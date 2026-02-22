@@ -1,24 +1,51 @@
-import './style.css'
-import javascriptLogo from './javascript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.js'
+import * as THREE from "three"
+import { SceneManager } from "./core/SceneManager"
+import { VRManager } from "./core/VRManager"
+import { InteractionSystem } from "./systems/InteractionSystem"
 
-document.querySelector('#app').innerHTML = `
-  <div>
-    <a href="https://vite.dev" target="_blank">
-      <img src="${viteLogo}" class="logo" alt="Vite logo" />
-    </a>
-    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript" target="_blank">
-      <img src="${javascriptLogo}" class="logo vanilla" alt="JavaScript logo" />
-    </a>
-    <h1>Hello Vite!</h1>
-    <div class="card">
-      <button id="counter" type="button"></button>
-    </div>
-    <p class="read-the-docs">
-      Click on the Vite logo to learn more
-    </p>
-  </div>
-`
+let sceneManager
+let vrManager
+let interactionSystem
 
-setupCounter(document.querySelector('#counter'))
+init()
+
+function init() {
+
+    sceneManager = new SceneManager()
+    vrManager = new VRManager(sceneManager.renderer)
+
+    interactionSystem = new InteractionSystem(sceneManager)
+
+    addBasicEnvironment()
+    addTestCube()
+
+    sceneManager.renderer.setAnimationLoop(() => {
+        interactionSystem.update()
+        sceneManager.render()
+    })
+}
+
+function addBasicEnvironment() {
+
+    const light = new THREE.HemisphereLight(0xffffff, 0x444444)
+    light.position.set(0, 20, 0)
+    sceneManager.scene.add(light)
+
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.MeshStandardMaterial({ color: 0x808080 })
+    )
+    floor.rotation.x = -Math.PI / 2
+    sceneManager.scene.add(floor)
+}
+
+function addTestCube() {
+
+    const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(0.2, 0.2, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0xff0000 })
+    )
+
+    cube.position.set(0, 1.2, -1)
+    sceneManager.scene.add(cube)
+}
