@@ -17,7 +17,7 @@ export class InteractionSystem {
     this.downRaycaster = new THREE.Raycaster()
 
     this.controllers = []
-    this.interactables = [] // ✅ SOLO objetos interactuables
+    this.interactables = [] // ✅ SOLO objetos agarrables
     this.surfaces = [] // ✅ superficies para snap (mesa/piso)
 
     this.hovered = null
@@ -29,6 +29,10 @@ export class InteractionSystem {
   // ---------- REGISTRO ----------
   register(mesh) {
     if (!mesh) return
+
+    // ❌ Nunca registres superficies como interactuables
+    if (mesh.userData?.isSurface) return
+
     mesh.userData.interactable = true
     this.interactables.push(mesh)
   }
@@ -39,7 +43,14 @@ export class InteractionSystem {
 
   registerSurface(mesh) {
     if (!mesh) return
+
     mesh.userData.isSurface = true
+
+    // 🔒 Blindaje: por si por error tenía interactable en algún momento
+    if (mesh.userData.interactable) {
+      delete mesh.userData.interactable
+    }
+
     this.surfaces.push(mesh)
   }
 
@@ -86,7 +97,6 @@ export class InteractionSystem {
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
-    // origin un poco arriba para asegurar intersección
     const origin = object.position.clone()
     origin.y += 2
 
@@ -97,7 +107,6 @@ export class InteractionSystem {
 
     const hit = hits[0]
 
-    // Ajuste para apoyar el objeto: mitad de su altura (bounding box)
     const bbox = new THREE.Box3().setFromObject(object)
     const size = new THREE.Vector3()
     bbox.getSize(size)
@@ -109,6 +118,9 @@ export class InteractionSystem {
   onSelectStart(event) {
     const controller = event.target
 
+    // 🔒 Blindaje: nunca seleccionar superficies
+    if (this.hovered?.userData?.isSurface) return
+
     if (this.hovered) {
       this.selected = this.hovered
       controller.attach(this.selected)
@@ -118,10 +130,10 @@ export class InteractionSystem {
   onSelectEnd() {
     if (!this.selected) return
 
-    // Regresar a la escena (world space)
+    // Regresar a la escena
     this.scene.attach(this.selected)
 
-    // Snap real a mesa/piso
+    // Snap real
     this.snapToSurface(this.selected)
 
     // Guardar transform en AppState
@@ -137,33 +149,10 @@ export class InteractionSystem {
     this.selected = null
   }
 
-  // ---------- ROTACIÓN ----------
-  rotateSelectedFromGamepad() {
-    if (!this.selected) return
-
-    // Rotación simple: usa eje X del joystick (puede variar por mapeo)
-    const ROT_SPEED = 0.05
-
-    for (const controller of this.controllers) {
-      const gp = controller.gamepad
-      if (!gp || !gp.axes) continue
-
-      // Quest puede mapear en axes[2] o axes[0] dependiendo
-      const x = gp.axes[2] ?? gp.axes[0] ?? 0
-
-      if (Math.abs(x) > 0.2) {
-        this.selected.rotation.y -= x * ROT_SPEED
-      }
-    }
-  }
-
   // ---------- UPDATE ----------
   update() {
-    // Si está agarrando, permitir rotación y no calcular hover
-    if (this.selected) {
-      this.rotateSelectedFromGamepad()
-      return
-    }
+    // Si está agarrando, no recalcular hover
+    if (this.selected) return
 
     let best = null
 
@@ -173,11 +162,17 @@ export class InteractionSystem {
       this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
       this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
 
+      // ✅ Solo intersecta objetos interactuables
       const hits = this.raycaster.intersectObjects(this.interactables, true)
+
       if (hits.length > 0) {
         let obj = hits[0].object
+
+        // Subir a un parent que sea interactuable (por si el mesh está anidado)
         while (obj && obj.parent && !obj.userData?.interactable) obj = obj.parent
-        if (obj?.userData?.interactable) {
+
+        // 🔒 Blindaje: si por cualquier razón es surface, ignorar
+        if (obj?.userData?.interactable && !obj.userData?.isSurface) {
           best = obj
           break
         }
