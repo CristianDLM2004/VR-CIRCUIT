@@ -39,6 +39,13 @@ export class InteractionSystem {
   // -------------------------
   register(mesh) {
     if (!mesh) return
+
+    // ✅ BLINDAJE: si por error intentas registrar una surface como interactuable, NO lo permitas
+    if (mesh.userData?.isSurface) return
+
+    // También evita que algo en Layer 2 se cuele
+    if (mesh.layers?.test(new THREE.Layers().set(2))) return
+
     mesh.userData.interactable = true
     mesh.layers.set(1)
 
@@ -54,12 +61,6 @@ export class InteractionSystem {
   // -------------------------
   // Surfaces (piso/mesa)
   // -------------------------
-  /**
-   * @param {THREE.Object3D} mesh
-   * @param {Object} options
-   *  - type: "table" | "floor" (default "floor")
-   *  - bounds: { minX,maxX,minZ,maxZ } EN MUNDO (recomendado para mesa)
-   */
   registerSurface(mesh, options = {}) {
     if (!mesh) return
 
@@ -69,6 +70,9 @@ export class InteractionSystem {
     mesh.userData.isSurface = true
     mesh.userData.interactable = false
     mesh.layers.set(2)
+
+    // ✅ BLINDAJE: si por accidente estaba en interactables, sácalo
+    this.unregister(mesh)
 
     const existing = this.surfaces.find((s) => s.mesh === mesh)
     if (existing) {
@@ -98,12 +102,11 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Hover highlight (solo visual)
+  // Hover highlight
   // -------------------------
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
-    // Quitar highlight anterior
     if (this.hovered) {
       this.hovered.traverse?.((child) => {
         if (child.isMesh && child.material?.emissive) child.material.emissive.setHex(0x000000)
@@ -113,7 +116,6 @@ export class InteractionSystem {
 
     this.hovered = newHovered
 
-    // Poner highlight nuevo
     if (this.hovered) {
       this.hovered.traverse?.((child) => {
         if (child.isMesh && child.material?.emissive) child.material.emissive.setHex(0x222222)
@@ -128,13 +130,11 @@ export class InteractionSystem {
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
-    // origin en mundo (asumimos que ya está attach a scene)
     const origin = object.position.clone()
     origin.y += 2
 
     this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
-    // Intersecta meshes de surface (Layer 2 ya filtra)
     const surfaceMeshes = this.surfaces.map((s) => s.mesh)
     const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
     if (hits.length === 0) return
@@ -142,15 +142,12 @@ export class InteractionSystem {
     const best = this.pickBestSurfaceHit(hits)
     if (!best) return
 
-    // Tamaño del objeto (para que repose sobre la superficie)
     const bbox = new THREE.Box3().setFromObject(object)
     const size = new THREE.Vector3()
     bbox.getSize(size)
 
-    // 1) Ajustar altura (apoya sobre surface)
     object.position.y = best.point.y + size.y / 2
 
-    // 2) Si es mesa con bounds: clamp X/Z (considera el tamaño del objeto para no “salirse”)
     const surf = best.surface
     if (surf?.type === "table" && surf.bounds) {
       const halfX = size.x / 2
@@ -167,7 +164,6 @@ export class InteractionSystem {
   }
 
   pickBestSurfaceHit(hits) {
-    // Mapear hit.object a surface registrada (puede pegar a un child)
     const getSurfaceEntry = (hitObj) => {
       for (const s of this.surfaces) {
         if (hitObj === s.mesh) return s
@@ -180,7 +176,6 @@ export class InteractionSystem {
       return null
     }
 
-    // 1) Mesa dentro de bounds
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (!surf || surf.type !== "table" || !surf.bounds) continue
@@ -194,13 +189,11 @@ export class InteractionSystem {
       }
     }
 
-    // 2) Piso (primer floor)
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "floor") return { ...h, surface: surf }
     }
 
-    // 3) Fallback: el primero con surface
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
@@ -216,7 +209,6 @@ export class InteractionSystem {
     const controller = event.target
     if (!this.hovered) return
 
-    // ✅ Nunca permitir agarrar algo sin componentId
     if (!this.hovered.userData?.componentId) return
 
     this.selected = this.hovered
@@ -226,11 +218,9 @@ export class InteractionSystem {
   onSelectEnd() {
     if (!this.selected) return
 
-    // volver al mundo (scene) para que el snap sea en coords mundo
     this.scene.attach(this.selected)
     this.snapToSurface(this.selected)
 
-    // Guardar transform
     const id = this.selected.userData?.componentId
     if (id) {
       const p = this.selected.position
@@ -261,13 +251,17 @@ export class InteractionSystem {
       const hits = this.raycaster.intersectObjects(this.interactables, true)
 
       if (hits.length > 0) {
-        let obj = hits[0].object
-        while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
-
-        if (obj?.userData?.componentId) {
-          best = obj
-          break
+        // ✅ IMPORTANTE: busca el primer hit que realmente sea un componente (no solo hits[0])
+        for (const h of hits) {
+          let obj = h.object
+          while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
+          if (obj?.userData?.componentId) {
+            best = obj
+            break
+          }
         }
+
+        if (best) break
       }
     }
 
