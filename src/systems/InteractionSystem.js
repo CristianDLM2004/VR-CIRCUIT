@@ -8,32 +8,64 @@ export class InteractionSystem {
 
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
+    this.camera = sceneManager.camera
 
+    // XR raycaster (Layer 1)
     this.raycaster = new THREE.Raycaster()
     this.raycaster.layers.set(1)
-
     this.tempMatrix = new THREE.Matrix4()
 
+    // Snap raycaster (Layer 2)
     this.downRaycaster = new THREE.Raycaster()
     this.downRaycaster.layers.set(2)
 
     this.controllers = []
     this.interactables = []
     this.surfaces = []
-
-    // ✅ Nuevo: HoleSystem (opcional)
     this.holeSystem = null
 
     this.hovered = null
     this.selected = null
 
+    // -------------------------
+    // PC Mouse controls
+    // -------------------------
+    this.mouseEnabled = true
+    this.mouseNDC = new THREE.Vector2()
+    this.mouseRaycaster = new THREE.Raycaster()
+    this.mouseRaycaster.layers.set(1)
+
+    // Drag plane (XZ) a la altura del objeto al agarrar
+    this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    this.dragHit = new THREE.Vector3()
+    this.dragOffset = new THREE.Vector3()
+
+    // Bind events
+    this._onMouseMove = (e) => this.onMouseMove(e)
+    this._onMouseDown = (e) => this.onMouseDown(e)
+    this._onMouseUp = () => this.onMouseUp()
+
+    window.addEventListener("pointermove", this._onMouseMove)
+    window.addEventListener("pointerdown", this._onMouseDown)
+    window.addEventListener("pointerup", this._onMouseUp)
+
     this.initControllers()
+  }
+
+  // Limpieza opcional si algún día destruyes el sistema
+  dispose() {
+    window.removeEventListener("pointermove", this._onMouseMove)
+    window.removeEventListener("pointerdown", this._onMouseDown)
+    window.removeEventListener("pointerup", this._onMouseUp)
   }
 
   setHoleSystem(holeSystem) {
     this.holeSystem = holeSystem
   }
 
+  // -------------------------
+  // Interactuables
+  // -------------------------
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
@@ -49,6 +81,9 @@ export class InteractionSystem {
     this.interactables = this.interactables.filter((m) => m !== mesh)
   }
 
+  // -------------------------
+  // Surfaces
+  // -------------------------
   registerSurface(mesh, options = {}) {
     if (!mesh) return
 
@@ -74,6 +109,9 @@ export class InteractionSystem {
     this.surfaces.push({ mesh, type, bounds })
   }
 
+  // -------------------------
+  // XR Controllers
+  // -------------------------
   initControllers() {
     const controllerModelFactory = new XRControllerModelFactory()
 
@@ -91,6 +129,9 @@ export class InteractionSystem {
     }
   }
 
+  // -------------------------
+  // Hover highlight
+  // -------------------------
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
@@ -111,12 +152,106 @@ export class InteractionSystem {
     }
   }
 
+  // -------------------------
+  // Mouse helpers
+  // -------------------------
+  updateMouseNDC(event) {
+    // Usa el canvas del renderer para normalizar bien
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+    const y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+    this.mouseNDC.set(x, y)
+  }
+
+  pickWithMouse() {
+    this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
+    const hits = this.mouseRaycaster.intersectObjects(this.interactables, true)
+    if (hits.length === 0) return null
+
+    for (const h of hits) {
+      let obj = h.object
+      while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
+      if (obj?.userData?.componentId && this.interactables.includes(obj) && !obj.userData?.isSurface) {
+        return obj
+      }
+    }
+    return null
+  }
+
+  onMouseMove(event) {
+    // No mover hover/drag si estamos en VR
+    if (this.renderer.xr.isPresenting) return
+    if (!this.mouseEnabled) return
+
+    this.updateMouseNDC(event)
+
+    // Si estamos arrastrando, mover el objeto en XZ usando un plano
+    if (this.selected) {
+      this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
+      if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
+        // posición = hit + offset
+        this.selected.position.copy(this.dragHit).add(this.dragOffset)
+      }
+      return
+    }
+
+    // Hover normal
+    const hovered = this.pickWithMouse()
+    this.setHover(hovered)
+  }
+
+  onMouseDown(event) {
+    if (this.renderer.xr.isPresenting) return
+    if (!this.mouseEnabled) return
+    if (event.button !== 0) return // solo click izquierdo
+
+    this.updateMouseNDC(event)
+
+    const obj = this.pickWithMouse()
+    if (!obj) return
+
+    this.selected = obj
+
+    // Preparar plano a la altura actual del objeto
+    this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
+
+    // Calcular offset para que no “salte” al centro del rayo
+    this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
+    if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
+      this.dragOffset.copy(this.selected.position).sub(this.dragHit)
+    } else {
+      this.dragOffset.set(0, 0, 0)
+    }
+  }
+
+  onMouseUp() {
+    if (this.renderer.xr.isPresenting) return
+    if (!this.mouseEnabled) return
+    if (!this.selected) return
+
+    // Al soltar: snap + guardar transform
+    this.snapToSurface(this.selected)
+
+    const id = this.selected.userData?.componentId
+    if (id) {
+      const p = this.selected.position
+      const q = this.selected.quaternion
+      this.appState.updateComponent(id, {
+        transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
+      })
+    }
+
+    this.selected = null
+  }
+
+  // -------------------------
+  // Snap logic (surfaces + holes)
+  // -------------------------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
     const origin = object.position.clone()
     origin.y += 2
-
     this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
     const surfaceMeshes = this.surfaces.map((s) => s.mesh)
@@ -130,10 +265,10 @@ export class InteractionSystem {
     const size = new THREE.Vector3()
     bbox.getSize(size)
 
-    // 1) altura sobre la superficie
+    // altura
     object.position.y = best.point.y + size.y / 2
 
-    // 2) clamp en mesa (si aplica)
+    // clamp mesa
     const surf = best.surface
     if (surf?.type === "table" && surf.bounds) {
       const halfX = size.x / 2
@@ -147,10 +282,9 @@ export class InteractionSystem {
       object.position.z = THREE.MathUtils.clamp(object.position.z, minZ, maxZ)
     }
 
-    // ✅ 3) si hay HoleSystem, intenta snap a hole cercano (prioridad si está cerca)
-    // Nota: snapea solo XZ; Y ya quedó sobre superficie.
+    // holes (solo XZ)
     if (this.holeSystem) {
-      this.holeSystem.trySnapObject(object, 0.03) // 3 cm (ajustable)
+      this.holeSystem.trySnapObject(object, 0.03)
     }
   }
 
@@ -167,13 +301,13 @@ export class InteractionSystem {
       return null
     }
 
-    // protoboard (si lo registramos como type "protoboard") tiene prioridad
+    // protoboard primero
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "protoboard") return { ...h, surface: surf }
     }
 
-    // mesa dentro bounds
+    // mesa con bounds
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (!surf || surf.type !== "table" || !surf.bounds) continue
@@ -199,6 +333,9 @@ export class InteractionSystem {
     return null
   }
 
+  // -------------------------
+  // XR select handlers
+  // -------------------------
   onSelectStart(event) {
     const controller = event.target
     if (!this.hovered) return
@@ -228,7 +365,12 @@ export class InteractionSystem {
     this.selected = null
   }
 
+  // -------------------------
+  // Update hover (XR or mouse)
+  // -------------------------
   update() {
+    // En PC, hover ya se calcula en mousemove. Aquí solo calculamos hover XR.
+    if (!this.renderer.xr.isPresenting) return
     if (this.selected) return
 
     let best = null
