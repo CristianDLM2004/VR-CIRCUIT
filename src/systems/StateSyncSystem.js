@@ -1,7 +1,6 @@
 import { ComponentFactory } from "../components/ComponentFactory"
 
 export class StateSyncSystem {
-
   constructor(scene, appState, interactionSystem = null) {
     this.scene = scene
     this.appState = appState
@@ -14,7 +13,6 @@ export class StateSyncSystem {
   }
 
   rebuildFromState() {
-
     for (const mesh of this.meshById.values()) {
       if (this.interactionSystem) this.interactionSystem.unregister(mesh)
       this.scene.remove(mesh)
@@ -22,7 +20,6 @@ export class StateSyncSystem {
     this.meshById.clear()
 
     for (const data of this.appState.components) {
-
       const mesh = ComponentFactory.createComponent(data)
       if (!mesh) continue
 
@@ -31,5 +28,9 @@ export class StateSyncSystem {
 
       if (this.interactionSystem) this.interactionSystem.register(mesh)
     }
+  }
+
+  getMeshById(id) {
+    return this.meshById.get(id) || null
   }
 }

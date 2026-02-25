@@ -14,23 +14,20 @@ let stateSync
 init()
 
 function init() {
-
   sceneManager = new SceneManager()
   vrManager = new VRManager(sceneManager.renderer)
 
   appState = new AppState()
-
   interactionSystem = new InteractionSystem(sceneManager, appState)
   stateSync = new StateSyncSystem(sceneManager.scene, appState, interactionSystem)
 
   addBasicEnvironment()
 
-  // Si no hay estado guardado, crea 1 componente dummy
   if (!localStorage.getItem("vrcircuit_state")) {
     appState.addComponent({
       id: crypto.randomUUID(),
       type: "cube",
-      transform: { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
+      transform: { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 },
     })
   } else {
     loadState()
@@ -48,25 +45,26 @@ function init() {
 
 function onKeyDown(e) {
   if (e.key.toLowerCase() === "s") saveState()
-  if (e.key.toLowerCase() === "l") loadState()
+  if (e.key.toLowerCase() === "l") {
+    loadState()
+    stateSync.rebuildFromState()
+  }
 }
 
 function saveState() {
   localStorage.setItem("vrcircuit_state", appState.toJSON())
-  console.log("Estado guardado")
+  console.log("✅ Estado guardado")
 }
 
 function loadState() {
   const raw = localStorage.getItem("vrcircuit_state")
   if (!raw) return
-
   const obj = JSON.parse(raw)
   appState.loadFromObject(obj)
-  console.log("Estado cargado")
+  console.log("✅ Estado cargado")
 }
 
 function addBasicEnvironment() {
-
   const light = new THREE.HemisphereLight(0xffffff, 0x444444)
   light.position.set(0, 20, 0)
   sceneManager.scene.add(light)
