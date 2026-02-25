@@ -34,12 +34,13 @@ export class InteractionSystem {
   // -------------------------
   register(mesh) {
     if (!mesh) return
-
-    // nunca metas surfaces a interactuables
     if (mesh.userData?.isSurface) return
 
     mesh.userData.interactable = true
-    mesh.layers.set(1)
+
+    // ✅ BLINDAJE: dejar SOLO layer 1
+    mesh.layers.disableAll()
+    mesh.layers.enable(1)
 
     if (!this.interactables.includes(mesh)) {
       this.interactables.push(mesh)
@@ -61,12 +62,15 @@ export class InteractionSystem {
 
     mesh.userData.isSurface = true
     mesh.userData.interactable = false
-    // por seguridad: si algo le puso componentId, lo borramos
+
+    // ✅ si por error alguien le metió componentId, bórralo
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
 
-    mesh.layers.set(2)
+    // ✅ BLINDAJE: dejar SOLO layer 2
+    mesh.layers.disableAll()
+    mesh.layers.enable(2)
 
-    // si por accidente estaba registrado como interactuable, sacarlo
+    // si por accidente estaba como interactuable, sacarlo
     this.unregister(mesh)
 
     const existing = this.surfaces.find((s) => s.mesh === mesh)
@@ -207,7 +211,7 @@ export class InteractionSystem {
     // ✅ candado: nunca agarrar surfaces
     if (this.hovered.userData?.isSurface) return
 
-    // ✅ solo componentes reales
+    // ✅ solo componentes reales registrados
     if (!this.hovered.userData?.componentId) return
     if (!this.interactables.includes(this.hovered)) return
 
@@ -254,13 +258,9 @@ export class InteractionSystem {
         let obj = h.object
         while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
 
-        // ✅ solo root registrado
-        if (obj?.userData?.componentId && this.interactables.includes(obj)) {
-          // ✅ jamás surfaces
-          if (!obj.userData?.isSurface) {
-            best = obj
-            break
-          }
+        if (obj?.userData?.componentId && this.interactables.includes(obj) && !obj.userData?.isSurface) {
+          best = obj
+          break
         }
       }
 

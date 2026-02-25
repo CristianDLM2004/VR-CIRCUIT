@@ -23,9 +23,11 @@ export class ComponentFactory {
     // Metadata
     mesh.userData.componentId = data.id
     mesh.userData.interactable = true
+    mesh.userData.isSurface = false
 
-    // ✅ Layer 1 = interactuables
-    mesh.layers.set(1)
+    // ✅ BLINDAJE: limpiar layers y dejar SOLO Layer 1
+    mesh.layers.disableAll()
+    mesh.layers.enable(1)
 
     return mesh
   }
