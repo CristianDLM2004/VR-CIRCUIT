@@ -20,7 +20,7 @@ export class InteractionSystem {
     this.downRaycaster.layers.set(2)
 
     this.controllers = []
-    this.interactables = [] // SOLO roots de componentes (Layer 1)
+    this.interactables = [] // roots de componentes layer 1
     this.surfaces = [] // [{ mesh, type, bounds }]
 
     this.hovered = null
@@ -30,47 +30,12 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Helpers de jerarquía
-  // -------------------------
-  isDescendant(child, parent) {
-    let cur = child
-    while (cur) {
-      if (cur === parent) return true
-      cur = cur.parent
-    }
-    return false
-  }
-
-  hasSurfaceInAncestry(obj) {
-    let cur = obj
-    while (cur) {
-      if (cur.userData?.isSurface) return true
-      cur = cur.parent
-    }
-    return false
-  }
-
-  findRootWithComponentId(obj) {
-    let cur = obj
-    while (cur) {
-      if (cur.userData?.componentId) return cur
-      cur = cur.parent
-    }
-    return null
-  }
-
-  isRegisteredInteractableRoot(root) {
-    // root debe ser exactamente uno de los meshes registrados (los que crea ComponentFactory)
-    return this.interactables.includes(root)
-  }
-
-  // -------------------------
   // Interactuables (componentes)
   // -------------------------
   register(mesh) {
     if (!mesh) return
 
-    // Si por error intentan registrar surfaces, no permitir
+    // nunca metas surfaces a interactuables
     if (mesh.userData?.isSurface) return
 
     mesh.userData.interactable = true
@@ -96,13 +61,12 @@ export class InteractionSystem {
 
     mesh.userData.isSurface = true
     mesh.userData.interactable = false
-
-    // Blindaje extra: si por cualquier razón trae componentId, se lo quitamos
+    // por seguridad: si algo le puso componentId, lo borramos
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
 
     mesh.layers.set(2)
 
-    // si estaba en interactables por error, sácalo
+    // si por accidente estaba registrado como interactuable, sacarlo
     this.unregister(mesh)
 
     const existing = this.surfaces.find((s) => s.mesh === mesh)
@@ -207,6 +171,7 @@ export class InteractionSystem {
       return null
     }
 
+    // mesa dentro bounds
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (!surf || surf.type !== "table" || !surf.bounds) continue
@@ -214,17 +179,16 @@ export class InteractionSystem {
       const { minX, maxX, minZ, maxZ } = surf.bounds
       const x = h.point.x
       const z = h.point.z
-
-      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
-        return { ...h, surface: surf }
-      }
+      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) return { ...h, surface: surf }
     }
 
+    // piso
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "floor") return { ...h, surface: surf }
     }
 
+    // fallback
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
@@ -240,13 +204,12 @@ export class InteractionSystem {
     const controller = event.target
     if (!this.hovered) return
 
-    // Blindaje duro: nunca agarrar surfaces ni hijos de surfaces
+    // ✅ candado: nunca agarrar surfaces
     if (this.hovered.userData?.isSurface) return
-    if (this.hasSurfaceInAncestry(this.hovered)) return
 
-    // Solo componentes reales registrados
+    // ✅ solo componentes reales
     if (!this.hovered.userData?.componentId) return
-    if (!this.isRegisteredInteractableRoot(this.hovered)) return
+    if (!this.interactables.includes(this.hovered)) return
 
     this.selected = this.hovered
     controller.attach(this.selected)
@@ -271,7 +234,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Update: hover por raycast (Layer 1)
+  // Update hover
   // -------------------------
   update() {
     if (this.selected) return
@@ -287,20 +250,18 @@ export class InteractionSystem {
       const hits = this.raycaster.intersectObjects(this.interactables, true)
       if (hits.length === 0) continue
 
-      // Busca el primer hit que realmente sea un componente ROOT registrado
       for (const h of hits) {
-        const root = this.findRootWithComponentId(h.object)
-        if (!root) continue
+        let obj = h.object
+        while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
 
-        // Blindaje duro: si por error el root es surface (o cuelga de surface), ignorar
-        if (root.userData?.isSurface) continue
-        if (this.hasSurfaceInAncestry(root)) continue
-
-        // Solo si el root está registrado como interactuable real
-        if (!this.isRegisteredInteractableRoot(root)) continue
-
-        best = root
-        break
+        // ✅ solo root registrado
+        if (obj?.userData?.componentId && this.interactables.includes(obj)) {
+          // ✅ jamás surfaces
+          if (!obj.userData?.isSurface) {
+            best = obj
+            break
+          }
+        }
       }
 
       if (best) break
