@@ -19,29 +19,50 @@ function init() {
   vrManager = new VRManager(sceneManager.renderer)
 
   appState = new AppState()
-  stateSync = new StateSyncSystem(sceneManager.scene, appState)
+
+  interactionSystem = new InteractionSystem(sceneManager, appState)
+  stateSync = new StateSyncSystem(sceneManager.scene, appState, interactionSystem)
 
   addBasicEnvironment()
 
-  // Componente inicial (dummy)
-  const componentData = {
-    id: crypto.randomUUID(),
-    type: "cube",
-    transform: { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
+  // Si no hay estado guardado, crea 1 componente dummy
+  if (!localStorage.getItem("vrcircuit_state")) {
+    appState.addComponent({
+      id: crypto.randomUUID(),
+      type: "cube",
+      transform: { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
+    })
+  } else {
+    loadState()
   }
 
-  appState.addComponent(componentData)
-
-  // Construir escena desde AppState
   stateSync.rebuildFromState()
 
-  // Interacción usa AppState para guardar cambios al soltar
-  interactionSystem = new InteractionSystem(sceneManager, appState)
+  window.addEventListener("keydown", onKeyDown)
 
   sceneManager.renderer.setAnimationLoop(() => {
     interactionSystem.update()
     sceneManager.render()
   })
+}
+
+function onKeyDown(e) {
+  if (e.key.toLowerCase() === "s") saveState()
+  if (e.key.toLowerCase() === "l") loadState()
+}
+
+function saveState() {
+  localStorage.setItem("vrcircuit_state", appState.toJSON())
+  console.log("Estado guardado")
+}
+
+function loadState() {
+  const raw = localStorage.getItem("vrcircuit_state")
+  if (!raw) return
+
+  const obj = JSON.parse(raw)
+  appState.loadFromObject(obj)
+  console.log("Estado cargado")
 }
 
 function addBasicEnvironment() {

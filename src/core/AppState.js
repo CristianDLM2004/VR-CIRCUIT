@@ -32,4 +32,13 @@ export class AppState {
             connections: this.connections
         }
     }
+
+    toJSON() {
+        return JSON.stringify(this.getState(), null, 2)
+    }
+
+    loadFromObject(obj) {
+        this.components = Array.isArray(obj?.components) ? obj.components : []
+        this.connections = Array.isArray(obj?.connections) ? obj.connections : []
+    }
 }

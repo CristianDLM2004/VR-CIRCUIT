@@ -15,10 +15,22 @@ export class InteractionSystem {
     this.tempMatrix = new THREE.Matrix4()
 
     this.controllers = []
-    this.intersected = []
+    this.interactables = [] // SOLO objetos interactuables
+    this.hovered = null
     this.selected = null
 
     this.initControllers()
+  }
+
+  // Registrar objetos que se pueden agarrar
+  register(mesh) {
+    if (!mesh) return
+    mesh.userData.interactable = true
+    this.interactables.push(mesh)
+  }
+
+  unregister(mesh) {
+    this.interactables = this.interactables.filter(m => m !== mesh)
   }
 
   initControllers() {
@@ -41,36 +53,31 @@ export class InteractionSystem {
   }
 
   onSelectStart(event) {
-
     const controller = event.target
 
-    if (this.intersected.length > 0) {
-
-      const object = this.intersected[0]
-
-      // Solo interactuables (por si el raycaster toca otras cosas)
-      if (!object.userData?.interactable) return
-
-      this.selected = object
-      controller.attach(object)
+    if (this.hovered) {
+      this.selected = this.hovered
+      controller.attach(this.selected)
     }
   }
 
-  onSelectEnd(event) {
-
-    const controller = event.target
+  onSelectEnd() {
 
     if (this.selected) {
 
-      // Regresar el objeto a la escena
+      // Regresar a la escena
       this.scene.attach(this.selected)
 
-      // Sincronizar transform hacia AppState
+      // Snap básico a mesa (altura fija por ahora)
+    
+      const TABLE_Y = 1.05
+      this.selected.position.y = TABLE_Y
+
+      // Guardar transform en AppState
       const id = this.selected.userData?.componentId
       if (id) {
         const p = this.selected.position
         const q = this.selected.quaternion
-
         this.appState.updateComponent(id, {
           transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w }
         })
@@ -80,9 +87,30 @@ export class InteractionSystem {
     }
   }
 
+  setHover(newHovered) {
+    if (this.hovered === newHovered) return
+
+    // Quitar highlight anterior
+    if (this.hovered?.material?.emissive) {
+      this.hovered.material.emissive.setHex(0x000000)
+    }
+
+    this.hovered = newHovered
+
+    // Poner highlight
+    if (this.hovered?.material?.emissive) {
+      this.hovered.material.emissive.setHex(0x222222)
+    }
+  }
+
   update() {
 
-    this.intersected = []
+    if (this.selected) {
+      // Mientras agarras, no cambies hover
+      return
+    }
+
+    let best = null
 
     for (let controller of this.controllers) {
 
@@ -91,18 +119,18 @@ export class InteractionSystem {
       this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
       this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
 
-      // MVP: intersecta todo; luego lo filtramos en Fase 1 (interactuables list)
-      const intersects = this.raycaster.intersectObjects(this.scene.children, true)
+      const hits = this.raycaster.intersectObjects(this.interactables, true)
 
-      if (intersects.length > 0) {
-        // Tomamos el primer objeto, pero subimos al padre si el mesh está anidado
-        let obj = intersects[0].object
+      if (hits.length > 0) {
+        let obj = hits[0].object
         while (obj && obj.parent && !obj.userData?.interactable) obj = obj.parent
-
         if (obj?.userData?.interactable) {
-          this.intersected.push(obj)
+          best = obj
+          break
         }
       }
     }
+
+    this.setHover(best)
   }
 }
