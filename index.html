@@ -19,12 +19,9 @@
         height: 100%;
       }
       canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
+        display: block; /* ✅ no width/height aquí para no romper XR */
       }
 
-      /* Overlay UI (PC) */
       #ui-overlay {
         position: fixed;
         top: 12px;
