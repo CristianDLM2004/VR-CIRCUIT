@@ -9,17 +9,24 @@ export class InteractionSystem {
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
 
+    // Raycaster para apuntar desde controladores
     this.raycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
 
+    // Raycaster para snap hacia abajo
+    this.downRaycaster = new THREE.Raycaster()
+
     this.controllers = []
-    this.interactables = [] //  SOLO objetos interactuables
+    this.interactables = [] // ✅ SOLO objetos interactuables
+    this.surfaces = [] // ✅ superficies para snap (mesa/piso)
+
     this.hovered = null
     this.selected = null
 
     this.initControllers()
   }
 
+  // ---------- REGISTRO ----------
   register(mesh) {
     if (!mesh) return
     mesh.userData.interactable = true
@@ -30,6 +37,17 @@ export class InteractionSystem {
     this.interactables = this.interactables.filter((m) => m !== mesh)
   }
 
+  registerSurface(mesh) {
+    if (!mesh) return
+    mesh.userData.isSurface = true
+    this.surfaces.push(mesh)
+  }
+
+  unregisterSurface(mesh) {
+    this.surfaces = this.surfaces.filter((m) => m !== mesh)
+  }
+
+  // ---------- CONTROLADORES ----------
   initControllers() {
     const controllerModelFactory = new XRControllerModelFactory()
 
@@ -47,8 +65,50 @@ export class InteractionSystem {
     }
   }
 
+  // ---------- HOVER ----------
+  setHover(newHovered) {
+    if (this.hovered === newHovered) return
+
+    // Quitar highlight anterior
+    if (this.hovered?.material?.emissive) {
+      this.hovered.material.emissive.setHex(0x000000)
+    }
+
+    this.hovered = newHovered
+
+    // Poner highlight
+    if (this.hovered?.material?.emissive) {
+      this.hovered.material.emissive.setHex(0x222222)
+    }
+  }
+
+  // ---------- SNAP REAL ----------
+  snapToSurface(object) {
+    if (!object || this.surfaces.length === 0) return
+
+    // origin un poco arriba para asegurar intersección
+    const origin = object.position.clone()
+    origin.y += 2
+
+    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
+
+    const hits = this.downRaycaster.intersectObjects(this.surfaces, true)
+    if (hits.length === 0) return
+
+    const hit = hits[0]
+
+    // Ajuste para apoyar el objeto: mitad de su altura (bounding box)
+    const bbox = new THREE.Box3().setFromObject(object)
+    const size = new THREE.Vector3()
+    bbox.getSize(size)
+
+    object.position.y = hit.point.y + size.y / 2
+  }
+
+  // ---------- SELECT ----------
   onSelectStart(event) {
     const controller = event.target
+
     if (this.hovered) {
       this.selected = this.hovered
       controller.attach(this.selected)
@@ -58,12 +118,11 @@ export class InteractionSystem {
   onSelectEnd() {
     if (!this.selected) return
 
-    // Regresar a la escena
+    // Regresar a la escena (world space)
     this.scene.attach(this.selected)
 
-    // Snap básico a mesa (altura fija por ahora)
-    const TABLE_Y = 1.05
-    this.selected.position.y = TABLE_Y
+    // Snap real a mesa/piso
+    this.snapToSurface(this.selected)
 
     // Guardar transform en AppState
     const id = this.selected.userData?.componentId
@@ -78,24 +137,33 @@ export class InteractionSystem {
     this.selected = null
   }
 
-  setHover(newHovered) {
-    if (this.hovered === newHovered) return
+  // ---------- ROTACIÓN ----------
+  rotateSelectedFromGamepad() {
+    if (!this.selected) return
 
-    // quitar highlight anterior
-    if (this.hovered?.material?.emissive) {
-      this.hovered.material.emissive.setHex(0x000000)
-    }
+    // Rotación simple: usa eje X del joystick (puede variar por mapeo)
+    const ROT_SPEED = 0.05
 
-    this.hovered = newHovered
+    for (const controller of this.controllers) {
+      const gp = controller.gamepad
+      if (!gp || !gp.axes) continue
 
-    // poner highlight
-    if (this.hovered?.material?.emissive) {
-      this.hovered.material.emissive.setHex(0x222222)
+      // Quest puede mapear en axes[2] o axes[0] dependiendo
+      const x = gp.axes[2] ?? gp.axes[0] ?? 0
+
+      if (Math.abs(x) > 0.2) {
+        this.selected.rotation.y -= x * ROT_SPEED
+      }
     }
   }
 
+  // ---------- UPDATE ----------
   update() {
-    if (this.selected) return // mientras agarras, no cambies hover
+    // Si está agarrando, permitir rotación y no calcular hover
+    if (this.selected) {
+      this.rotateSelectedFromGamepad()
+      return
+    }
 
     let best = null
 
