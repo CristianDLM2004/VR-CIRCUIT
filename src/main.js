@@ -43,6 +43,9 @@ const table = new THREE.Mesh(
 table.position.set(0, 1.0, -1.0)
 scene.add(table)
 
+// ✅ Importante: asegurar matrices antes de calcular bounds
+table.updateMatrixWorld(true)
+
 interactionSystem.registerSurface(floor, { type: "floor" })
 
 const tableBox = new THREE.Box3().setFromObject(table)
@@ -67,7 +70,7 @@ const { group: protoboard, surfaceMesh: protoSurface, layout } = createProtoboar
 
 scene.add(protoboard)
 
-// Registrar como surface prioritaria
+// Registrar como surface (idealmente prioritaria dentro de InteractionSystem)
 interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 
 // HoleSystem (snapeo a holes)
@@ -78,6 +81,8 @@ interactionSystem.setHoleSystem(holeSystem)
 // UI overlay (Add Cube)
 // ---------------------------
 function genId(prefix = "cmp") {
+  // Preferir UUID para evitar colisiones (Quest Browser soporta crypto normalmente)
+  if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 }
 
@@ -100,14 +105,16 @@ function addCube() {
 document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
 
 window.addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "c") addCube()
+  const k = e.key.toLowerCase()
 
-  if (e.key.toLowerCase() === "s") {
+  if (k === "c") addCube()
+
+  if (k === "s") {
     localStorage.setItem("vr_circuit_state", appState.toJSON())
     console.log("✅ Estado guardado")
   }
 
-  if (e.key.toLowerCase() === "l") {
+  if (k === "l") {
     const raw = localStorage.getItem("vr_circuit_state")
     if (!raw) return console.log("⚠️ No hay estado guardado")
     appState.loadFromObject(JSON.parse(raw))
