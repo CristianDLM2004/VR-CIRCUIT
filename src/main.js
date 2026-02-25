@@ -2,10 +2,13 @@ import * as THREE from "three"
 import { SceneManager } from "./core/SceneManager"
 import { VRManager } from "./core/VRManager"
 import { InteractionSystem } from "./systems/InteractionSystem"
+import { AppState } from "./core/AppState"
+import { ComponentFactory } from "./components/ComponentFactory"
 
 let sceneManager
 let vrManager
 let interactionSystem
+let appState
 
 init()
 
@@ -13,11 +16,12 @@ function init() {
 
     sceneManager = new SceneManager()
     vrManager = new VRManager(sceneManager.renderer)
-
     interactionSystem = new InteractionSystem(sceneManager)
 
+    appState = new AppState()
+
     addBasicEnvironment()
-    addTestCube()
+    spawnInitialComponent()
 
     sceneManager.renderer.setAnimationLoop(() => {
         interactionSystem.update()
@@ -35,17 +39,21 @@ function addBasicEnvironment() {
         new THREE.PlaneGeometry(20, 20),
         new THREE.MeshStandardMaterial({ color: 0x808080 })
     )
+
     floor.rotation.x = -Math.PI / 2
     sceneManager.scene.add(floor)
 }
 
-function addTestCube() {
+function spawnInitialComponent() {
 
-    const cube = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 0.2, 0.2),
-        new THREE.MeshStandardMaterial({ color: 0xff0000 })
-    )
+    const componentData = {
+        id: crypto.randomUUID(),
+        type: "cube",
+        transform: { x: 0, y: 1.2, z: -1 }
+    }
 
-    cube.position.set(0, 1.2, -1)
-    sceneManager.scene.add(cube)
+    appState.addComponent(componentData)
+
+    const mesh = ComponentFactory.createComponent(componentData)
+    sceneManager.scene.add(mesh)
 }
