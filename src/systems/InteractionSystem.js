@@ -9,16 +9,14 @@ export class InteractionSystem {
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
 
-    // Raycaster para apuntar desde controladores
     this.raycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
 
-    // Raycaster para snap hacia abajo
     this.downRaycaster = new THREE.Raycaster()
 
     this.controllers = []
-    this.interactables = [] // ✅ SOLO objetos agarrables
-    this.surfaces = [] // ✅ superficies para snap (mesa/piso)
+    this.interactables = [] // SOLO agarrables
+    this.surfaces = [] // piso/mesa
 
     this.hovered = null
     this.selected = null
@@ -26,15 +24,29 @@ export class InteractionSystem {
     this.initControllers()
   }
 
+  // ---------- UTIL ----------
+  isValidInteractable(mesh) {
+    return !!mesh && mesh.userData?.interactable === true && mesh.userData?.isSurface !== true
+  }
+
+  cleanupInteractables() {
+    // ✅ Elimina cualquier cosa que se haya colado (piso/mesa/etc.)
+    this.interactables = this.interactables.filter((m) => this.isValidInteractable(m))
+  }
+
   // ---------- REGISTRO ----------
   register(mesh) {
     if (!mesh) return
 
-    // ❌ Nunca registres superficies como interactuables
+    // Nunca registrar surfaces como interactuables
     if (mesh.userData?.isSurface) return
 
     mesh.userData.interactable = true
-    this.interactables.push(mesh)
+
+    // Evitar duplicados
+    if (!this.interactables.includes(mesh)) {
+      this.interactables.push(mesh)
+    }
   }
 
   unregister(mesh) {
@@ -46,12 +58,21 @@ export class InteractionSystem {
 
     mesh.userData.isSurface = true
 
-    // 🔒 Blindaje: por si por error tenía interactable en algún momento
+    // 🔒 Blindaje: si por error estaba como interactuable, eliminar flag
     if (mesh.userData.interactable) {
       delete mesh.userData.interactable
     }
 
-    this.surfaces.push(mesh)
+    // 🔒 Blindaje real: si ya estaba en el array de interactuables, SACARLO
+    this.unregister(mesh)
+
+    // Evitar duplicados
+    if (!this.surfaces.includes(mesh)) {
+      this.surfaces.push(mesh)
+    }
+
+    // Limpieza final
+    this.cleanupInteractables()
   }
 
   unregisterSurface(mesh) {
@@ -80,20 +101,18 @@ export class InteractionSystem {
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
-    // Quitar highlight anterior
     if (this.hovered?.material?.emissive) {
       this.hovered.material.emissive.setHex(0x000000)
     }
 
     this.hovered = newHovered
 
-    // Poner highlight
     if (this.hovered?.material?.emissive) {
       this.hovered.material.emissive.setHex(0x222222)
     }
   }
 
-  // ---------- SNAP REAL ----------
+  // ---------- SNAP ----------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
@@ -118,25 +137,22 @@ export class InteractionSystem {
   onSelectStart(event) {
     const controller = event.target
 
-    // 🔒 Blindaje: nunca seleccionar superficies
-    if (this.hovered?.userData?.isSurface) return
+    // Limpieza defensiva
+    this.cleanupInteractables()
 
-    if (this.hovered) {
-      this.selected = this.hovered
-      controller.attach(this.selected)
-    }
+    // Si no hay hovered válido, nada
+    if (!this.isValidInteractable(this.hovered)) return
+
+    this.selected = this.hovered
+    controller.attach(this.selected)
   }
 
   onSelectEnd() {
     if (!this.selected) return
 
-    // Regresar a la escena
     this.scene.attach(this.selected)
-
-    // Snap real
     this.snapToSurface(this.selected)
 
-    // Guardar transform en AppState
     const id = this.selected.userData?.componentId
     if (id) {
       const p = this.selected.position
@@ -151,8 +167,10 @@ export class InteractionSystem {
 
   // ---------- UPDATE ----------
   update() {
-    // Si está agarrando, no recalcular hover
     if (this.selected) return
+
+    // ✅ Limpieza constante (evita que vuelvan a colarse surfaces)
+    this.cleanupInteractables()
 
     let best = null
 
@@ -162,17 +180,13 @@ export class InteractionSystem {
       this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
       this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
 
-      // ✅ Solo intersecta objetos interactuables
       const hits = this.raycaster.intersectObjects(this.interactables, true)
 
       if (hits.length > 0) {
         let obj = hits[0].object
+        while (obj && obj.parent && !this.isValidInteractable(obj)) obj = obj.parent
 
-        // Subir a un parent que sea interactuable (por si el mesh está anidado)
-        while (obj && obj.parent && !obj.userData?.interactable) obj = obj.parent
-
-        // 🔒 Blindaje: si por cualquier razón es surface, ignorar
-        if (obj?.userData?.interactable && !obj.userData?.isSurface) {
+        if (this.isValidInteractable(obj)) {
           best = obj
           break
         }
