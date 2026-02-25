@@ -5,6 +5,9 @@ import { AppState } from "./core/AppState.js"
 import { StateSyncSystem } from "./systems/StateSyncSystem.js"
 import { InteractionSystem } from "./systems/InteractionSystem.js"
 
+import { createProtoboard } from "./components/Protoboard.js"
+import { HoleSystem } from "./systems/HoleSystem.js"
+
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
 
@@ -15,15 +18,16 @@ const interactionSystem = new InteractionSystem(sceneManager, appState)
 const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem)
 
 // ---------------------------
-// Escena base: luz, piso, mesa
+// Luces
 // ---------------------------
 scene.add(new THREE.AmbientLight(0xffffff, 0.6))
-
 const dir = new THREE.DirectionalLight(0xffffff, 1.0)
 dir.position.set(2, 4, 2)
 scene.add(dir)
 
-// Piso
+// ---------------------------
+// Piso + Mesa (surfaces)
+// ---------------------------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(50, 50),
   new THREE.MeshStandardMaterial({ color: 0x222222 })
@@ -32,7 +36,6 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
-// Mesa
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
@@ -40,50 +43,50 @@ const table = new THREE.Mesh(
 table.position.set(0, 1.0, -1.0)
 scene.add(table)
 
-// Register surfaces
 interactionSystem.registerSurface(floor, { type: "floor" })
-const box = new THREE.Box3().setFromObject(table)
-const margin = 0.12
+
+const tableBox = new THREE.Box3().setFromObject(table)
+const tableMargin = 0.12
 interactionSystem.registerSurface(table, {
   type: "table",
   bounds: {
-    minX: box.min.x + margin,
-    maxX: box.max.x - margin,
-    minZ: box.min.z + margin,
-    maxZ: box.max.z - margin,
+    minX: tableBox.min.x + tableMargin,
+    maxX: tableBox.max.x - tableMargin,
+    minZ: tableBox.min.z + tableMargin,
+    maxZ: tableBox.max.z - tableMargin,
   },
 })
 
 // ---------------------------
-// Helpers: spawn
+// ✅ Protoboard placeholder + HoleSystem
+// ---------------------------
+const tableTopY = table.position.y + 0.05 // mesa (0.1 alto) => top aprox
+const { group: protoboard, surfaceMesh: protoSurface, layout } = createProtoboard({
+  position: new THREE.Vector3(table.position.x, tableTopY + 0.03, table.position.z),
+})
+
+scene.add(protoboard)
+
+// Registrar como surface prioritaria
+interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
+
+// HoleSystem (snapeo a holes)
+const holeSystem = new HoleSystem(protoboard, layout)
+interactionSystem.setHoleSystem(holeSystem)
+
+// ---------------------------
+// UI overlay (Add Cube)
 // ---------------------------
 function genId(prefix = "cmp") {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 }
 
-function spawnPositionOnTableOrFront() {
-  // Prefer mesa: centro superior de mesa
-  const tableTopY = table.position.y + 0.1 // aprox (mesa es 0.1 de alto)
-  const pos = new THREE.Vector3(table.position.x, tableTopY + 0.2, table.position.z)
-
-  // Clamp dentro de bounds de mesa
-  const b = interactionSystem.surfaces.find((s) => s.mesh === table)?.bounds
-  if (b) {
-    pos.x = THREE.MathUtils.clamp(pos.x, b.minX + 0.2, b.maxX - 0.2)
-    pos.z = THREE.MathUtils.clamp(pos.z, b.minZ + 0.2, b.maxZ - 0.2)
-  } else {
-    // Fallback: frente a cámara
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
-    pos.copy(camera.position).add(forward.multiplyScalar(1.2))
-    pos.y = 1.2
-  }
-
-  return pos
-}
-
 function addCube() {
   const id = genId("cube")
-  const p = spawnPositionOnTableOrFront()
+
+  // spawn cerca del protoboard (centro)
+  const p = protoboard.position.clone()
+  p.y += 0.15
 
   appState.addComponent({
     id,
@@ -94,11 +97,7 @@ function addCube() {
   stateSyncSystem.rebuildFromState()
 }
 
-// ---------------------------
-// UI overlay
-// ---------------------------
-const btnAddCube = document.getElementById("btn-add-cube")
-btnAddCube?.addEventListener("click", () => addCube())
+document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
 
 window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() === "c") addCube()
@@ -118,7 +117,7 @@ window.addEventListener("keydown", (e) => {
 })
 
 // ---------------------------
-// Init rebuild (si ya hay estado cargado en runtime, lo agregas después)
+// Init
 // ---------------------------
 stateSyncSystem.rebuildFromState()
 

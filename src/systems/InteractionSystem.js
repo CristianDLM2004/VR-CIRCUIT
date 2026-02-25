@@ -9,19 +9,20 @@ export class InteractionSystem {
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
 
-    // Raycaster para agarrar (Layer 1)
     this.raycaster = new THREE.Raycaster()
     this.raycaster.layers.set(1)
 
     this.tempMatrix = new THREE.Matrix4()
 
-    // Raycaster para snap (Layer 2)
     this.downRaycaster = new THREE.Raycaster()
     this.downRaycaster.layers.set(2)
 
     this.controllers = []
-    this.interactables = [] // roots de componentes layer 1
-    this.surfaces = [] // [{ mesh, type, bounds }]
+    this.interactables = []
+    this.surfaces = []
+
+    // ✅ Nuevo: HoleSystem (opcional)
+    this.holeSystem = null
 
     this.hovered = null
     this.selected = null
@@ -29,31 +30,25 @@ export class InteractionSystem {
     this.initControllers()
   }
 
-  // -------------------------
-  // Interactuables (componentes)
-  // -------------------------
+  setHoleSystem(holeSystem) {
+    this.holeSystem = holeSystem
+  }
+
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
 
     mesh.userData.interactable = true
-
-    // ✅ BLINDAJE: dejar SOLO layer 1
     mesh.layers.disableAll()
     mesh.layers.enable(1)
 
-    if (!this.interactables.includes(mesh)) {
-      this.interactables.push(mesh)
-    }
+    if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
   }
 
   unregister(mesh) {
     this.interactables = this.interactables.filter((m) => m !== mesh)
   }
 
-  // -------------------------
-  // Surfaces (piso/mesa)
-  // -------------------------
   registerSurface(mesh, options = {}) {
     if (!mesh) return
 
@@ -62,15 +57,11 @@ export class InteractionSystem {
 
     mesh.userData.isSurface = true
     mesh.userData.interactable = false
-
-    // ✅ si por error alguien le metió componentId, bórralo
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
 
-    // ✅ BLINDAJE: dejar SOLO layer 2
     mesh.layers.disableAll()
     mesh.layers.enable(2)
 
-    // si por accidente estaba como interactuable, sacarlo
     this.unregister(mesh)
 
     const existing = this.surfaces.find((s) => s.mesh === mesh)
@@ -100,9 +91,6 @@ export class InteractionSystem {
     }
   }
 
-  // -------------------------
-  // Hover highlight
-  // -------------------------
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
@@ -123,9 +111,6 @@ export class InteractionSystem {
     }
   }
 
-  // -------------------------
-  // Snap: mesa > piso + clamp
-  // -------------------------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
@@ -145,13 +130,14 @@ export class InteractionSystem {
     const size = new THREE.Vector3()
     bbox.getSize(size)
 
+    // 1) altura sobre la superficie
     object.position.y = best.point.y + size.y / 2
 
+    // 2) clamp en mesa (si aplica)
     const surf = best.surface
     if (surf?.type === "table" && surf.bounds) {
       const halfX = size.x / 2
       const halfZ = size.z / 2
-
       const minX = surf.bounds.minX + halfX
       const maxX = surf.bounds.maxX - halfX
       const minZ = surf.bounds.minZ + halfZ
@@ -159,6 +145,12 @@ export class InteractionSystem {
 
       object.position.x = THREE.MathUtils.clamp(object.position.x, minX, maxX)
       object.position.z = THREE.MathUtils.clamp(object.position.z, minZ, maxZ)
+    }
+
+    // ✅ 3) si hay HoleSystem, intenta snap a hole cercano (prioridad si está cerca)
+    // Nota: snapea solo XZ; Y ya quedó sobre superficie.
+    if (this.holeSystem) {
+      this.holeSystem.trySnapObject(object, 0.03) // 3 cm (ajustable)
     }
   }
 
@@ -173,6 +165,12 @@ export class InteractionSystem {
         }
       }
       return null
+    }
+
+    // protoboard (si lo registramos como type "protoboard") tiene prioridad
+    for (const h of hits) {
+      const surf = getSurfaceEntry(h.object)
+      if (surf?.type === "protoboard") return { ...h, surface: surf }
     }
 
     // mesa dentro bounds
@@ -201,17 +199,10 @@ export class InteractionSystem {
     return null
   }
 
-  // -------------------------
-  // Select handlers
-  // -------------------------
   onSelectStart(event) {
     const controller = event.target
     if (!this.hovered) return
-
-    // ✅ candado: nunca agarrar surfaces
     if (this.hovered.userData?.isSurface) return
-
-    // ✅ solo componentes reales registrados
     if (!this.hovered.userData?.componentId) return
     if (!this.interactables.includes(this.hovered)) return
 
@@ -237,9 +228,6 @@ export class InteractionSystem {
     this.selected = null
   }
 
-  // -------------------------
-  // Update hover
-  // -------------------------
   update() {
     if (this.selected) return
 
