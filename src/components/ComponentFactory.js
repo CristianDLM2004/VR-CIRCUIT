@@ -1,9 +1,7 @@
 import * as THREE from "three"
 
 export class ComponentFactory {
-
   static createComponent(data) {
-
     let mesh
 
     switch (data.type) {
@@ -13,7 +11,6 @@ export class ComponentFactory {
           new THREE.MeshStandardMaterial()
         )
         break
-
       default:
         return null
     }
@@ -23,9 +20,12 @@ export class ComponentFactory {
     mesh.position.set(t.x, t.y, t.z)
     mesh.quaternion.set(t.qx ?? 0, t.qy ?? 0, t.qz ?? 0, t.qw ?? 1)
 
-    // Metadata para sistemas
+    // Metadata
     mesh.userData.componentId = data.id
     mesh.userData.interactable = true
+
+    // ✅ Layer 1 = interactuables
+    mesh.layers.set(1)
 
     return mesh
   }

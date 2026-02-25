@@ -9,14 +9,19 @@ export class InteractionSystem {
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
 
+    // Raycaster para agarrar (Layer 1)
     this.raycaster = new THREE.Raycaster()
+    this.raycaster.layers.set(1)
+
     this.tempMatrix = new THREE.Matrix4()
 
+    // Raycaster para snap (Layer 2)
     this.downRaycaster = new THREE.Raycaster()
+    this.downRaycaster.layers.set(2)
 
     this.controllers = []
-    this.interactables = [] // SOLO agarrables
-    this.surfaces = [] // piso/mesa
+    this.interactables = [] // meshes layer 1
+    this.surfaces = [] // meshes layer 2
 
     this.hovered = null
     this.selected = null
@@ -24,26 +29,12 @@ export class InteractionSystem {
     this.initControllers()
   }
 
-  // ---------- UTIL ----------
-  isValidInteractable(mesh) {
-    return !!mesh && mesh.userData?.interactable === true && mesh.userData?.isSurface !== true
-  }
-
-  cleanupInteractables() {
-    // ✅ Elimina cualquier cosa que se haya colado (piso/mesa/etc.)
-    this.interactables = this.interactables.filter((m) => this.isValidInteractable(m))
-  }
-
-  // ---------- REGISTRO ----------
+  // Solo componentes
   register(mesh) {
     if (!mesh) return
-
-    // Nunca registrar surfaces como interactuables
-    if (mesh.userData?.isSurface) return
-
     mesh.userData.interactable = true
+    mesh.layers.set(1)
 
-    // Evitar duplicados
     if (!this.interactables.includes(mesh)) {
       this.interactables.push(mesh)
     }
@@ -53,33 +44,18 @@ export class InteractionSystem {
     this.interactables = this.interactables.filter((m) => m !== mesh)
   }
 
+  // Solo superficies
   registerSurface(mesh) {
     if (!mesh) return
-
     mesh.userData.isSurface = true
+    mesh.userData.interactable = false
+    mesh.layers.set(2)
 
-    // 🔒 Blindaje: si por error estaba como interactuable, eliminar flag
-    if (mesh.userData.interactable) {
-      delete mesh.userData.interactable
-    }
-
-    // 🔒 Blindaje real: si ya estaba en el array de interactuables, SACARLO
-    this.unregister(mesh)
-
-    // Evitar duplicados
     if (!this.surfaces.includes(mesh)) {
       this.surfaces.push(mesh)
     }
-
-    // Limpieza final
-    this.cleanupInteractables()
   }
 
-  unregisterSurface(mesh) {
-    this.surfaces = this.surfaces.filter((m) => m !== mesh)
-  }
-
-  // ---------- CONTROLADORES ----------
   initControllers() {
     const controllerModelFactory = new XRControllerModelFactory()
 
@@ -97,7 +73,6 @@ export class InteractionSystem {
     }
   }
 
-  // ---------- HOVER ----------
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
@@ -112,7 +87,6 @@ export class InteractionSystem {
     }
   }
 
-  // ---------- SNAP ----------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
@@ -121,6 +95,7 @@ export class InteractionSystem {
 
     this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
+    // ✅ Solo intersecta Layer 2 por configuración del raycaster
     const hits = this.downRaycaster.intersectObjects(this.surfaces, true)
     if (hits.length === 0) return
 
@@ -133,15 +108,12 @@ export class InteractionSystem {
     object.position.y = hit.point.y + size.y / 2
   }
 
-  // ---------- SELECT ----------
   onSelectStart(event) {
     const controller = event.target
+    if (!this.hovered) return
 
-    // Limpieza defensiva
-    this.cleanupInteractables()
-
-    // Si no hay hovered válido, nada
-    if (!this.isValidInteractable(this.hovered)) return
+    // ✅ Extra: nunca permitir agarrar algo sin componentId
+    if (!this.hovered.userData?.componentId) return
 
     this.selected = this.hovered
     controller.attach(this.selected)
@@ -153,6 +125,7 @@ export class InteractionSystem {
     this.scene.attach(this.selected)
     this.snapToSurface(this.selected)
 
+    // Guardar transform
     const id = this.selected.userData?.componentId
     if (id) {
       const p = this.selected.position
@@ -165,28 +138,25 @@ export class InteractionSystem {
     this.selected = null
   }
 
-  // ---------- UPDATE ----------
   update() {
     if (this.selected) return
 
-    // ✅ Limpieza constante (evita que vuelvan a colarse surfaces)
-    this.cleanupInteractables()
-
     let best = null
 
-    for (let controller of this.controllers) {
+    for (const controller of this.controllers) {
       this.tempMatrix.identity().extractRotation(controller.matrixWorld)
 
       this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
       this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
 
+      // ✅ Intersecta SOLO Layer 1 por configuración del raycaster
       const hits = this.raycaster.intersectObjects(this.interactables, true)
 
       if (hits.length > 0) {
         let obj = hits[0].object
-        while (obj && obj.parent && !this.isValidInteractable(obj)) obj = obj.parent
+        while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
 
-        if (this.isValidInteractable(obj)) {
+        if (obj?.userData?.componentId) {
           best = obj
           break
         }
