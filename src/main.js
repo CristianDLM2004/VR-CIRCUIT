@@ -1,112 +1,107 @@
-import * as THREE from "three"
-import { SceneManager } from "./core/SceneManager"
-import { VRManager } from "./core/VRManager"
-import { InteractionSystem } from "./systems/InteractionSystem"
-import { AppState } from "./core/AppState"
-import { StateSyncSystem } from "./systems/StateSyncSystem"
+// src/main.js
+import * as THREE from "three";
+import { SceneManager } from "./core/SceneManager.js";
+import { VRManager } from "./core/VRManager.js";
+import { AppState } from "./core/AppState.js";
+import { StateSyncSystem } from "./systems/StateSyncSystem.js";
+import { InteractionSystem } from "./systems/InteractionSystem.js";
 
-let sceneManager
-let vrManager
-let interactionSystem
-let appState
-let stateSync
+const sceneManager = new SceneManager();
+const { scene, camera, renderer } = sceneManager;
 
-let floor
-let table
+const vrManager = new VRManager(renderer, scene, camera);
 
-init()
+const appState = new AppState();
+const interactionSystem = new InteractionSystem(renderer, camera, scene, appState);
+const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem);
 
-function init() {
-  sceneManager = new SceneManager()
-  vrManager = new VRManager(sceneManager.renderer)
+// ---------------------------
+// Escena base: luz, piso, mesa
+// ---------------------------
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
 
-  appState = new AppState()
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(2, 4, 2);
+scene.add(dir);
 
-  interactionSystem = new InteractionSystem(sceneManager, appState)
-  stateSync = new StateSyncSystem(sceneManager.scene, appState, interactionSystem)
+// Piso
+const floorGeo = new THREE.PlaneGeometry(50, 50);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = 0;
+floor.receiveShadow = true;
 
-  addBasicEnvironment()
+floor.userData.isSurface = true;
+floor.userData.interactable = false;
+floor.layers.set(2); // surfaces
+scene.add(floor);
 
-  // Registrar superficies (snap)
-  interactionSystem.registerSurface(floor)
-  interactionSystem.registerSurface(table)
+// Mesa (placeholder)
+const tableGeo = new THREE.BoxGeometry(2.0, 0.1, 1.2);
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+const table = new THREE.Mesh(tableGeo, tableMat);
+table.position.set(0, 1.0, -1.0);
+table.receiveShadow = true;
 
-  // Estado inicial
-  if (!localStorage.getItem("vrcircuit_state")) {
-    appState.addComponent({
-      id: crypto.randomUUID(),
-      type: "cube",
-      transform: { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 },
-    })
-  } else {
-    loadState()
+table.userData.isSurface = true;
+table.userData.interactable = false;
+table.layers.set(2); // surfaces
+scene.add(table);
+
+// Registrar surfaces en InteractionSystem
+interactionSystem.registerSurface(floor, { type: "floor" });
+
+// Bounds de mesa en mundo
+const box = new THREE.Box3().setFromObject(table);
+
+// Margen para que los componentes no queden al borde
+const margin = 0.12;
+
+const tableBounds = {
+  minX: box.min.x + margin,
+  maxX: box.max.x - margin,
+  minZ: box.min.z + margin,
+  maxZ: box.max.z - margin,
+};
+
+interactionSystem.registerSurface(table, { type: "table", bounds: tableBounds });
+
+// ---------------------------
+// XR Controllers
+// ---------------------------
+vrManager.onControllerReady((controller) => {
+  interactionSystem.addController(controller);
+});
+
+// ---------------------------
+// Cargar estado previo y reconstruir
+// ---------------------------
+stateSyncSystem.rebuildFromState();
+
+// Teclas PC (ya tienes S y L; lo dejo aquí)
+window.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "s") {
+    localStorage.setItem("vr_circuit_state", appState.toJSON());
+    console.log("✅ Estado guardado en localStorage");
   }
-
-  // Construir escena desde AppState (y registrar interactuables)
-  stateSync.rebuildFromState()
-
-  // Atajos PC
-  window.addEventListener("keydown", onKeyDown)
-
-  sceneManager.renderer.setAnimationLoop(() => {
-    interactionSystem.update()
-    sceneManager.render()
-  })
-}
-
-function onKeyDown(e) {
-  const k = e.key.toLowerCase()
-
-  if (k === "s") saveState()
-  if (k === "l") {
-    loadState()
-    stateSync.rebuildFromState()
+  if (e.key.toLowerCase() === "l") {
+    const raw = localStorage.getItem("vr_circuit_state");
+    if (raw) {
+      appState.loadFromObject(JSON.parse(raw));
+      stateSyncSystem.rebuildFromState();
+      console.log("✅ Estado cargado y reconstruido");
+    } else {
+      console.log("⚠️ No hay estado guardado");
+    }
   }
-}
+});
 
-function saveState() {
-  localStorage.setItem("vrcircuit_state", appState.toJSON())
-  console.log("✅ Estado guardado")
-}
-
-function loadState() {
-  const raw = localStorage.getItem("vrcircuit_state")
-  if (!raw) return
-  const obj = JSON.parse(raw)
-  appState.loadFromObject(obj)
-  console.log("✅ Estado cargado")
-}
-
-function addBasicEnvironment() {
-  const light = new THREE.HemisphereLight(0xffffff, 0x444444)
-  light.position.set(0, 20, 0)
-  sceneManager.scene.add(light)
-
-  // Piso
-  floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(20, 20),
-    new THREE.MeshStandardMaterial({ color: 0x808080 })
-  )
-  floor.rotation.x = -Math.PI / 2
-  floor.userData.isSurface = true
-  floor.userData.interactable = false
-
-  // ✅ Layer 2 = surfaces
-  floor.layers.set(2)
-
-  sceneManager.scene.add(floor)
-
-  // Mesa
-  table = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 0.1, 1),
-    new THREE.MeshStandardMaterial({ color: 0x222222 })
-  )
-  table.position.set(0, 1, -1)
-  table.userData.isSurface = true
-  table.userData.interactable = false
-
-  // ✅ Layer 2 = surfaces
-  table.layers.set(2)
-
-  sceneManager.scene.add(table)
-}
+// ---------------------------
+// Loop
+// ---------------------------
+renderer.setAnimationLoop(() => {
+  interactionSystem.update();
+  renderer.render(scene, camera);
+});
