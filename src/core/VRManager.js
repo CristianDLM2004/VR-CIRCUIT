@@ -2,6 +2,9 @@ import { VRButton } from "three/examples/jsm/webxr/VRButton.js"
 
 export class VRManager {
   constructor(renderer) {
+    // Reference space recomendado
+    renderer.xr.setReferenceSpaceType("local-floor")
+
     const options = {
       optionalFeatures: [
         "local-floor",
