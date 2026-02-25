@@ -1,352 +1,276 @@
-// src/systems/InteractionSystem.js
-import * as THREE from "three";
+import * as THREE from "three"
+import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js"
 
 export class InteractionSystem {
-  constructor(renderer, camera, scene, appState) {
-    this.renderer = renderer;
-    this.camera = camera;
-    this.scene = scene;
-    this.appState = appState;
+  constructor(sceneManager, appState) {
+    this.sceneManager = sceneManager
+    this.appState = appState
 
-    // Interactuables (Layer 1)
-    this.interactables = [];
+    this.scene = sceneManager.scene
+    this.renderer = sceneManager.renderer
 
-    // Surfaces (Layer 2)
-    // Cada surface: { mesh, type: "table"|"floor", bounds?: {minX,maxX,minZ,maxZ} }
-    this.surfaces = [];
+    // Raycaster para agarrar (Layer 1)
+    this.raycaster = new THREE.Raycaster()
+    this.raycaster.layers.set(1)
 
-    this.raycaster = new THREE.Raycaster();
-    this.raycaster.layers.set(1); // solo componentes
+    this.tempMatrix = new THREE.Matrix4()
 
-    this.downRaycaster = new THREE.Raycaster();
-    this.downRaycaster.layers.set(2); // solo superficies
+    // Raycaster para snap (Layer 2)
+    this.downRaycaster = new THREE.Raycaster()
+    this.downRaycaster.layers.set(2)
 
-    this.tempVec3 = new THREE.Vector3();
+    this.controllers = []
+    this.interactables = [] // meshes layer 1
 
-    // Estado interacción
-    this.hovered = null;
-    this.selected = null;
-    this.selectedRoot = null;
+    /**
+     * Surfaces registradas:
+     * [{ mesh, type: "table"|"floor", bounds?: {minX,maxX,minZ,maxZ} }]
+     */
+    this.surfaces = []
 
-    // Colores/feedback
-    this.hoverEmissive = new THREE.Color(0x333333);
-    this.selectEmissive = new THREE.Color(0x666666);
+    this.hovered = null
+    this.selected = null
 
-    // XR
-    this.controllers = [];
+    this.initControllers()
   }
 
-  // ---------------------------
-  // Registro de objetos
-  // ---------------------------
-  registerInteractable(mesh) {
-    if (!mesh) return;
-    if (!this.interactables.includes(mesh)) this.interactables.push(mesh);
+  // -------------------------
+  // Interactuables (componentes)
+  // -------------------------
+  register(mesh) {
+    if (!mesh) return
+    mesh.userData.interactable = true
+    mesh.layers.set(1)
+
+    if (!this.interactables.includes(mesh)) {
+      this.interactables.push(mesh)
+    }
   }
 
-  unregisterInteractable(mesh) {
-    const idx = this.interactables.indexOf(mesh);
-    if (idx >= 0) this.interactables.splice(idx, 1);
+  unregister(mesh) {
+    this.interactables = this.interactables.filter((m) => m !== mesh)
   }
 
+  // -------------------------
+  // Surfaces (piso/mesa)
+  // -------------------------
   /**
-   * Registra una superficie para snap.
-   * @param {THREE.Object3D} surfaceMesh
+   * @param {THREE.Object3D} mesh
    * @param {Object} options
-   *  - type: "table" | "floor" (default: "floor")
-   *  - bounds: { minX,maxX,minZ,maxZ } en mundo (solo para "table")
+   *  - type: "table" | "floor" (default "floor")
+   *  - bounds: { minX,maxX,minZ,maxZ } EN MUNDO (recomendado para mesa)
    */
-  registerSurface(surfaceMesh, options = {}) {
-    if (!surfaceMesh) return;
-    const type = options.type || "floor";
-    const bounds = options.bounds || null;
+  registerSurface(mesh, options = {}) {
+    if (!mesh) return
 
-    // Evitar duplicados
-    const exists = this.surfaces.find((s) => s.mesh === surfaceMesh);
-    if (exists) {
-      exists.type = type;
-      exists.bounds = bounds;
-      return;
+    const type = options.type || "floor"
+    const bounds = options.bounds || null
+
+    mesh.userData.isSurface = true
+    mesh.userData.interactable = false
+    mesh.layers.set(2)
+
+    const existing = this.surfaces.find((s) => s.mesh === mesh)
+    if (existing) {
+      existing.type = type
+      existing.bounds = bounds
+      return
     }
 
-    this.surfaces.push({ mesh: surfaceMesh, type, bounds });
+    this.surfaces.push({ mesh, type, bounds })
   }
 
-  clearSurfaces() {
-    this.surfaces.length = 0;
-  }
+  initControllers() {
+    const controllerModelFactory = new XRControllerModelFactory()
 
-  // ---------------------------
-  // XR Controllers
-  // ---------------------------
-  addController(controller) {
-    if (!controller) return;
-    if (!this.controllers.includes(controller)) {
-      this.controllers.push(controller);
+    for (let i = 0; i < 2; i++) {
+      const controller = this.renderer.xr.getController(i)
+      controller.addEventListener("selectstart", (e) => this.onSelectStart(e))
+      controller.addEventListener("selectend", () => this.onSelectEnd())
+      this.scene.add(controller)
 
-      controller.addEventListener("selectstart", (e) => this.onSelectStart(e, controller));
-      controller.addEventListener("selectend", (e) => this.onSelectEnd(e, controller));
+      const controllerGrip = this.renderer.xr.getControllerGrip(i)
+      controllerGrip.add(controllerModelFactory.createControllerModel(controllerGrip))
+      this.scene.add(controllerGrip)
+
+      this.controllers.push(controller)
     }
   }
 
-  // ---------------------------
-  // Update loop
-  // ---------------------------
-  update() {
-    // 1) Hover desde controladores XR (si hay), si no, desde cámara (PC fallback)
-    let hoverHit = null;
+  // -------------------------
+  // Hover highlight (solo visual)
+  // -------------------------
+  setHover(newHovered) {
+    if (this.hovered === newHovered) return
 
-    if (this.controllers.length > 0) {
-      // Tomamos el primer controlador que esté apuntando algo
-      for (const c of this.controllers) {
-        const hit = this.getRayHitFromController(c);
-        if (hit) {
-          hoverHit = hit;
-          break;
-        }
-      }
-    } else {
-      // PC fallback: ray desde cámara al centro de pantalla
-      hoverHit = this.getRayHitFromCameraCenter();
+    // Quitar highlight anterior
+    if (this.hovered) {
+      this.hovered.traverse?.((child) => {
+        if (child.isMesh && child.material?.emissive) child.material.emissive.setHex(0x000000)
+      })
+      if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x000000)
     }
 
-    const newHovered = hoverHit ? this.findInteractableRoot(hoverHit.object) : null;
+    this.hovered = newHovered
 
-    // 2) Actualizar highlight hover (si no estamos agarrando ese mismo)
-    if (newHovered !== this.hovered) {
-      this.setEmissive(this.hovered, null);
-      this.hovered = newHovered;
-
-      if (this.hovered && this.hovered !== this.selectedRoot) {
-        this.setEmissive(this.hovered, this.hoverEmissive);
-      }
+    // Poner highlight nuevo
+    if (this.hovered) {
+      this.hovered.traverse?.((child) => {
+        if (child.isMesh && child.material?.emissive) child.material.emissive.setHex(0x222222)
+      })
+      if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x222222)
     }
-
-    // 3) Si estamos agarrando, podrías agregar aquí “follow” si usas attach directo al controller
-    // (En tu caso ya lo tienes funcionando, así que no meto cambios aquí).
   }
 
-  // ---------------------------
-  // Ray helpers
-  // ---------------------------
-  getRayHitFromController(controller) {
-    // Convierte el controller a rayo
-    const origin = new THREE.Vector3();
-    const direction = new THREE.Vector3(0, 0, -1);
+  // -------------------------
+  // Snap mejorado: mesa > piso + clamp
+  // -------------------------
+  snapToSurface(object) {
+    if (!object || this.surfaces.length === 0) return
 
-    controller.getWorldPosition(origin);
-    direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion())).normalize();
+    // origin en mundo (asumimos que ya está attach a scene)
+    const origin = object.position.clone()
+    origin.y += 2
 
-    this.raycaster.set(origin, direction);
+    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
-    const hits = this.raycaster.intersectObjects(this.interactables, true);
-    if (!hits || hits.length === 0) return null;
+    // Intersecta meshes de surface (Layer 2 ya filtra)
+    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
+    const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
+    if (hits.length === 0) return
 
-    // Acepta solo objetos con componentId en la cadena
-    for (const h of hits) {
-      const root = this.findInteractableRoot(h.object);
-      if (root && root.userData && root.userData.componentId) return h;
-    }
-    return null;
-  }
+    const best = this.pickBestSurfaceHit(hits)
+    if (!best) return
 
-  getRayHitFromCameraCenter() {
-    // Centro pantalla
-    this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+    // Tamaño del objeto (para que repose sobre la superficie)
+    const bbox = new THREE.Box3().setFromObject(object)
+    const size = new THREE.Vector3()
+    bbox.getSize(size)
 
-    const hits = this.raycaster.intersectObjects(this.interactables, true);
-    if (!hits || hits.length === 0) return null;
+    // 1) Ajustar altura (apoya sobre surface)
+    object.position.y = best.point.y + size.y / 2
 
-    for (const h of hits) {
-      const root = this.findInteractableRoot(h.object);
-      if (root && root.userData && root.userData.componentId) return h;
-    }
-    return null;
-  }
+    // 2) Si es mesa con bounds: clamp X/Z (considera el tamaño del objeto para no “salirse”)
+    const surf = best.surface
+    if (surf?.type === "table" && surf.bounds) {
+      const halfX = size.x / 2
+      const halfZ = size.z / 2
 
-  findInteractableRoot(obj) {
-    let cur = obj;
-    while (cur) {
-      if (cur.userData && cur.userData.componentId) return cur;
-      cur = cur.parent;
-    }
-    return null;
-  }
+      const minX = surf.bounds.minX + halfX
+      const maxX = surf.bounds.maxX - halfX
+      const minZ = surf.bounds.minZ + halfZ
+      const maxZ = surf.bounds.maxZ - halfZ
 
-  // ---------------------------
-  // Select handlers
-  // ---------------------------
-  onSelectStart(_event, controller) {
-    // Solo si hay hovered válido
-    if (!this.hovered || !this.hovered.userData?.componentId) return;
-    if (this.selectedRoot) return;
-
-    this.selectedRoot = this.hovered;
-    this.selected = controller;
-
-    // Visual feedback
-    this.setEmissive(this.selectedRoot, this.selectEmissive);
-
-    // “Pegar” al controller (tu proyecto ya lo hace; aquí lo dejamos simple)
-    controller.attach(this.selectedRoot);
-  }
-
-  onSelectEnd(_event, controller) {
-    if (!this.selectedRoot) return;
-    if (controller !== this.selected) return;
-
-    // Soltar al scene (mantiene world transform)
-    this.scene.attach(this.selectedRoot);
-
-    // Snap mejorado (mesa primero, clamp; si no, piso)
-    this.snapSelectedToBestSurface(this.selectedRoot);
-
-    // Actualiza AppState con transform final
-    this.commitTransformToState(this.selectedRoot);
-
-    // Limpieza visual/estado
-    this.setEmissive(this.selectedRoot, null);
-    this.selectedRoot = null;
-    this.selected = null;
-  }
-
-  // ---------------------------
-  // Snap logic (MEJORADO)
-  // ---------------------------
-  snapSelectedToBestSurface(selectedMesh) {
-    // 1) Tomar posición actual para lanzar ray down
-    const worldPos = new THREE.Vector3();
-    selectedMesh.getWorldPosition(worldPos);
-
-    // 2) Preparar ray down
-    const origin = new THREE.Vector3(worldPos.x, worldPos.y + 2.0, worldPos.z);
-    const direction = new THREE.Vector3(0, -1, 0);
-    this.downRaycaster.set(origin, direction);
-
-    // 3) Intersectar con TODAS las surfaces (Layer 2 ya filtra)
-    const surfaceMeshes = this.surfaces.map((s) => s.mesh);
-    const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true);
-    if (!hits || hits.length === 0) return;
-
-    // 4) Elegir mejor surface: mesa si el punto cae dentro de bounds; si no, fallback a piso
-    const best = this.pickBestSurfaceHit(hits);
-    if (!best) return;
-
-    // 5) Aplicar Y al punto de hit
-    selectedMesh.position.y = best.point.y;
-
-    // 6) Si es mesa y tiene bounds -> clamp XZ
-    if (best.surface?.type === "table" && best.surface?.bounds) {
-      const b = best.surface.bounds;
-      selectedMesh.position.x = THREE.MathUtils.clamp(selectedMesh.position.x, b.minX, b.maxX);
-      selectedMesh.position.z = THREE.MathUtils.clamp(selectedMesh.position.z, b.minZ, b.maxZ);
+      object.position.x = THREE.MathUtils.clamp(object.position.x, minX, maxX)
+      object.position.z = THREE.MathUtils.clamp(object.position.z, minZ, maxZ)
     }
   }
 
   pickBestSurfaceHit(hits) {
-    // hits ya vienen ordenados por distancia
-    // Necesitamos mapear hit.object a surface registrada (puede ser child).
+    // Mapear hit.object a surface registrada (puede pegar a un child)
     const getSurfaceEntry = (hitObj) => {
-      // busca por identidad o por parentesco
       for (const s of this.surfaces) {
-        if (hitObj === s.mesh) return s;
-
-        // si el hit fue a un child:
-        let cur = hitObj;
+        if (hitObj === s.mesh) return s
+        let cur = hitObj
         while (cur) {
-          if (cur === s.mesh) return s;
-          cur = cur.parent;
+          if (cur === s.mesh) return s
+          cur = cur.parent
         }
       }
-      return null;
-    };
+      return null
+    }
 
-    // 1) Candidatos mesa dentro de bounds
+    // 1) Mesa dentro de bounds
     for (const h of hits) {
-      const surf = getSurfaceEntry(h.object);
-      if (!surf) continue;
-      if (surf.type !== "table") continue;
-      if (!surf.bounds) continue;
+      const surf = getSurfaceEntry(h.object)
+      if (!surf || surf.type !== "table" || !surf.bounds) continue
 
-      const { minX, maxX, minZ, maxZ } = surf.bounds;
-      const x = h.point.x;
-      const z = h.point.z;
+      const { minX, maxX, minZ, maxZ } = surf.bounds
+      const x = h.point.x
+      const z = h.point.z
 
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
-        return { ...h, surface: surf };
+        return { ...h, surface: surf }
       }
     }
 
-    // 2) Si no, primer piso
+    // 2) Piso (primer floor)
     for (const h of hits) {
-      const surf = getSurfaceEntry(h.object);
-      if (!surf) continue;
-      if (surf.type === "floor") return { ...h, surface: surf };
+      const surf = getSurfaceEntry(h.object)
+      if (surf?.type === "floor") return { ...h, surface: surf }
     }
 
-    // 3) Si no hay floor registrado, regresa el primer hit válido
+    // 3) Fallback: el primero con surface
     for (const h of hits) {
-      const surf = getSurfaceEntry(h.object);
-      if (surf) return { ...h, surface: surf };
+      const surf = getSurfaceEntry(h.object)
+      if (surf) return { ...h, surface: surf }
     }
 
-    return null;
+    return null
   }
 
-  // ---------------------------
-  // State commit
-  // ---------------------------
-  commitTransformToState(mesh) {
-    const id = mesh.userData?.componentId;
-    if (!id) return;
+  // -------------------------
+  // Select handlers
+  // -------------------------
+  onSelectStart(event) {
+    const controller = event.target
+    if (!this.hovered) return
 
-    // Pos/Rot/Scale (world)
-    const pos = new THREE.Vector3();
-    const quat = new THREE.Quaternion();
-    const scale = new THREE.Vector3();
+    // ✅ Nunca permitir agarrar algo sin componentId
+    if (!this.hovered.userData?.componentId) return
 
-    mesh.getWorldPosition(pos);
-    mesh.getWorldQuaternion(quat);
-    mesh.getWorldScale(scale);
-
-    const euler = new THREE.Euler().setFromQuaternion(quat, "YXZ");
-
-    this.appState.updateComponent(id, {
-      position: { x: pos.x, y: pos.y, z: pos.z },
-      rotation: { x: euler.x, y: euler.y, z: euler.z },
-      scale: { x: scale.x, y: scale.y, z: scale.z },
-    });
+    this.selected = this.hovered
+    controller.attach(this.selected)
   }
 
-  // ---------------------------
-  // Visual helpers
-  // ---------------------------
-  setEmissive(obj, colorOrNull) {
-    if (!obj) return;
+  onSelectEnd() {
+    if (!this.selected) return
 
-    obj.traverse((child) => {
-      if (!child.isMesh) return;
-      const mat = child.material;
-      if (!mat) return;
+    // volver al mundo (scene) para que el snap sea en coords mundo
+    this.scene.attach(this.selected)
+    this.snapToSurface(this.selected)
 
-      // soporta material único o array
-      if (Array.isArray(mat)) {
-        for (const m of mat) this.applyEmissive(m, colorOrNull);
-      } else {
-        this.applyEmissive(mat, colorOrNull);
+    // Guardar transform
+    const id = this.selected.userData?.componentId
+    if (id) {
+      const p = this.selected.position
+      const q = this.selected.quaternion
+      this.appState.updateComponent(id, {
+        transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
+      })
+    }
+
+    this.selected = null
+  }
+
+  // -------------------------
+  // Update: hover por raycast (Layer 1)
+  // -------------------------
+  update() {
+    if (this.selected) return
+
+    let best = null
+
+    for (const controller of this.controllers) {
+      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+
+      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+      // ✅ Intersecta SOLO Layer 1 por configuración del raycaster
+      const hits = this.raycaster.intersectObjects(this.interactables, true)
+
+      if (hits.length > 0) {
+        let obj = hits[0].object
+        while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
+
+        if (obj?.userData?.componentId) {
+          best = obj
+          break
+        }
       }
-    });
-  }
-
-  applyEmissive(material, colorOrNull) {
-    if (!material) return;
-    if (!("emissive" in material)) return;
-
-    if (colorOrNull) {
-      material.emissive.copy(colorOrNull);
-    } else {
-      material.emissive.set(0x000000);
     }
-    material.needsUpdate = true;
+
+    this.setHover(best)
   }
 }
