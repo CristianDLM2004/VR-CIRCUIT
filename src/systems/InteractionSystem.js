@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js"
+import { XRHandModelFactory } from "three/examples/jsm/webxr/XRHandModelFactory.js"
 
 export class InteractionSystem {
   constructor(sceneManager, appState) {
@@ -27,6 +28,9 @@ export class InteractionSystem {
     this.hovered = null
     this.selected = null
 
+    // Visual aids (rays)
+    this.controllerRays = [] // { controller, line, hitDot }
+
     // -------------------------
     // PC Mouse controls
     // -------------------------
@@ -35,12 +39,10 @@ export class InteractionSystem {
     this.mouseRaycaster = new THREE.Raycaster()
     this.mouseRaycaster.layers.set(1)
 
-    // Drag plane (XZ) a la altura del objeto al agarrar
     this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
     this.dragHit = new THREE.Vector3()
     this.dragOffset = new THREE.Vector3()
 
-    // Bind events
     this._onMouseMove = (e) => this.onMouseMove(e)
     this._onMouseDown = (e) => this.onMouseDown(e)
     this._onMouseUp = () => this.onMouseUp()
@@ -71,8 +73,7 @@ export class InteractionSystem {
 
     mesh.userData.interactable = true
 
-    // ✅ Layers SOLO para raycast: conservar layer 0 para render.
-    // No usar disableAll (evita render distinto por ojo en XR).
+    // Layers SOLO para raycast: conservar layer 0 para render.
     mesh.layers.enable(1)
 
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
@@ -95,7 +96,7 @@ export class InteractionSystem {
     mesh.userData.interactable = false
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
 
-    // ✅ Layer 2 para snap raycast, pero conservar layer 0 para render.
+    // Layer 2 para snap raycast, conservar layer 0 para render
     mesh.layers.enable(2)
 
     this.unregister(mesh)
@@ -111,23 +112,62 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // XR Controllers
+  // XR Controllers + Hands + Rays
   // -------------------------
   initControllers() {
     const controllerModelFactory = new XRControllerModelFactory()
+    const handModelFactory = new XRHandModelFactory()
 
     for (let i = 0; i < 2; i++) {
+      // Controller (ray origin)
       const controller = this.renderer.xr.getController(i)
       controller.addEventListener("selectstart", (e) => this.onSelectStart(e))
       controller.addEventListener("selectend", () => this.onSelectEnd())
       this.scene.add(controller)
 
+      // Controller model (grip)
       const controllerGrip = this.renderer.xr.getControllerGrip(i)
       controllerGrip.add(controllerModelFactory.createControllerModel(controllerGrip))
       this.scene.add(controllerGrip)
 
+      // Hand tracking (si está disponible en runtime)
+      const hand = this.renderer.xr.getHand(i)
+      // Modelos "sencillos" visibles; si no hay hand tracking, no se mostrarán
+      hand.add(handModelFactory.createHandModel(hand, "mesh"))
+      this.scene.add(hand)
+
+      // Ray visual (laser) desde el controller
+      const { line, hitDot } = this.createControllerRay()
+      controller.add(line)
+      controller.add(hitDot)
+      this.controllerRays.push({ controller, line, hitDot })
+
       this.controllers.push(controller)
     }
+  }
+
+  createControllerRay() {
+    // Línea de 1m hacia -Z (se escala según hit)
+    const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]
+    const geo = new THREE.BufferGeometry().setFromPoints(points)
+    const mat = new THREE.LineBasicMaterial({ color: 0xffffff })
+    const line = new THREE.Line(geo, mat)
+    line.name = "ControllerRay"
+    line.scale.z = 5 // default 5m
+
+    // Punto al final del rayo
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.01, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    )
+    dot.name = "ControllerRayDot"
+    dot.position.z = -5
+
+    // Render en layer 0 (por seguridad)
+    line.layers.enable(0)
+    dot.layers.enable(0)
+
+    return { line, hitDot: dot }
   }
 
   // -------------------------
@@ -352,10 +392,14 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Update hover (XR or mouse)
+  // Update hover (XR or mouse) + update rays
   // -------------------------
   update() {
     if (!this.renderer.xr.isPresenting) return
+
+    // Actualiza ray visuals siempre en VR
+    this.updateControllerRays()
+
     if (this.selected) return
 
     let best = null
@@ -383,5 +427,25 @@ export class InteractionSystem {
     }
 
     this.setHover(best)
+  }
+
+  updateControllerRays() {
+    // Ajusta longitud del rayo según el primer hit (si hay)
+    for (const r of this.controllerRays) {
+      const controller = r.controller
+      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+
+      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+      const hits = this.raycaster.intersectObjects(this.interactables, true)
+
+      let dist = 5
+      if (hits.length > 0) dist = Math.min(5, Math.max(0.05, hits[0].distance))
+
+      r.line.scale.z = dist
+      r.hitDot.position.z = -dist
+      r.hitDot.visible = true
+    }
   }
 }
