@@ -2,10 +2,7 @@ import * as THREE from "three"
 
 /**
  * Panel 3D simple con 3 botones (Add / Save / Load).
- * No usa texto (para evitar loaders), pero usa colores + iconos 3D básicos.
- *
- * Retorna: { group, buttons }
- * buttons: array de meshes que debes registrar en InteractionSystem.register(...)
+ * Retorna { group, buttons }
  */
 export function createVRPanel({
   position = new THREE.Vector3(0, 1.35, -0.45),
@@ -19,7 +16,6 @@ export function createVRPanel({
   group.position.copy(position)
   group.rotation.y = rotationY
 
-  // Base del panel
   const panelGeo = new THREE.BoxGeometry(0.32, 0.18, 0.015)
   const panelMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   const panel = new THREE.Mesh(panelGeo, panelMat)
@@ -29,26 +25,32 @@ export function createVRPanel({
 
   const buttons = []
 
-  // Helper para crear botón
   const makeButton = ({ name, x, y, color, action, iconType }) => {
     const btn = new THREE.Mesh(
       new THREE.BoxGeometry(0.09, 0.05, 0.02),
       new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.0 })
     )
     btn.name = name
-    btn.position.set(x, y, 0.02) // un poquito al frente del panel
+    btn.position.set(x, y, 0.02)
     btn.castShadow = true
 
-    // Metadata UI
     btn.userData.isUI = true
     btn.userData.uiAction = action
+
+    // ✅ Debounce / cooldown (evita 3+ disparos)
+    btn.userData._lastPressMs = 0
+    btn.userData._cooldownMs = 250
+
     btn.userData.onPress = () => {
+      const now = performance.now()
+      if (now - btn.userData._lastPressMs < btn.userData._cooldownMs) return
+      btn.userData._lastPressMs = now
+
       if (action === "add") onAdd()
       if (action === "save") onSave()
       if (action === "load") onLoad()
     }
 
-    // Icono 3D (sin texto)
     const icon = createIcon(iconType)
     icon.position.set(0, 0, 0.013)
     btn.add(icon)
@@ -57,7 +59,6 @@ export function createVRPanel({
     buttons.push(btn)
   }
 
-  // Iconos simples
   function createIcon(type) {
     const iconGroup = new THREE.Group()
     iconGroup.name = `Icon_${type}`
@@ -69,7 +70,6 @@ export function createVRPanel({
       const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.028, 0.006), mat)
       iconGroup.add(bar1, bar2)
     } else if (type === "save") {
-      // disquete-ish: un cuadrito + ranura
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.026, 0.006), mat)
       const slot = new THREE.Mesh(
         new THREE.BoxGeometry(0.018, 0.006, 0.006),
@@ -78,7 +78,6 @@ export function createVRPanel({
       slot.position.y = 0.008
       iconGroup.add(body, slot)
     } else if (type === "load") {
-      // flecha hacia abajo
       const stem = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.02, 0.006), mat)
       stem.position.y = 0.004
       const head = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.014, 10), mat)
@@ -90,7 +89,6 @@ export function createVRPanel({
     return iconGroup
   }
 
-  // Botones (colores distintos)
   makeButton({ name: "BtnAdd", x: -0.105, y: 0.0, color: 0x2ecc71, action: "add", iconType: "plus" })
   makeButton({ name: "BtnSave", x: 0.0, y: 0.0, color: 0xf1c40f, action: "save", iconType: "save" })
   makeButton({ name: "BtnLoad", x: 0.105, y: 0.0, color: 0x3498db, action: "load", iconType: "load" })

@@ -11,13 +11,12 @@ export class InteractionSystem {
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
 
-    // Raycasters (sin layers)
     this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
 
     this.controllers = []
-    this.hands = [] // { hand, pinchPoint, isPinching, lastPinchT, handedness? }
+    this.hands = [] // { hand, pinchPoint, isPinching }
     this.interactables = []
     this.surfaces = []
     this.holeSystem = null
@@ -25,32 +24,25 @@ export class InteractionSystem {
     this.hovered = null
     this.selected = null
     this.selectedBy = null // "controller" | "hand" | "mouse"
-    this.activeController = null
-    this.activeHand = null
 
-    // Visual rays SOLO para controladores
+    // Rays only for controllers
     this.controllerRays = [] // { controller, line, hitDot }
 
-    // Near interaction settings (hands)
+    // Near interaction
     this.nearEnabled = true
-    this.nearRadius = 0.075 // 7.5 cm: más permisivo para “picar”/agarrar
+    this.nearRadius = 0.08 // 8 cm (más cómodo en Quest)
+    this.pinchStartDist = 0.028
+    this.pinchEndDist = 0.040
+
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
-    this._tmpC = new THREE.Vector3()
+    this._tmpCenter = new THREE.Vector3()
     this._box = new THREE.Box3()
-    this._size = new THREE.Vector3()
 
-    // Pinch detection thresholds
-    this.pinchStartDist = 0.028 // 2.8 cm (entra)
-    this.pinchEndDist = 0.038   // 3.8 cm (sale) -> histéresis
-
-    // -------------------------
-    // PC Mouse controls (igual)
-    // -------------------------
+    // PC mouse
     this.mouseEnabled = true
     this.mouseNDC = new THREE.Vector2()
     this.mouseRaycaster = new THREE.Raycaster()
-
     this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
     this.dragHit = new THREE.Vector3()
     this.dragOffset = new THREE.Vector3()
@@ -115,14 +107,14 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // XR Inputs: controllers + hands
+  // XR Inputs
   // -------------------------
   initXRInputs() {
     const controllerModelFactory = new XRControllerModelFactory()
     const handModelFactory = new XRHandModelFactory()
 
     for (let i = 0; i < 2; i++) {
-      // ---- Controllers ----
+      // Controllers
       const controller = this.renderer.xr.getController(i)
       controller.addEventListener("selectstart", (e) => this.onControllerSelectStart(e))
       controller.addEventListener("selectend", () => this.onControllerSelectEnd())
@@ -132,7 +124,6 @@ export class InteractionSystem {
       controllerGrip.add(controllerModelFactory.createControllerModel(controllerGrip))
       this.scene.add(controllerGrip)
 
-      // Ray visual solo en controller
       const { line, hitDot } = this.createControllerRay()
       controller.add(line)
       controller.add(hitDot)
@@ -140,21 +131,16 @@ export class InteractionSystem {
 
       this.controllers.push(controller)
 
-      // ---- Hands ----
+      // Hands
       const hand = this.renderer.xr.getHand(i)
       hand.add(handModelFactory.createHandModel(hand, "mesh"))
       this.scene.add(hand)
 
-      // Pinch point fallback (invisible target)
       const pinchPoint = new THREE.Object3D()
       pinchPoint.name = `PinchPoint_${i}`
       hand.add(pinchPoint)
 
-      this.hands.push({
-        hand,
-        pinchPoint,
-        isPinching: false,
-      })
+      this.hands.push({ hand, pinchPoint, isPinching: false })
     }
   }
 
@@ -174,6 +160,13 @@ export class InteractionSystem {
     dot.position.z = -5
 
     return { line, hitDot: dot }
+  }
+
+  // ✅ DETECCIÓN REAL: hand tracking activo usando XRSession
+  isHandTrackingActive() {
+    const session = this.renderer.xr.getSession?.()
+    if (!session) return false
+    return Array.from(session.inputSources || []).some((src) => !!src.hand)
   }
 
   // -------------------------
@@ -199,9 +192,6 @@ export class InteractionSystem {
     }
   }
 
-  // -------------------------
-  // Helpers
-  // -------------------------
   pickInteractableFromHitObject(hitObject) {
     let obj = hitObject
     while (obj && obj.parent) {
@@ -214,7 +204,6 @@ export class InteractionSystem {
     return null
   }
 
-  // Para near interaction, usa el centro del bbox (mejor que getWorldPosition para botones)
   getObjectWorldCenter(obj, out) {
     this._box.setFromObject(obj)
     this._box.getCenter(out)
@@ -222,7 +211,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Controller hover (ray)
+  // Controller hover + rays
   // -------------------------
   computeControllerHover() {
     let best = null
@@ -243,14 +232,13 @@ export class InteractionSystem {
           break
         }
       }
-
       if (best) break
     }
 
     return best
   }
 
-  updateControllerRays(visible = true) {
+  updateControllerRays(visible) {
     for (const r of this.controllerRays) {
       r.line.visible = visible
       r.hitDot.visible = visible
@@ -273,77 +261,21 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Hand near hover + pinch detection
+  // Hands near hover + pinch detection
   // -------------------------
-  handsAreActive() {
-    // Si ya existen joints, consideramos hand-tracking activo
-    for (const h of this.hands) {
-      if (h.hand?.joints && h.hand.joints["index-finger-tip"] && h.hand.joints["thumb-tip"]) return true
-    }
-    return false
-  }
-
-  getHandWorldPoint(handEntry) {
-    const hand = handEntry.hand
-    const joint = hand.joints?.["index-finger-tip"]
-    if (joint) {
-      joint.getWorldPosition(this._tmpA)
-      return this._tmpA
-    }
-    handEntry.pinchPoint.getWorldPosition(this._tmpA)
-    return this._tmpA
-  }
-
-  findNearestInteractable(worldPoint, maxDist) {
-    let best = null
-    let bestD2 = maxDist * maxDist
-
-    for (const obj of this.interactables) {
-      if (!obj || obj.userData?.isSurface) continue
-
-      this.getObjectWorldCenter(obj, this._tmpB)
-      const d2 = this._tmpB.distanceToSquared(worldPoint)
-      if (d2 < bestD2) {
-        bestD2 = d2
-        best = obj
-      }
-    }
-
-    return best
-  }
-
-  computeHandHover() {
-    if (!this.nearEnabled) return null
-    if (this.selected && this.selectedBy === "controller") return null
-
-    let best = null
-    let bestD2 = this.nearRadius * this.nearRadius
-
-    for (const h of this.hands) {
-      const p = this.getHandWorldPoint(h)
-      const nearest = this.findNearestInteractable(p, this.nearRadius)
-      if (!nearest) continue
-
-      this.getObjectWorldCenter(nearest, this._tmpB)
-      const d2 = this._tmpB.distanceToSquared(p)
-      if (d2 < bestD2) {
-        bestD2 = d2
-        best = nearest
-      }
-    }
-
-    return best
+  getHandIndexTipWorld(handEntry, out) {
+    const joint = handEntry.hand.joints?.["index-finger-tip"]
+    if (joint) return joint.getWorldPosition(out)
+    return handEntry.pinchPoint.getWorldPosition(out)
   }
 
   updateHandPinchState() {
     for (const h of this.hands) {
-      const hand = h.hand
-      const index = hand.joints?.["index-finger-tip"]
-      const thumb = hand.joints?.["thumb-tip"]
+      const index = h.hand.joints?.["index-finger-tip"]
+      const thumb = h.hand.joints?.["thumb-tip"]
 
-      // Si no hay joints, no podemos detectar pinch
+      // Si no hay joints, no pinch
       if (!index || !thumb) {
-        // Si estaba pinching y perdió tracking, suelta
         if (h.isPinching) {
           h.isPinching = false
           this.onHandPinchEnd()
@@ -365,6 +297,31 @@ export class InteractionSystem {
     }
   }
 
+  computeHandHover() {
+    if (!this.nearEnabled) return null
+    if (this.selected && this.selectedBy === "controller") return null
+
+    let best = null
+    let bestD2 = this.nearRadius * this.nearRadius
+
+    for (const h of this.hands) {
+      this.getHandIndexTipWorld(h, this._tmpA)
+
+      for (const obj of this.interactables) {
+        if (!obj || obj.userData?.isSurface) continue
+
+        this.getObjectWorldCenter(obj, this._tmpCenter)
+        const d2 = this._tmpCenter.distanceToSquared(this._tmpA)
+        if (d2 < bestD2) {
+          bestD2 = d2
+          best = obj
+        }
+      }
+    }
+
+    return best
+  }
+
   // -------------------------
   // Controller select (ray)
   // -------------------------
@@ -379,12 +336,11 @@ export class InteractionSystem {
       return
     }
 
-    // Grab only components
+    // Grab components only
     if (!this.hovered.userData?.componentId) return
 
     this.selected = this.hovered
     this.selectedBy = "controller"
-    this.activeController = controller
     controller.attach(this.selected)
   }
 
@@ -398,21 +354,19 @@ export class InteractionSystem {
 
     this.selected = null
     this.selectedBy = null
-    this.activeController = null
   }
 
   // -------------------------
-  // Hand pinch
+  // Hand pinch (near)
   // -------------------------
   onHandPinchStart(handEntry) {
-    // Si ya hay selección, no iniciar otra
     if (this.selected) return
 
-    // Si por cualquier cosa hovered no está, recalcula con esta mano
+    // target: hovered o nearest
     let target = this.hovered
     if (!target) {
-      const p = this.getHandWorldPoint(handEntry)
-      target = this.findNearestInteractable(p, this.nearRadius)
+      this.getHandIndexTipWorld(handEntry, this._tmpA)
+      target = this.computeHandHover()
       if (target) this.setHover(target)
     }
     if (!target) return
@@ -424,14 +378,12 @@ export class InteractionSystem {
       return
     }
 
-    // Grab only components
+    // Grab components only
     if (!target.userData?.componentId) return
 
     this.selected = target
     this.selectedBy = "hand"
-    this.activeHand = handEntry
 
-    // Attach al joint del índice (más natural)
     const joint = handEntry.hand.joints?.["index-finger-tip"]
     if (joint) joint.attach(this.selected)
     else handEntry.pinchPoint.attach(this.selected)
@@ -447,12 +399,12 @@ export class InteractionSystem {
 
     this.selected = null
     this.selectedBy = null
-    this.activeHand = null
   }
 
   persistSelectedTransform() {
     const id = this.selected?.userData?.componentId
     if (!id) return
+
     const p = this.selected.position
     const q = this.selected.quaternion
     this.appState.updateComponent(id, {
@@ -461,7 +413,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // PC Mouse (igual)
+  // Mouse (PC)
   // -------------------------
   updateMouseNDC(event) {
     const rect = this.renderer.domElement.getBoundingClientRect()
@@ -474,7 +426,6 @@ export class InteractionSystem {
     this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
     const hits = this.mouseRaycaster.intersectObjects(this.interactables, true)
     if (hits.length === 0) return null
-
     for (const h of hits) {
       const picked = this.pickInteractableFromHitObject(h.object)
       if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) return picked
@@ -485,17 +436,7 @@ export class InteractionSystem {
   onMouseMove(event) {
     if (this.renderer.xr.isPresenting) return
     if (!this.mouseEnabled) return
-
     this.updateMouseNDC(event)
-
-    if (this.selected && this.selectedBy === "mouse") {
-      this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
-      if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
-        this.selected.position.copy(this.dragHit).add(this.dragOffset)
-      }
-      return
-    }
-
     const hovered = this.pickWithMouse()
     this.setHover(hovered)
   }
@@ -513,37 +454,12 @@ export class InteractionSystem {
       obj.userData.onPress()
       return
     }
-
-    if (!obj.userData?.componentId) return
-
-    this.selected = obj
-    this.selectedBy = "mouse"
-
-    this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
-
-    this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
-    if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
-      this.dragOffset.copy(this.selected.position).sub(this.dragHit)
-    } else {
-      this.dragOffset.set(0, 0, 0)
-    }
   }
 
-  onMouseUp() {
-    if (this.renderer.xr.isPresenting) return
-    if (!this.mouseEnabled) return
-    if (!this.selected) return
-    if (this.selectedBy !== "mouse") return
-
-    this.snapToSurface(this.selected)
-    this.persistSelectedTransform()
-
-    this.selected = null
-    this.selectedBy = null
-  }
+  onMouseUp() {}
 
   // -------------------------
-  // Snap logic (surfaces + holes)
+  // Snap logic
   // -------------------------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
@@ -559,27 +475,13 @@ export class InteractionSystem {
     const best = this.pickBestSurfaceHit(hits)
     if (!best) return
 
-    this._box.setFromObject(object)
-    this._box.getSize(this._size)
+    const bbox = new THREE.Box3().setFromObject(object)
+    const size = new THREE.Vector3()
+    bbox.getSize(size)
 
-    object.position.y = best.point.y + this._size.y / 2
+    object.position.y = best.point.y + size.y / 2
 
-    const surf = best.surface
-    if (surf?.type === "table" && surf.bounds) {
-      const halfX = this._size.x / 2
-      const halfZ = this._size.z / 2
-      const minX = surf.bounds.minX + halfX
-      const maxX = surf.bounds.maxX - halfX
-      const minZ = surf.bounds.minZ + halfZ
-      const maxZ = surf.bounds.maxZ - halfZ
-
-      object.position.x = THREE.MathUtils.clamp(object.position.x, minX, maxX)
-      object.position.z = THREE.MathUtils.clamp(object.position.z, minZ, maxZ)
-    }
-
-    if (this.holeSystem) {
-      this.holeSystem.trySnapObject(object, 0.03)
-    }
+    if (this.holeSystem) this.holeSystem.trySnapObject(object, 0.03)
   }
 
   pickBestSurfaceHit(hits) {
@@ -599,26 +501,18 @@ export class InteractionSystem {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "protoboard") return { ...h, surface: surf }
     }
-
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
-      if (!surf || surf.type !== "table" || !surf.bounds) continue
-      const { minX, maxX, minZ, maxZ } = surf.bounds
-      const x = h.point.x
-      const z = h.point.z
-      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) return { ...h, surface: surf }
+      if (surf?.type === "table") return { ...h, surface: surf }
     }
-
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "floor") return { ...h, surface: surf }
     }
-
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
     }
-
     return null
   }
 
@@ -628,24 +522,19 @@ export class InteractionSystem {
   update() {
     if (!this.renderer.xr.isPresenting) return
 
-    const handsActive = this.handsAreActive()
+    const handsActive = this.isHandTrackingActive()
 
-    // ✅ Si manos están activas: ocultar rayos de controladores
-    // Si NO: mostrar rayos (modo controladores)
+    // ✅ rayos SOLO con controladores
     this.updateControllerRays(!handsActive)
 
-    // ✅ Detectar pinch con joints (robusto)
-    this.updateHandPinchState()
+    // pinch detection solo si handsActive
+    if (handsActive) this.updateHandPinchState()
 
-    // Si estamos agarrando algo, no cambiar hover
+    // no cambiar hover si ya agarraste algo
     if (this.selected) return
 
-    // Preferencia de hover:
-    // - manos (near) si hay handsActive
-    // - si no, controller ray hover
-    const handHover = handsActive ? this.computeHandHover() : null
-    const controllerHover = !handsActive ? this.computeControllerHover() : null
-
-    this.setHover(handHover || controllerHover)
+    // ✅ hover: manos si handsActive, si no controllers
+    const hovered = handsActive ? this.computeHandHover() : this.computeControllerHover()
+    this.setHover(hovered)
   }
 }
