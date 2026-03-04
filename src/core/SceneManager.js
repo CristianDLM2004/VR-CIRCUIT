@@ -19,7 +19,7 @@ export class SceneManager {
       powerPreference: "high-performance",
     })
 
-    // ✅ En Quest, pixelRatio alto + XR puede causar glitches; lo controlamos en sessionstart
+    // En modo NO-XR: tamaño normal
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.setSize(window.innerWidth, window.innerHeight, false)
     this.renderer.xr.enabled = true
@@ -28,10 +28,10 @@ export class SceneManager {
     if (!app) throw new Error("No existe <div id='app'></div> en index.html")
     app.appendChild(this.renderer.domElement)
 
-    // ✅ Importante: NO resizes mientras XR está presentando
+    // Importante: NO resizes mientras XR está presentando
     window.addEventListener("resize", this.onResize.bind(this))
 
-    // ✅ Hooks XR para evitar “un solo ojo”
+    // Hooks XR para evitar “un solo ojo”
     this.renderer.xr.addEventListener("sessionstart", () => {
       // En XR, mejor pixelRatio estable
       this.renderer.setPixelRatio(1)
@@ -39,8 +39,8 @@ export class SceneManager {
       // Ayuda a estabilizar el framebuffer en Quest
       this.renderer.xr.setFramebufferScaleFactor(1.0)
 
-      // Reafirma tamaño sin tocar style
-      this.renderer.setSize(window.innerWidth, window.innerHeight, false)
+      // ❌ NO llamar setSize aquí: WebXR controla el framebuffer durante la sesión
+      // this.renderer.setSize(window.innerWidth, window.innerHeight, false)
     })
 
     this.renderer.xr.addEventListener("sessionend", () => {
@@ -51,7 +51,7 @@ export class SceneManager {
   }
 
   onResize() {
-    // ✅ Si estás en VR, NO toques size/aspect; puede romper el stereo
+    // Si estás en VR, NO toques size/aspect; puede romper el stereo
     if (this.renderer.xr.isPresenting) return
 
     this.camera.aspect = window.innerWidth / window.innerHeight
