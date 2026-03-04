@@ -63,17 +63,15 @@ interactionSystem.registerSurface(table, {
 // ---------------------------
 // ✅ Protoboard placeholder + HoleSystem
 // ---------------------------
-const tableTopY = table.position.y + 0.05 // mesa (0.1 alto) => top aprox
+const tableTopY = table.position.y + 0.05
 const { group: protoboard, surfaceMesh: protoSurface, layout } = createProtoboard({
   position: new THREE.Vector3(table.position.x, tableTopY + 0.03, table.position.z),
 })
 
 scene.add(protoboard)
 
-// Registrar como surface (idealmente prioritaria dentro de InteractionSystem)
 interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 
-// HoleSystem (snapeo a holes)
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
@@ -81,7 +79,6 @@ interactionSystem.setHoleSystem(holeSystem)
 // UI overlay (Add Cube)
 // ---------------------------
 function genId(prefix = "cmp") {
-  // Preferir UUID para evitar colisiones (Quest Browser soporta crypto normalmente)
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 }
@@ -89,7 +86,6 @@ function genId(prefix = "cmp") {
 function addCube() {
   const id = genId("cube")
 
-  // spawn cerca del protoboard (centro)
   const p = protoboard.position.clone()
   p.y += 0.15
 
@@ -133,5 +129,6 @@ stateSyncSystem.rebuildFromState()
 // ---------------------------
 renderer.setAnimationLoop(() => {
   interactionSystem.update()
-  renderer.render(scene, camera)
+  // ✅ Render a través del SceneManager para aplicar el fix por frame
+  sceneManager.render()
 })
