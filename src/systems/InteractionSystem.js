@@ -11,21 +11,31 @@ export class InteractionSystem {
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
 
-    // Raycasters SIN layers (más estable en Quest)
+    // Raycasters (sin layers)
     this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
 
     this.controllers = []
+    this.hands = [] // { hand, pinchPoint }
     this.interactables = []
     this.surfaces = []
     this.holeSystem = null
 
     this.hovered = null
     this.selected = null
+    this.selectedBy = null // "controller" | "hand"
+    this.activeController = null
+    this.activeHand = null
 
-    // Visual aids (rays)
+    // Visual rays SOLO para controladores
     this.controllerRays = [] // { controller, line, hitDot }
+
+    // Near interaction settings (hands)
+    this.nearEnabled = true
+    this.nearRadius = 0.06 // 6 cm
+    this._tmpV = new THREE.Vector3()
+    this._tmpW = new THREE.Vector3()
 
     // -------------------------
     // PC Mouse controls
@@ -46,7 +56,7 @@ export class InteractionSystem {
     window.addEventListener("pointerdown", this._onMouseDown)
     window.addEventListener("pointerup", this._onMouseUp)
 
-    this.initControllers()
+    this.initXRInputs()
   }
 
   dispose() {
@@ -65,9 +75,7 @@ export class InteractionSystem {
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
-
     mesh.userData.interactable = true
-
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
   }
 
@@ -96,37 +104,54 @@ export class InteractionSystem {
       existing.bounds = bounds
       return
     }
-
     this.surfaces.push({ mesh, type, bounds })
   }
 
   // -------------------------
-  // XR Controllers + Hands + Rays
+  // XR Inputs: controllers + hands
   // -------------------------
-  initControllers() {
+  initXRInputs() {
     const controllerModelFactory = new XRControllerModelFactory()
     const handModelFactory = new XRHandModelFactory()
 
     for (let i = 0; i < 2; i++) {
+      // ---- Controllers ----
       const controller = this.renderer.xr.getController(i)
-      controller.addEventListener("selectstart", (e) => this.onSelectStart(e))
-      controller.addEventListener("selectend", () => this.onSelectEnd())
+      controller.addEventListener("selectstart", (e) => this.onControllerSelectStart(e))
+      controller.addEventListener("selectend", () => this.onControllerSelectEnd())
       this.scene.add(controller)
 
       const controllerGrip = this.renderer.xr.getControllerGrip(i)
       controllerGrip.add(controllerModelFactory.createControllerModel(controllerGrip))
       this.scene.add(controllerGrip)
 
-      const hand = this.renderer.xr.getHand(i)
-      hand.add(handModelFactory.createHandModel(hand, "mesh"))
-      this.scene.add(hand)
-
+      // Ray visual solo en controller
       const { line, hitDot } = this.createControllerRay()
       controller.add(line)
       controller.add(hitDot)
       this.controllerRays.push({ controller, line, hitDot })
 
       this.controllers.push(controller)
+
+      // ---- Hands ----
+      const hand = this.renderer.xr.getHand(i)
+      hand.add(handModelFactory.createHandModel(hand, "mesh"))
+      this.scene.add(hand)
+
+      // Pinch point (un pequeño target invisible que sigue el índice)
+      const pinchPoint = new THREE.Object3D()
+      pinchPoint.name = `PinchPoint_${i}`
+      hand.add(pinchPoint)
+
+      // Eventos de pinch (Quest suele soportarlos)
+      hand.addEventListener("pinchstart", (e) => this.onHandPinchStart(e))
+      hand.addEventListener("pinchend", () => this.onHandPinchEnd())
+
+      // Fallback: algunos runtimes disparan selectstart en hand
+      hand.addEventListener("selectstart", (e) => this.onHandPinchStart(e))
+      hand.addEventListener("selectend", () => this.onHandPinchEnd())
+
+      this.hands.push({ hand, pinchPoint })
     }
   }
 
@@ -172,7 +197,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Picking helper (XR/mouse)
+  // Picking helper
   // -------------------------
   pickInteractableFromHitObject(hitObject) {
     let obj = hitObject
@@ -187,7 +212,214 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Mouse helpers
+  // Controller-based (ray) hover
+  // -------------------------
+  computeControllerHover() {
+    let best = null
+
+    for (const controller of this.controllers) {
+      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+
+      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+      const hits = this.raycaster.intersectObjects(this.interactables, true)
+      if (hits.length === 0) continue
+
+      for (const h of hits) {
+        const picked = this.pickInteractableFromHitObject(h.object)
+        if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) {
+          best = picked
+          break
+        }
+      }
+
+      if (best) break
+    }
+
+    return best
+  }
+
+  // Visual rays only for controllers
+  updateControllerRays() {
+    for (const r of this.controllerRays) {
+      const controller = r.controller
+      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+
+      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+      const hits = this.raycaster.intersectObjects(this.interactables, true)
+
+      let dist = 5
+      if (hits.length > 0) dist = Math.min(5, Math.max(0.05, hits[0].distance))
+
+      r.line.visible = true
+      r.hitDot.visible = true
+      r.line.scale.z = dist
+      r.hitDot.position.z = -dist
+    }
+  }
+
+  // -------------------------
+  // Hand-based (near) hover
+  // -------------------------
+  getHandWorldPoint(handEntry) {
+    // Intento 1: si existe el joint index-finger-tip, úsalo
+    const hand = handEntry.hand
+    const joint = hand.joints?.["index-finger-tip"]
+    if (joint) {
+      joint.getWorldPosition(this._tmpW)
+      return this._tmpW
+    }
+
+    // Intento 2: fallback al pinchPoint
+    handEntry.pinchPoint.getWorldPosition(this._tmpW)
+    return this._tmpW
+  }
+
+  findNearestInteractable(worldPoint, maxDist = 0.06) {
+    let best = null
+    let bestD2 = maxDist * maxDist
+
+    // buscamos el objeto “raíz” interactuable (botón o mesh con componentId)
+    for (const obj of this.interactables) {
+      if (!obj) continue
+      if (obj.userData?.isSurface) continue
+
+      obj.getWorldPosition(this._tmpV)
+      const d2 = this._tmpV.distanceToSquared(worldPoint)
+
+      if (d2 < bestD2) {
+        bestD2 = d2
+        best = obj
+      }
+    }
+
+    return best
+  }
+
+  computeHandHover() {
+    if (!this.nearEnabled) return null
+
+    // Si ya estamos agarrando con controller, no estorbar
+    if (this.selected && this.selectedBy === "controller") return null
+
+    // Revisa ambas manos y toma el nearest global
+    let best = null
+    let bestD2 = this.nearRadius * this.nearRadius
+
+    for (const h of this.hands) {
+      const p = this.getHandWorldPoint(h)
+      const nearest = this.findNearestInteractable(p, this.nearRadius)
+      if (!nearest) continue
+
+      nearest.getWorldPosition(this._tmpV)
+      const d2 = this._tmpV.distanceToSquared(p)
+      if (d2 < bestD2) {
+        bestD2 = d2
+        best = nearest
+      }
+    }
+
+    return best
+  }
+
+  // -------------------------
+  // Controller select
+  // -------------------------
+  onControllerSelectStart(event) {
+    const controller = event.target
+    if (!this.hovered) return
+    if (this.hovered.userData?.isSurface) return
+
+    // UI press
+    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
+      this.hovered.userData.onPress()
+      return
+    }
+
+    // Grab only components
+    if (!this.hovered.userData?.componentId) return
+
+    this.selected = this.hovered
+    this.selectedBy = "controller"
+    this.activeController = controller
+    controller.attach(this.selected)
+  }
+
+  onControllerSelectEnd() {
+    if (!this.selected) return
+    if (this.selectedBy !== "controller") return
+
+    this.scene.attach(this.selected)
+    this.snapToSurface(this.selected)
+    this.persistSelectedTransform()
+
+    this.selected = null
+    this.selectedBy = null
+    this.activeController = null
+  }
+
+  // -------------------------
+  // Hand pinch
+  // -------------------------
+  onHandPinchStart(event) {
+    const hand = event.target
+
+    // Si ya hay selección, no iniciar otra
+    if (this.selected) return
+    if (!this.hovered) return
+    if (this.hovered.userData?.isSurface) return
+
+    // UI press
+    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
+      this.hovered.userData.onPress()
+      return
+    }
+
+    // Grab only components
+    if (!this.hovered.userData?.componentId) return
+
+    // Encontrar entry de mano
+    const handEntry = this.hands.find((h) => h.hand === hand)
+    if (!handEntry) return
+
+    this.selected = this.hovered
+    this.selectedBy = "hand"
+    this.activeHand = handEntry
+
+    // Attach al joint index-finger-tip si existe; si no, al pinchPoint
+    const joint = hand.joints?.["index-finger-tip"]
+    if (joint) joint.attach(this.selected)
+    else handEntry.pinchPoint.attach(this.selected)
+  }
+
+  onHandPinchEnd() {
+    if (!this.selected) return
+    if (this.selectedBy !== "hand") return
+
+    this.scene.attach(this.selected)
+    this.snapToSurface(this.selected)
+    this.persistSelectedTransform()
+
+    this.selected = null
+    this.selectedBy = null
+    this.activeHand = null
+  }
+
+  persistSelectedTransform() {
+    const id = this.selected?.userData?.componentId
+    if (!id) return
+    const p = this.selected.position
+    const q = this.selected.quaternion
+    this.appState.updateComponent(id, {
+      transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
+    })
+  }
+
+  // -------------------------
+  // PC Mouse (igual que antes)
   // -------------------------
   updateMouseNDC(event) {
     const rect = this.renderer.domElement.getBoundingClientRect()
@@ -235,16 +467,17 @@ export class InteractionSystem {
     const obj = this.pickWithMouse()
     if (!obj) return
 
-    // ✅ Click UI en PC
+    // click UI
     if (obj.userData?.isUI && typeof obj.userData?.onPress === "function") {
       obj.userData.onPress()
       return
     }
 
-    // Drag normal (solo componentes)
     if (!obj.userData?.componentId) return
 
     this.selected = obj
+    this.selectedBy = "mouse"
+
     this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
 
     this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
@@ -259,19 +492,13 @@ export class InteractionSystem {
     if (this.renderer.xr.isPresenting) return
     if (!this.mouseEnabled) return
     if (!this.selected) return
+    if (this.selectedBy !== "mouse") return
 
     this.snapToSurface(this.selected)
-
-    const id = this.selected.userData?.componentId
-    if (id) {
-      const p = this.selected.position
-      const q = this.selected.quaternion
-      this.appState.updateComponent(id, {
-        transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
-      })
-    }
+    this.persistSelectedTransform()
 
     this.selected = null
+    this.selectedBy = null
   }
 
   // -------------------------
@@ -356,92 +583,23 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // XR select handlers
+  // Update loop
   // -------------------------
-  onSelectStart(event) {
-    const controller = event.target
-    if (!this.hovered) return
-    if (this.hovered.userData?.isSurface) return
-
-    // ✅ UI press
-    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
-      this.hovered.userData.onPress()
-      return
-    }
-
-    // ✅ Grab normal (solo componentes)
-    if (!this.hovered.userData?.componentId) return
-    if (!this.interactables.includes(this.hovered)) return
-
-    this.selected = this.hovered
-    controller.attach(this.selected)
-  }
-
-  onSelectEnd() {
-    if (!this.selected) return
-
-    this.scene.attach(this.selected)
-    this.snapToSurface(this.selected)
-
-    const id = this.selected.userData?.componentId
-    if (id) {
-      const p = this.selected.position
-      const q = this.selected.quaternion
-      this.appState.updateComponent(id, {
-        transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
-      })
-    }
-
-    this.selected = null
-  }
-
   update() {
     if (!this.renderer.xr.isPresenting) return
 
+    // Rays solo controller
     this.updateControllerRays()
+
+    // Si estamos agarrando algo, no cambiar hover
     if (this.selected) return
 
-    let best = null
+    // Preferencia:
+    // - Si hay manos activas cerca, usa near hover
+    // - Si no, usa controller ray hover
+    const handHover = this.computeHandHover()
+    const controllerHover = this.computeControllerHover()
 
-    for (const controller of this.controllers) {
-      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
-
-      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
-      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
-
-      const hits = this.raycaster.intersectObjects(this.interactables, true)
-      if (hits.length === 0) continue
-
-      for (const h of hits) {
-        const picked = this.pickInteractableFromHitObject(h.object)
-        if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) {
-          best = picked
-          break
-        }
-      }
-
-      if (best) break
-    }
-
-    this.setHover(best)
-  }
-
-  updateControllerRays() {
-    for (const r of this.controllerRays) {
-      const controller = r.controller
-      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
-
-      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
-      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
-
-      const hits = this.raycaster.intersectObjects(this.interactables, true)
-
-      let dist = 5
-      if (hits.length > 0) dist = Math.min(5, Math.max(0.05, hits[0].distance))
-
-      r.line.scale.z = dist
-      r.hitDot.position.z = -dist
-      r.hitDot.visible = true
-    }
+    this.setHover(handHover || controllerHover)
   }
 }
