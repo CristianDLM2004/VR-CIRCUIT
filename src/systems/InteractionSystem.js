@@ -52,7 +52,6 @@ export class InteractionSystem {
     this.initControllers()
   }
 
-  // Limpieza opcional si algún día destruyes el sistema
   dispose() {
     window.removeEventListener("pointermove", this._onMouseMove)
     window.removeEventListener("pointerdown", this._onMouseDown)
@@ -71,7 +70,9 @@ export class InteractionSystem {
     if (mesh.userData?.isSurface) return
 
     mesh.userData.interactable = true
-    mesh.layers.disableAll()
+
+    // ✅ Layers SOLO para raycast: conservar layer 0 para render.
+    // No usar disableAll (evita render distinto por ojo en XR).
     mesh.layers.enable(1)
 
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
@@ -94,7 +95,7 @@ export class InteractionSystem {
     mesh.userData.interactable = false
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
 
-    mesh.layers.disableAll()
+    // ✅ Layer 2 para snap raycast, pero conservar layer 0 para render.
     mesh.layers.enable(2)
 
     this.unregister(mesh)
@@ -156,7 +157,6 @@ export class InteractionSystem {
   // Mouse helpers
   // -------------------------
   updateMouseNDC(event) {
-    // Usa el canvas del renderer para normalizar bien
     const rect = this.renderer.domElement.getBoundingClientRect()
     const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     const y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
@@ -179,23 +179,19 @@ export class InteractionSystem {
   }
 
   onMouseMove(event) {
-    // No mover hover/drag si estamos en VR
     if (this.renderer.xr.isPresenting) return
     if (!this.mouseEnabled) return
 
     this.updateMouseNDC(event)
 
-    // Si estamos arrastrando, mover el objeto en XZ usando un plano
     if (this.selected) {
       this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
       if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
-        // posición = hit + offset
         this.selected.position.copy(this.dragHit).add(this.dragOffset)
       }
       return
     }
 
-    // Hover normal
     const hovered = this.pickWithMouse()
     this.setHover(hovered)
   }
@@ -203,7 +199,7 @@ export class InteractionSystem {
   onMouseDown(event) {
     if (this.renderer.xr.isPresenting) return
     if (!this.mouseEnabled) return
-    if (event.button !== 0) return // solo click izquierdo
+    if (event.button !== 0) return
 
     this.updateMouseNDC(event)
 
@@ -212,10 +208,8 @@ export class InteractionSystem {
 
     this.selected = obj
 
-    // Preparar plano a la altura actual del objeto
     this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
 
-    // Calcular offset para que no “salte” al centro del rayo
     this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
     if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
       this.dragOffset.copy(this.selected.position).sub(this.dragHit)
@@ -229,7 +223,6 @@ export class InteractionSystem {
     if (!this.mouseEnabled) return
     if (!this.selected) return
 
-    // Al soltar: snap + guardar transform
     this.snapToSurface(this.selected)
 
     const id = this.selected.userData?.componentId
@@ -265,10 +258,8 @@ export class InteractionSystem {
     const size = new THREE.Vector3()
     bbox.getSize(size)
 
-    // altura
     object.position.y = best.point.y + size.y / 2
 
-    // clamp mesa
     const surf = best.surface
     if (surf?.type === "table" && surf.bounds) {
       const halfX = size.x / 2
@@ -282,7 +273,6 @@ export class InteractionSystem {
       object.position.z = THREE.MathUtils.clamp(object.position.z, minZ, maxZ)
     }
 
-    // holes (solo XZ)
     if (this.holeSystem) {
       this.holeSystem.trySnapObject(object, 0.03)
     }
@@ -301,13 +291,11 @@ export class InteractionSystem {
       return null
     }
 
-    // protoboard primero
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "protoboard") return { ...h, surface: surf }
     }
 
-    // mesa con bounds
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (!surf || surf.type !== "table" || !surf.bounds) continue
@@ -318,13 +306,11 @@ export class InteractionSystem {
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) return { ...h, surface: surf }
     }
 
-    // piso
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "floor") return { ...h, surface: surf }
     }
 
-    // fallback
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
@@ -369,7 +355,6 @@ export class InteractionSystem {
   // Update hover (XR or mouse)
   // -------------------------
   update() {
-    // En PC, hover ya se calcula en mousemove. Aquí solo calculamos hover XR.
     if (!this.renderer.xr.isPresenting) return
     if (this.selected) return
 

@@ -25,8 +25,8 @@ export class ComponentFactory {
     mesh.userData.interactable = true
     mesh.userData.isSurface = false
 
-    // ✅ BLINDAJE: limpiar layers y dejar SOLO Layer 1
-    mesh.layers.disableAll()
+    // ✅ Layers SOLO para raycast: conservar layer 0 para render.
+    // (No usar disableAll)
     mesh.layers.enable(1)
 
     return mesh
