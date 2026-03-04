@@ -11,7 +11,7 @@ export class InteractionSystem {
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
 
-    // ✅ Raycasters SIN layers (evita render desincronizado por ojo)
+    // Raycasters SIN layers (más estable en Quest)
     this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
@@ -172,6 +172,21 @@ export class InteractionSystem {
   }
 
   // -------------------------
+  // Picking helper (XR/mouse)
+  // -------------------------
+  pickInteractableFromHitObject(hitObject) {
+    let obj = hitObject
+    while (obj && obj.parent) {
+      if (obj.userData?.isUI) return obj
+      if (obj.userData?.componentId) return obj
+      obj = obj.parent
+    }
+    if (hitObject?.userData?.isUI) return hitObject
+    if (hitObject?.userData?.componentId) return hitObject
+    return null
+  }
+
+  // -------------------------
   // Mouse helpers
   // -------------------------
   updateMouseNDC(event) {
@@ -187,11 +202,8 @@ export class InteractionSystem {
     if (hits.length === 0) return null
 
     for (const h of hits) {
-      let obj = h.object
-      while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
-      if (obj?.userData?.componentId && this.interactables.includes(obj) && !obj.userData?.isSurface) {
-        return obj
-      }
+      const picked = this.pickInteractableFromHitObject(h.object)
+      if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) return picked
     }
     return null
   }
@@ -222,6 +234,15 @@ export class InteractionSystem {
     this.updateMouseNDC(event)
     const obj = this.pickWithMouse()
     if (!obj) return
+
+    // ✅ Click UI en PC
+    if (obj.userData?.isUI && typeof obj.userData?.onPress === "function") {
+      obj.userData.onPress()
+      return
+    }
+
+    // Drag normal (solo componentes)
+    if (!obj.userData?.componentId) return
 
     this.selected = obj
     this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
@@ -341,6 +362,14 @@ export class InteractionSystem {
     const controller = event.target
     if (!this.hovered) return
     if (this.hovered.userData?.isSurface) return
+
+    // ✅ UI press
+    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
+      this.hovered.userData.onPress()
+      return
+    }
+
+    // ✅ Grab normal (solo componentes)
     if (!this.hovered.userData?.componentId) return
     if (!this.interactables.includes(this.hovered)) return
 
@@ -384,10 +413,9 @@ export class InteractionSystem {
       if (hits.length === 0) continue
 
       for (const h of hits) {
-        let obj = h.object
-        while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
-        if (obj?.userData?.componentId && this.interactables.includes(obj) && !obj.userData?.isSurface) {
-          best = obj
+        const picked = this.pickInteractableFromHitObject(h.object)
+        if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) {
+          best = picked
           break
         }
       }
