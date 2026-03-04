@@ -11,14 +11,10 @@ export class InteractionSystem {
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
 
-    // XR raycaster (Layer 1)
+    // ✅ Raycasters SIN layers (evita render desincronizado por ojo)
     this.raycaster = new THREE.Raycaster()
-    this.raycaster.layers.set(1)
-    this.tempMatrix = new THREE.Matrix4()
-
-    // Snap raycaster (Layer 2)
     this.downRaycaster = new THREE.Raycaster()
-    this.downRaycaster.layers.set(2)
+    this.tempMatrix = new THREE.Matrix4()
 
     this.controllers = []
     this.interactables = []
@@ -37,7 +33,6 @@ export class InteractionSystem {
     this.mouseEnabled = true
     this.mouseNDC = new THREE.Vector2()
     this.mouseRaycaster = new THREE.Raycaster()
-    this.mouseRaycaster.layers.set(1)
 
     this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
     this.dragHit = new THREE.Vector3()
@@ -73,9 +68,6 @@ export class InteractionSystem {
 
     mesh.userData.interactable = true
 
-    // Layers SOLO para raycast: conservar layer 0 para render.
-    mesh.layers.enable(1)
-
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
   }
 
@@ -95,9 +87,6 @@ export class InteractionSystem {
     mesh.userData.isSurface = true
     mesh.userData.interactable = false
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
-
-    // Layer 2 para snap raycast, conservar layer 0 para render
-    mesh.layers.enable(2)
 
     this.unregister(mesh)
 
@@ -119,24 +108,19 @@ export class InteractionSystem {
     const handModelFactory = new XRHandModelFactory()
 
     for (let i = 0; i < 2; i++) {
-      // Controller (ray origin)
       const controller = this.renderer.xr.getController(i)
       controller.addEventListener("selectstart", (e) => this.onSelectStart(e))
       controller.addEventListener("selectend", () => this.onSelectEnd())
       this.scene.add(controller)
 
-      // Controller model (grip)
       const controllerGrip = this.renderer.xr.getControllerGrip(i)
       controllerGrip.add(controllerModelFactory.createControllerModel(controllerGrip))
       this.scene.add(controllerGrip)
 
-      // Hand tracking (si está disponible en runtime)
       const hand = this.renderer.xr.getHand(i)
-      // Modelos "sencillos" visibles; si no hay hand tracking, no se mostrarán
       hand.add(handModelFactory.createHandModel(hand, "mesh"))
       this.scene.add(hand)
 
-      // Ray visual (laser) desde el controller
       const { line, hitDot } = this.createControllerRay()
       controller.add(line)
       controller.add(hitDot)
@@ -147,25 +131,19 @@ export class InteractionSystem {
   }
 
   createControllerRay() {
-    // Línea de 1m hacia -Z (se escala según hit)
     const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]
     const geo = new THREE.BufferGeometry().setFromPoints(points)
     const mat = new THREE.LineBasicMaterial({ color: 0xffffff })
     const line = new THREE.Line(geo, mat)
     line.name = "ControllerRay"
-    line.scale.z = 5 // default 5m
+    line.scale.z = 5
 
-    // Punto al final del rayo
     const dot = new THREE.Mesh(
       new THREE.SphereGeometry(0.01, 12, 12),
       new THREE.MeshBasicMaterial({ color: 0xffffff })
     )
     dot.name = "ControllerRayDot"
     dot.position.z = -5
-
-    // Render en layer 0 (por seguridad)
-    line.layers.enable(0)
-    dot.layers.enable(0)
 
     return { line, hitDot: dot }
   }
@@ -242,12 +220,10 @@ export class InteractionSystem {
     if (event.button !== 0) return
 
     this.updateMouseNDC(event)
-
     const obj = this.pickWithMouse()
     if (!obj) return
 
     this.selected = obj
-
     this.dragPlane.set(new THREE.Vector3(0, 1, 0), -this.selected.position.y)
 
     this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
@@ -339,7 +315,6 @@ export class InteractionSystem {
     for (const h of hits) {
       const surf = getSurfaceEntry(h.object)
       if (!surf || surf.type !== "table" || !surf.bounds) continue
-
       const { minX, maxX, minZ, maxZ } = surf.bounds
       const x = h.point.x
       const z = h.point.z
@@ -391,15 +366,10 @@ export class InteractionSystem {
     this.selected = null
   }
 
-  // -------------------------
-  // Update hover (XR or mouse) + update rays
-  // -------------------------
   update() {
     if (!this.renderer.xr.isPresenting) return
 
-    // Actualiza ray visuals siempre en VR
     this.updateControllerRays()
-
     if (this.selected) return
 
     let best = null
@@ -416,7 +386,6 @@ export class InteractionSystem {
       for (const h of hits) {
         let obj = h.object
         while (obj && obj.parent && !obj.userData?.componentId) obj = obj.parent
-
         if (obj?.userData?.componentId && this.interactables.includes(obj) && !obj.userData?.isSurface) {
           best = obj
           break
@@ -430,7 +399,6 @@ export class InteractionSystem {
   }
 
   updateControllerRays() {
-    // Ajusta longitud del rayo según el primer hit (si hay)
     for (const r of this.controllerRays) {
       const controller = r.controller
       this.tempMatrix.identity().extractRotation(controller.matrixWorld)

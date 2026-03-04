@@ -25,10 +25,7 @@ export class ComponentFactory {
     mesh.userData.interactable = true
     mesh.userData.isSurface = false
 
-    // ✅ Layers SOLO para raycast: conservar layer 0 para render.
-    // (No usar disableAll)
-    mesh.layers.enable(1)
-
+    // ✅ NO layers: evitar bug de render por ojo en XR
     return mesh
   }
 }
