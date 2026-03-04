@@ -17,14 +17,14 @@ export class InteractionSystem {
     this.tempMatrix = new THREE.Matrix4()
 
     this.controllers = []
-    this.hands = [] // { hand, pinchPoint }
+    this.hands = [] // { hand, pinchPoint, isPinching, lastPinchT, handedness? }
     this.interactables = []
     this.surfaces = []
     this.holeSystem = null
 
     this.hovered = null
     this.selected = null
-    this.selectedBy = null // "controller" | "hand"
+    this.selectedBy = null // "controller" | "hand" | "mouse"
     this.activeController = null
     this.activeHand = null
 
@@ -33,12 +33,19 @@ export class InteractionSystem {
 
     // Near interaction settings (hands)
     this.nearEnabled = true
-    this.nearRadius = 0.06 // 6 cm
-    this._tmpV = new THREE.Vector3()
-    this._tmpW = new THREE.Vector3()
+    this.nearRadius = 0.075 // 7.5 cm: más permisivo para “picar”/agarrar
+    this._tmpA = new THREE.Vector3()
+    this._tmpB = new THREE.Vector3()
+    this._tmpC = new THREE.Vector3()
+    this._box = new THREE.Box3()
+    this._size = new THREE.Vector3()
+
+    // Pinch detection thresholds
+    this.pinchStartDist = 0.028 // 2.8 cm (entra)
+    this.pinchEndDist = 0.038   // 3.8 cm (sale) -> histéresis
 
     // -------------------------
-    // PC Mouse controls
+    // PC Mouse controls (igual)
     // -------------------------
     this.mouseEnabled = true
     this.mouseNDC = new THREE.Vector2()
@@ -138,20 +145,16 @@ export class InteractionSystem {
       hand.add(handModelFactory.createHandModel(hand, "mesh"))
       this.scene.add(hand)
 
-      // Pinch point (un pequeño target invisible que sigue el índice)
+      // Pinch point fallback (invisible target)
       const pinchPoint = new THREE.Object3D()
       pinchPoint.name = `PinchPoint_${i}`
       hand.add(pinchPoint)
 
-      // Eventos de pinch (Quest suele soportarlos)
-      hand.addEventListener("pinchstart", (e) => this.onHandPinchStart(e))
-      hand.addEventListener("pinchend", () => this.onHandPinchEnd())
-
-      // Fallback: algunos runtimes disparan selectstart en hand
-      hand.addEventListener("selectstart", (e) => this.onHandPinchStart(e))
-      hand.addEventListener("selectend", () => this.onHandPinchEnd())
-
-      this.hands.push({ hand, pinchPoint })
+      this.hands.push({
+        hand,
+        pinchPoint,
+        isPinching: false,
+      })
     }
   }
 
@@ -197,7 +200,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Picking helper
+  // Helpers
   // -------------------------
   pickInteractableFromHitObject(hitObject) {
     let obj = hitObject
@@ -211,8 +214,15 @@ export class InteractionSystem {
     return null
   }
 
+  // Para near interaction, usa el centro del bbox (mejor que getWorldPosition para botones)
+  getObjectWorldCenter(obj, out) {
+    this._box.setFromObject(obj)
+    this._box.getCenter(out)
+    return out
+  }
+
   // -------------------------
-  // Controller-based (ray) hover
+  // Controller hover (ray)
   // -------------------------
   computeControllerHover() {
     let best = null
@@ -240,9 +250,12 @@ export class InteractionSystem {
     return best
   }
 
-  // Visual rays only for controllers
-  updateControllerRays() {
+  updateControllerRays(visible = true) {
     for (const r of this.controllerRays) {
+      r.line.visible = visible
+      r.hitDot.visible = visible
+      if (!visible) continue
+
       const controller = r.controller
       this.tempMatrix.identity().extractRotation(controller.matrixWorld)
 
@@ -254,42 +267,42 @@ export class InteractionSystem {
       let dist = 5
       if (hits.length > 0) dist = Math.min(5, Math.max(0.05, hits[0].distance))
 
-      r.line.visible = true
-      r.hitDot.visible = true
       r.line.scale.z = dist
       r.hitDot.position.z = -dist
     }
   }
 
   // -------------------------
-  // Hand-based (near) hover
+  // Hand near hover + pinch detection
   // -------------------------
+  handsAreActive() {
+    // Si ya existen joints, consideramos hand-tracking activo
+    for (const h of this.hands) {
+      if (h.hand?.joints && h.hand.joints["index-finger-tip"] && h.hand.joints["thumb-tip"]) return true
+    }
+    return false
+  }
+
   getHandWorldPoint(handEntry) {
-    // Intento 1: si existe el joint index-finger-tip, úsalo
     const hand = handEntry.hand
     const joint = hand.joints?.["index-finger-tip"]
     if (joint) {
-      joint.getWorldPosition(this._tmpW)
-      return this._tmpW
+      joint.getWorldPosition(this._tmpA)
+      return this._tmpA
     }
-
-    // Intento 2: fallback al pinchPoint
-    handEntry.pinchPoint.getWorldPosition(this._tmpW)
-    return this._tmpW
+    handEntry.pinchPoint.getWorldPosition(this._tmpA)
+    return this._tmpA
   }
 
-  findNearestInteractable(worldPoint, maxDist = 0.06) {
+  findNearestInteractable(worldPoint, maxDist) {
     let best = null
     let bestD2 = maxDist * maxDist
 
-    // buscamos el objeto “raíz” interactuable (botón o mesh con componentId)
     for (const obj of this.interactables) {
-      if (!obj) continue
-      if (obj.userData?.isSurface) continue
+      if (!obj || obj.userData?.isSurface) continue
 
-      obj.getWorldPosition(this._tmpV)
-      const d2 = this._tmpV.distanceToSquared(worldPoint)
-
+      this.getObjectWorldCenter(obj, this._tmpB)
+      const d2 = this._tmpB.distanceToSquared(worldPoint)
       if (d2 < bestD2) {
         bestD2 = d2
         best = obj
@@ -301,11 +314,8 @@ export class InteractionSystem {
 
   computeHandHover() {
     if (!this.nearEnabled) return null
-
-    // Si ya estamos agarrando con controller, no estorbar
     if (this.selected && this.selectedBy === "controller") return null
 
-    // Revisa ambas manos y toma el nearest global
     let best = null
     let bestD2 = this.nearRadius * this.nearRadius
 
@@ -314,8 +324,8 @@ export class InteractionSystem {
       const nearest = this.findNearestInteractable(p, this.nearRadius)
       if (!nearest) continue
 
-      nearest.getWorldPosition(this._tmpV)
-      const d2 = this._tmpV.distanceToSquared(p)
+      this.getObjectWorldCenter(nearest, this._tmpB)
+      const d2 = this._tmpB.distanceToSquared(p)
       if (d2 < bestD2) {
         bestD2 = d2
         best = nearest
@@ -325,8 +335,38 @@ export class InteractionSystem {
     return best
   }
 
+  updateHandPinchState() {
+    for (const h of this.hands) {
+      const hand = h.hand
+      const index = hand.joints?.["index-finger-tip"]
+      const thumb = hand.joints?.["thumb-tip"]
+
+      // Si no hay joints, no podemos detectar pinch
+      if (!index || !thumb) {
+        // Si estaba pinching y perdió tracking, suelta
+        if (h.isPinching) {
+          h.isPinching = false
+          this.onHandPinchEnd()
+        }
+        continue
+      }
+
+      index.getWorldPosition(this._tmpA)
+      thumb.getWorldPosition(this._tmpB)
+      const dist = this._tmpA.distanceTo(this._tmpB)
+
+      if (!h.isPinching && dist <= this.pinchStartDist) {
+        h.isPinching = true
+        this.onHandPinchStart(h)
+      } else if (h.isPinching && dist >= this.pinchEndDist) {
+        h.isPinching = false
+        this.onHandPinchEnd()
+      }
+    }
+  }
+
   // -------------------------
-  // Controller select
+  // Controller select (ray)
   // -------------------------
   onControllerSelectStart(event) {
     const controller = event.target
@@ -364,33 +404,35 @@ export class InteractionSystem {
   // -------------------------
   // Hand pinch
   // -------------------------
-  onHandPinchStart(event) {
-    const hand = event.target
-
+  onHandPinchStart(handEntry) {
     // Si ya hay selección, no iniciar otra
     if (this.selected) return
-    if (!this.hovered) return
-    if (this.hovered.userData?.isSurface) return
+
+    // Si por cualquier cosa hovered no está, recalcula con esta mano
+    let target = this.hovered
+    if (!target) {
+      const p = this.getHandWorldPoint(handEntry)
+      target = this.findNearestInteractable(p, this.nearRadius)
+      if (target) this.setHover(target)
+    }
+    if (!target) return
+    if (target.userData?.isSurface) return
 
     // UI press
-    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
-      this.hovered.userData.onPress()
+    if (target.userData?.isUI && typeof target.userData?.onPress === "function") {
+      target.userData.onPress()
       return
     }
 
     // Grab only components
-    if (!this.hovered.userData?.componentId) return
+    if (!target.userData?.componentId) return
 
-    // Encontrar entry de mano
-    const handEntry = this.hands.find((h) => h.hand === hand)
-    if (!handEntry) return
-
-    this.selected = this.hovered
+    this.selected = target
     this.selectedBy = "hand"
     this.activeHand = handEntry
 
-    // Attach al joint index-finger-tip si existe; si no, al pinchPoint
-    const joint = hand.joints?.["index-finger-tip"]
+    // Attach al joint del índice (más natural)
+    const joint = handEntry.hand.joints?.["index-finger-tip"]
     if (joint) joint.attach(this.selected)
     else handEntry.pinchPoint.attach(this.selected)
   }
@@ -419,7 +461,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // PC Mouse (igual que antes)
+  // PC Mouse (igual)
   // -------------------------
   updateMouseNDC(event) {
     const rect = this.renderer.domElement.getBoundingClientRect()
@@ -446,7 +488,7 @@ export class InteractionSystem {
 
     this.updateMouseNDC(event)
 
-    if (this.selected) {
+    if (this.selected && this.selectedBy === "mouse") {
       this.mouseRaycaster.setFromCamera(this.mouseNDC, this.camera)
       if (this.mouseRaycaster.ray.intersectPlane(this.dragPlane, this.dragHit)) {
         this.selected.position.copy(this.dragHit).add(this.dragOffset)
@@ -467,7 +509,6 @@ export class InteractionSystem {
     const obj = this.pickWithMouse()
     if (!obj) return
 
-    // click UI
     if (obj.userData?.isUI && typeof obj.userData?.onPress === "function") {
       obj.userData.onPress()
       return
@@ -518,16 +559,15 @@ export class InteractionSystem {
     const best = this.pickBestSurfaceHit(hits)
     if (!best) return
 
-    const bbox = new THREE.Box3().setFromObject(object)
-    const size = new THREE.Vector3()
-    bbox.getSize(size)
+    this._box.setFromObject(object)
+    this._box.getSize(this._size)
 
-    object.position.y = best.point.y + size.y / 2
+    object.position.y = best.point.y + this._size.y / 2
 
     const surf = best.surface
     if (surf?.type === "table" && surf.bounds) {
-      const halfX = size.x / 2
-      const halfZ = size.z / 2
+      const halfX = this._size.x / 2
+      const halfZ = this._size.z / 2
       const minX = surf.bounds.minX + halfX
       const maxX = surf.bounds.maxX - halfX
       const minZ = surf.bounds.minZ + halfZ
@@ -588,17 +628,23 @@ export class InteractionSystem {
   update() {
     if (!this.renderer.xr.isPresenting) return
 
-    // Rays solo controller
-    this.updateControllerRays()
+    const handsActive = this.handsAreActive()
+
+    // ✅ Si manos están activas: ocultar rayos de controladores
+    // Si NO: mostrar rayos (modo controladores)
+    this.updateControllerRays(!handsActive)
+
+    // ✅ Detectar pinch con joints (robusto)
+    this.updateHandPinchState()
 
     // Si estamos agarrando algo, no cambiar hover
     if (this.selected) return
 
-    // Preferencia:
-    // - Si hay manos activas cerca, usa near hover
-    // - Si no, usa controller ray hover
-    const handHover = this.computeHandHover()
-    const controllerHover = this.computeControllerHover()
+    // Preferencia de hover:
+    // - manos (near) si hay handsActive
+    // - si no, controller ray hover
+    const handHover = handsActive ? this.computeHandHover() : null
+    const controllerHover = !handsActive ? this.computeControllerHover() : null
 
     this.setHover(handHover || controllerHover)
   }
