@@ -13,6 +13,9 @@ export class SceneManager {
     )
     this.camera.position.set(0, 1.6, 3)
 
+    // ✅ CLAVE: cámara base ve todas las layers
+    this.camera.layers.enableAll()
+
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
@@ -32,7 +35,7 @@ export class SceneManager {
     this.renderer.xr.addEventListener("sessionstart", () => {
       this.renderer.setPixelRatio(1)
       this.renderer.xr.setFramebufferScaleFactor(1.0)
-      // ❌ No setSize aquí
+      this.forceXREyeLayers()
     })
 
     this.renderer.xr.addEventListener("sessionend", () => {
@@ -49,7 +52,28 @@ export class SceneManager {
     this.renderer.setSize(window.innerWidth, window.innerHeight, false)
   }
 
+  forceXREyeLayers() {
+    if (!this.renderer.xr.isPresenting) return
+
+    // Asegurar base
+    this.camera.layers.enableAll()
+
+    const xrCam = this.renderer.xr.getCamera(this.camera)
+
+    // XR camera + ojos: enableAll
+    if (xrCam?.layers) xrCam.layers.enableAll()
+
+    if (xrCam?.isArrayCamera && Array.isArray(xrCam.cameras)) {
+      for (const eye of xrCam.cameras) {
+        eye.layers.enableAll()
+      }
+    }
+  }
+
   render() {
+    // ✅ Reafirmar por frame (Quest puede “desfasar” en caliente)
+    if (this.renderer.xr.isPresenting) this.forceXREyeLayers()
+
     this.renderer.render(this.scene, this.camera)
   }
 }
