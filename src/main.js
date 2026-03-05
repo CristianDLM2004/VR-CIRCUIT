@@ -78,31 +78,33 @@ const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
 // ---------------------------
-// Anchors UI (en la escena, siguiendo el XR camera)
+// Anchors UI (en la escena, siguiendo la pose real del XR camera)
 // ---------------------------
-// headAnchor: sigue pose de la cabeza (posición + rotación)
 const headAnchor = new THREE.Group()
 headAnchor.name = "HeadAnchor"
 scene.add(headAnchor)
 
-// floorAnchor: sigue XZ de la cabeza pero se queda en y=0 (piso)
 const floorAnchor = new THREE.Group()
 floorAnchor.name = "FloorAnchor"
 scene.add(floorAnchor)
-
-// Debug opcional: descomenta para ver una bolita donde está el anchor (solo para pruebas)
-// const dbg = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 12), new THREE.MeshStandardMaterial({ color: 0xff00ff }))
-// headAnchor.add(dbg)
 
 // ---------------------------
 // Trash System (bote de basura)
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
-// Bote en el piso al lado izquierdo del usuario (RELATIVO al floorAnchor)
-trashSystem.createTrashBin({
+// Bote en el piso, a tu izquierda y cerquita (relativo al usuario)
+const trash = trashSystem.createTrashBin({
   parent: floorAnchor,
-  position: new THREE.Vector3(-0.45, 0.0, -0.35), // izquierda, piso, cerquita
+  position: new THREE.Vector3(-0.45, 0.0, -0.35),
+})
+
+// Refuerzo visual: que no dependa tanto de luces
+trash.traverse((o) => {
+  if (o.isMesh && o.material) {
+    o.material = o.material.clone()
+    if ("emissive" in o.material) o.material.emissive.setHex(0x222222)
+  }
 })
 
 // ---------------------------
@@ -146,15 +148,23 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI)
 // ---------------------------
-// Panel a la derecha y más cerca (RELATIVO al headAnchor)
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
-  position: new THREE.Vector3(0.32, -0.18, -0.35), // derecha, a altura pecho, cerquita
-  rotationY: -Math.PI / 6, // 30° hacia el usuario
+  // derecha, a altura pecho, cerquita
+  position: new THREE.Vector3(0.32, -0.18, -0.35),
+  rotationY: -Math.PI / 6,
   onAdd: addCube,
   onSave: saveState,
   onLoad: loadState,
 })
 headAnchor.add(vrPanel)
+
+// Refuerzo visual del panel: más “brilla” para que se note
+vrPanel.traverse((o) => {
+  if (o.isMesh && o.material) {
+    o.material = o.material.clone()
+    if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
+  }
+})
 
 // Registrar botones como interactuables
 for (const b of panelButtons) interactionSystem.register(b)
@@ -188,8 +198,14 @@ renderer.setAnimationLoop(() => {
   if (renderer.xr.isPresenting) {
     const xrCam = renderer.xr.getCamera(camera)
 
-    // Pose de la "cabeza"
-    xrCam.matrixWorld.decompose(_tmpPos, _tmpQuat, _tmpScale)
+    // ✅ FIX CLAVE:
+    // En WebXR, xrCam suele ser ArrayCamera; la pose “real” está en xrCam.cameras[0]/[1].
+    const poseCam =
+      xrCam?.isArrayCamera && Array.isArray(xrCam.cameras) && xrCam.cameras.length > 0
+        ? xrCam.cameras[0]
+        : xrCam
+
+    poseCam.matrixWorld.decompose(_tmpPos, _tmpQuat, _tmpScale)
 
     headAnchor.position.copy(_tmpPos)
     headAnchor.quaternion.copy(_tmpQuat)
