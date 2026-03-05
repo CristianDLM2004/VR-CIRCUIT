@@ -28,23 +28,25 @@ export class InteractionSystem {
     // Rays only for controllers
     this.controllerRays = [] // { controller, line, hitDot }
 
-    // Near interaction
+    // Near interaction tuning
     this.nearEnabled = true
-    this.nearRadius = 0.09 // 9 cm (más cómodo)
+    this.nearRadius = 0.12 // 12 cm (más fácil agarrar cerca)
 
-    // ✅ Pinch thresholds (más permisivos para Quest)
-    this.pinchStartDist = 0.040 // 4.0 cm
-    this.pinchEndDist = 0.055   // 5.5 cm
+    // ✅ Pinch thresholds (MUCHO más permisivos)
+    // (Quest reporta distancias diferentes según iluminación/seguimiento)
+    this.pinchStartDist = 0.065 // 6.5 cm
+    this.pinchEndDist = 0.085   // 8.5 cm
 
-    // ✅ Poke UI thresholds (tocar con índice)
-    this.uiPokeRadius = 0.028 // ~2.8 cm alrededor del botón
-    this._lastPokedButton = null
-    this._pokeReleaseDist = 0.045 // para “soltar” y permitir otro click
+    // ✅ Poke UI: distancia dedo -> caja del botón
+    this.uiPokeRadius = 0.020 // 2 cm desde la superficie del botón
+    this.uiReleaseRadius = 0.040 // se “despresiona” cuando te alejas
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
-    this._tmpCenter = new THREE.Vector3()
+    this._tmpC = new THREE.Vector3()
     this._box = new THREE.Box3()
+
+    this._lastPokedButton = null
 
     this.initXRInputs()
   }
@@ -147,7 +149,7 @@ export class InteractionSystem {
     return { line, hitDot: dot }
   }
 
-  // ✅ hand tracking activo usando XRSession
+  // ✅ hand tracking activo usando XRSession (lo que ya te funcionó para ocultar rayos)
   isHandTrackingActive() {
     const session = this.renderer.xr.getSession?.()
     if (!session) return false
@@ -177,10 +179,13 @@ export class InteractionSystem {
     }
   }
 
-  getObjectWorldCenter(obj, out) {
+  // -------------------------
+  // Distance helpers (CLAVE)
+  // -------------------------
+  distanceToObjectSurface(obj, worldPoint) {
+    // Distancia real a la CAJA del objeto (no al centro)
     this._box.setFromObject(obj)
-    this._box.getCenter(out)
-    return out
+    return this._box.distanceToPoint(worldPoint)
   }
 
   // -------------------------
@@ -246,109 +251,103 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Hands: joints helpers
+  // Hand joint helpers
   // -------------------------
+  getJointWorld(hand, jointName, out) {
+    const j = hand.joints?.[jointName]
+    if (!j) return null
+    j.getWorldPosition(out)
+    return out
+  }
+
   getIndexTipWorld(handEntry, out) {
-    const joint = handEntry.hand.joints?.["index-finger-tip"]
-    if (joint) return joint.getWorldPosition(out)
-    return handEntry.pinchPoint.getWorldPosition(out)
+    const hand = handEntry.hand
+    const p = this.getJointWorld(hand, "index-finger-tip", out)
+    if (p) return p
+    // fallback (si por alguna razón no hay joints)
+    handEntry.pinchPoint.getWorldPosition(out)
+    return out
   }
 
   // -------------------------
-  // Near hover: (para highlight)
-  // -------------------------
-  computeHandHover() {
-    if (!this.nearEnabled) return null
-
-    let best = null
-    let bestD2 = this.nearRadius * this.nearRadius
-
-    for (const h of this.hands) {
-      this.getIndexTipWorld(h, this._tmpA)
-
-      for (const obj of this.interactables) {
-        if (!obj || obj.userData?.isSurface) continue
-
-        this.getObjectWorldCenter(obj, this._tmpCenter)
-        const d2 = this._tmpCenter.distanceToSquared(this._tmpA)
-        if (d2 < bestD2) {
-          bestD2 = d2
-          best = obj
-        }
-      }
-    }
-
-    return best
-  }
-
-  // -------------------------
-  // ✅ UI POKE: tocar con el índice
+  // ✅ UI POKE: tocar con índice (sin pinch)
   // -------------------------
   updateUIPoke() {
-    // Si estás agarrando algo, no pokes
     if (this.selected) return
 
-    let nearestBtn = null
-    let nearestD2 = this.uiPokeRadius * this.uiPokeRadius
+    // Si había un botón “presionado”, espera a que el dedo se aleje
+    if (this._lastPokedButton) {
+      let minDist = Infinity
+      for (const h of this.hands) {
+        this.getIndexTipWorld(h, this._tmpA)
+        minDist = Math.min(minDist, this.distanceToObjectSurface(this._lastPokedButton, this._tmpA))
+      }
+      if (minDist > this.uiReleaseRadius) this._lastPokedButton = null
+      return
+    }
+
+    let bestBtn = null
+    let bestDist = this.uiPokeRadius
 
     for (const h of this.hands) {
       this.getIndexTipWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
         if (!obj?.userData?.isUI) continue
-
-        this.getObjectWorldCenter(obj, this._tmpCenter)
-        const d2 = this._tmpCenter.distanceToSquared(this._tmpA)
-        if (d2 < nearestD2) {
-          nearestD2 = d2
-          nearestBtn = obj
+        const d = this.distanceToObjectSurface(obj, this._tmpA)
+        if (d < bestDist) {
+          bestDist = d
+          bestBtn = obj
         }
       }
     }
 
-    // Si ya había un botón “presionado”, esperamos a alejarse para permitir otro press
-    if (this._lastPokedButton) {
-      // si seguimos cerca del mismo, no repetir
-      this.getObjectWorldCenter(this._lastPokedButton, this._tmpCenter)
-      let minD = Infinity
-      for (const h of this.hands) {
-        this.getIndexTipWorld(h, this._tmpA)
-        minD = Math.min(minD, this._tmpA.distanceTo(this._tmpCenter))
-      }
-      if (minD > this._pokeReleaseDist) {
-        this._lastPokedButton = null
-      }
-      return
-    }
+    if (!bestBtn) return
 
-    if (!nearestBtn) return
-
-    // Ejecutar press (el VRPanel ya tiene debounce)
-    if (typeof nearestBtn.userData?.onPress === "function") {
-      nearestBtn.userData.onPress()
-      this._lastPokedButton = nearestBtn
+    if (typeof bestBtn.userData?.onPress === "function") {
+      bestBtn.userData.onPress()
+      this._lastPokedButton = bestBtn
     }
   }
 
   // -------------------------
-  // ✅ Pinch detection (solo para AGARRAR componentes)
+  // ✅ Pinch detection robusto (solo para agarrar componentes)
   // -------------------------
+  computePinchDistance(hand) {
+    // intentamos varias combinaciones por robustez
+    const thumbTip = this.getJointWorld(hand, "thumb-tip", this._tmpA)
+    if (!thumbTip) return null
+
+    const candidates = [
+      "index-finger-tip",
+      "index-finger-phalanx-distal",
+      "index-finger-phalanx-intermediate",
+    ]
+
+    let best = Infinity
+    for (const name of candidates) {
+      const p = this.getJointWorld(hand, name, this._tmpB)
+      if (!p) continue
+      const d = thumbTip.distanceTo(p)
+      if (d < best) best = d
+    }
+
+    if (!isFinite(best)) return null
+    return best
+  }
+
   updateHandPinchState() {
     for (const h of this.hands) {
-      const index = h.hand.joints?.["index-finger-tip"]
-      const thumb = h.hand.joints?.["thumb-tip"]
+      const dist = this.computePinchDistance(h.hand)
 
-      if (!index || !thumb) {
+      // si no hay joints suficientes, suelta si estaba agarrando
+      if (dist == null) {
         if (h.isPinching) {
           h.isPinching = false
           this.onHandPinchEnd()
         }
         continue
       }
-
-      index.getWorldPosition(this._tmpA)
-      thumb.getWorldPosition(this._tmpB)
-      const dist = this._tmpA.distanceTo(this._tmpB)
 
       if (!h.isPinching && dist <= this.pinchStartDist) {
         h.isPinching = true
@@ -361,17 +360,16 @@ export class InteractionSystem {
   }
 
   findNearestComponentToHand(handEntry, maxDist) {
-    this.getIndexTipWorld(handEntry, this._tmpA)
+    this.getIndexTipWorld(handEntry, this._tmpC)
 
     let best = null
-    let bestD2 = maxDist * maxDist
+    let bestDist = maxDist
 
     for (const obj of this.interactables) {
-      if (!obj?.userData?.componentId) continue // ✅ SOLO componentes
-      this.getObjectWorldCenter(obj, this._tmpCenter)
-      const d2 = this._tmpCenter.distanceToSquared(this._tmpA)
-      if (d2 < bestD2) {
-        bestD2 = d2
+      if (!obj?.userData?.componentId) continue // SOLO componentes
+      const d = this.distanceToObjectSurface(obj, this._tmpC)
+      if (d < bestDist) {
+        bestDist = d
         best = obj
       }
     }
@@ -382,13 +380,13 @@ export class InteractionSystem {
   onHandPinchStart(handEntry) {
     if (this.selected) return
 
-    // ✅ Pinch solo agarra componentes, NO UI
     const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
     if (!target) return
 
     this.selected = target
     this.selectedBy = "hand"
 
+    // Attach al índice si existe
     const joint = handEntry.hand.joints?.["index-finger-tip"]
     if (joint) joint.attach(this.selected)
     else handEntry.pinchPoint.attach(this.selected)
@@ -414,13 +412,11 @@ export class InteractionSystem {
     if (!this.hovered) return
     if (this.hovered.userData?.isSurface) return
 
-    // UI press
     if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
       this.hovered.userData.onPress()
       return
     }
 
-    // Grab components only
     if (!this.hovered.userData?.componentId) return
 
     this.selected = this.hovered
@@ -512,6 +508,31 @@ export class InteractionSystem {
   }
 
   // -------------------------
+  // Hover for hands (solo visual)
+  // -------------------------
+  computeHandHover() {
+    if (!this.nearEnabled) return null
+
+    let best = null
+    let bestDist = this.nearRadius
+
+    for (const h of this.hands) {
+      this.getIndexTipWorld(h, this._tmpA)
+
+      for (const obj of this.interactables) {
+        if (!obj || obj.userData?.isSurface) continue
+        const d = this.distanceToObjectSurface(obj, this._tmpA)
+        if (d < bestDist) {
+          bestDist = d
+          best = obj
+        }
+      }
+    }
+
+    return best
+  }
+
+  // -------------------------
   // Update loop
   // -------------------------
   update() {
@@ -523,16 +544,15 @@ export class InteractionSystem {
     this.updateControllerRays(!handsActive)
 
     if (handsActive) {
-      // ✅ 1) Poke UI con índice (sin pinch)
+      // ✅ botones con 1 dedo (poke)
       this.updateUIPoke()
 
-      // ✅ 2) Pinch solo para agarrar componentes
+      // ✅ cubos con pinch
       this.updateHandPinchState()
     }
 
-    // no cambiar hover si ya agarraste algo
+    // hover (solo visual)
     if (this.selected) return
-
     const hovered = handsActive ? this.computeHandHover() : this.computeControllerHover()
     this.setHover(hovered)
   }
