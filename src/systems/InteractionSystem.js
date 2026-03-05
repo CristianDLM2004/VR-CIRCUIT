@@ -25,18 +25,14 @@ export class InteractionSystem {
     this.selected = null
     this.selectedBy = null // "controller" | "hand"
 
-    // Rays only for controllers
     this.controllerRays = [] // { controller, line, hitDot }
 
-    // Near interaction tuning
     this.nearEnabled = true
-    this.nearRadius = 0.12 // 12 cm
+    this.nearRadius = 0.12
 
-    // Pinch thresholds
     this.pinchStartDist = 0.065
     this.pinchEndDist = 0.085
 
-    // UI poke radius
     this.uiPokeRadius = 0.020
     this.uiReleaseRadius = 0.040
 
@@ -48,17 +44,22 @@ export class InteractionSystem {
     this._lastPokedButton = null
 
     // -------------------------
-    // ✅ Tracking de velocidad para físicas al soltar
+    // ✅ Throw tuning (mejor alcance)
     // -------------------------
-    this.throwStartSpeed = 0.60 // m/s (si supera, entra física)
-    this.throwMinYSpeed = 0.25  // m/s (si hay velocidad vertical significativa)
+    this.throwVelocityMultiplier = 2.4 // sube/baja esto si quieres más/menos alcance
+    this.throwMinSpeed = 0.03 // incluso soltado suave activa caída
+
+    // Velocidad: promedio de muestras
     this._hold = {
       active: false,
       lastPos: new THREE.Vector3(),
       lastT: 0,
       vel: new THREE.Vector3(),
-      source: null, // Object3D (controller) o handEntry
-      sourceType: null, // "controller" | "hand"
+      source: null,
+      sourceType: null,
+      samples: [], // [{v:Vector3, t:number}]
+      maxSamples: 8,
+      sampleWindowMs: 120,
     }
 
     this.initXRInputs()
@@ -114,7 +115,6 @@ export class InteractionSystem {
     const handModelFactory = new XRHandModelFactory()
 
     for (let i = 0; i < 2; i++) {
-      // Controllers
       const controller = this.renderer.xr.getController(i)
       controller.addEventListener("selectstart", (e) => this.onControllerSelectStart(e))
       controller.addEventListener("selectend", () => this.onControllerSelectEnd())
@@ -131,7 +131,6 @@ export class InteractionSystem {
 
       this.controllers.push(controller)
 
-      // Hands
       const hand = this.renderer.xr.getHand(i)
       hand.add(handModelFactory.createHandModel(hand, "mesh"))
       this.scene.add(hand)
@@ -162,7 +161,6 @@ export class InteractionSystem {
     return { line, hitDot: dot }
   }
 
-  // ✅ hand tracking activo usando XRSession
   isHandTrackingActive() {
     const session = this.renderer.xr.getSession?.()
     if (!session) return false
@@ -192,17 +190,11 @@ export class InteractionSystem {
     }
   }
 
-  // -------------------------
-  // Distance helpers
-  // -------------------------
   distanceToObjectSurface(obj, worldPoint) {
     this._box.setFromObject(obj)
     return this._box.distanceToPoint(worldPoint)
   }
 
-  // -------------------------
-  // Controller hover + rays
-  // -------------------------
   pickInteractableFromHitObject(hitObject) {
     let obj = hitObject
     while (obj && obj.parent) {
@@ -321,7 +313,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Pinch detection robusto
+  // Pinch detection
   // -------------------------
   computePinchDistance(hand) {
     const thumbTip = this.getJointWorld(hand, "thumb-tip", this._tmpA)
@@ -386,7 +378,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // ✅ Persist helper (para físicas)
+  // Persist helpers
   // -------------------------
   persistMeshTransform(mesh) {
     const id = mesh?.userData?.componentId
@@ -399,7 +391,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // ✅ Hold velocity tracking
+  // Hold velocity tracking (promedio)
   // -------------------------
   _startHoldTracking(sourceType, source) {
     this._hold.active = true
@@ -407,13 +399,10 @@ export class InteractionSystem {
     this._hold.source = source
     this._hold.lastT = performance.now()
     this._hold.vel.set(0, 0, 0)
+    this._hold.samples.length = 0
 
-    // posición inicial
-    if (sourceType === "controller") {
-      source.getWorldPosition(this._hold.lastPos)
-    } else if (sourceType === "hand") {
-      this.getIndexTipWorld(source, this._hold.lastPos)
-    }
+    if (sourceType === "controller") source.getWorldPosition(this._hold.lastPos)
+    else this.getIndexTipWorld(source, this._hold.lastPos)
   }
 
   _stopHoldTracking() {
@@ -422,6 +411,7 @@ export class InteractionSystem {
     this._hold.source = null
     this._hold.lastT = 0
     this._hold.vel.set(0, 0, 0)
+    this._hold.samples.length = 0
   }
 
   _updateHoldVelocity() {
@@ -431,30 +421,41 @@ export class InteractionSystem {
     const dt = (now - this._hold.lastT) / 1000
     if (dt <= 0.0001) return
 
-    if (this._hold.sourceType === "controller") {
-      this._hold.source.getWorldPosition(this._tmpA)
+    if (this._hold.sourceType === "controller") this._hold.source.getWorldPosition(this._tmpA)
+    else this.getIndexTipWorld(this._hold.source, this._tmpA)
+
+    const v = this._tmpA.clone().sub(this._hold.lastPos).multiplyScalar(1 / dt)
+
+    // push sample
+    this._hold.samples.push({ v, t: now })
+    while (this._hold.samples.length > this._hold.maxSamples) this._hold.samples.shift()
+
+    // limpiar por ventana de tiempo
+    const minT = now - this._hold.sampleWindowMs
+    while (this._hold.samples.length && this._hold.samples[0].t < minT) this._hold.samples.shift()
+
+    // promedio
+    if (this._hold.samples.length) {
+      this._hold.vel.set(0, 0, 0)
+      for (const s of this._hold.samples) this._hold.vel.add(s.v)
+      this._hold.vel.multiplyScalar(1 / this._hold.samples.length)
     } else {
-      this.getIndexTipWorld(this._hold.source, this._tmpA)
+      this._hold.vel.copy(v)
     }
 
-    // v = dx/dt
-    this._hold.vel.copy(this._tmpA).sub(this._hold.lastPos).multiplyScalar(1 / dt)
-
-    // actualizar
     this._hold.lastPos.copy(this._tmpA)
     this._hold.lastT = now
   }
 
-  _shouldEnablePhysics(releaseVel) {
-    if (!releaseVel) return false
-    const speed = releaseVel.length()
-    if (speed >= this.throwStartSpeed) return true
-    if (Math.abs(releaseVel.y) >= this.throwMinYSpeed) return true
-    return false
+  _getReleaseVelocity() {
+    // copiar, boost, clamp mínimo
+    const v = this._hold.vel.clone().multiplyScalar(this.throwVelocityMultiplier)
+    if (v.length() < this.throwMinSpeed) v.set(0, 0, 0)
+    return v
   }
 
   // -------------------------
-  // Hand pinch -> grab
+  // Hand grab/release
   // -------------------------
   onHandPinchStart(handEntry) {
     if (this.selected) return
@@ -465,7 +466,6 @@ export class InteractionSystem {
     this.selected = target
     this.selectedBy = "hand"
 
-    // Start tracking
     this._startHoldTracking("hand", handEntry)
 
     const joint = handEntry.hand.joints?.["index-finger-tip"]
@@ -477,20 +477,13 @@ export class InteractionSystem {
     if (!this.selected) return
     if (this.selectedBy !== "hand") return
 
-    // Capturar última velocidad antes de soltar
     this._updateHoldVelocity()
-    const releaseVel = this._hold.vel.clone()
+    const releaseVel = this._getReleaseVelocity()
 
     this.scene.attach(this.selected)
 
-    // Si se “tiró”, activar física; si no, snap normal
-    if (this._shouldEnablePhysics(releaseVel)) {
-      this.selected.userData.physics = { active: true, vel: releaseVel }
-      // Persist se hará cuando se duerma
-    } else {
-      this.snapToSurface(this.selected)
-      this.persistSelectedTransform()
-    }
+    // ✅ SIEMPRE físicas al soltar (caída visible)
+    this.selected.userData.physics = { active: true, vel: releaseVel }
 
     this.selected = null
     this.selectedBy = null
@@ -498,7 +491,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Controller select (ray)
+  // Controller grab/release
   // -------------------------
   onControllerSelectStart(event) {
     const controller = event.target
@@ -515,7 +508,6 @@ export class InteractionSystem {
     this.selected = this.hovered
     this.selectedBy = "controller"
 
-    // Start tracking
     this._startHoldTracking("controller", controller)
 
     controller.attach(this.selected)
@@ -525,18 +517,13 @@ export class InteractionSystem {
     if (!this.selected) return
     if (this.selectedBy !== "controller") return
 
-    // Capturar última velocidad
     this._updateHoldVelocity()
-    const releaseVel = this._hold.vel.clone()
+    const releaseVel = this._getReleaseVelocity()
 
     this.scene.attach(this.selected)
 
-    if (this._shouldEnablePhysics(releaseVel)) {
-      this.selected.userData.physics = { active: true, vel: releaseVel }
-    } else {
-      this.snapToSurface(this.selected)
-      this.persistSelectedTransform()
-    }
+    // ✅ SIEMPRE físicas al soltar
+    this.selected.userData.physics = { active: true, vel: releaseVel }
 
     this.selected = null
     this.selectedBy = null
@@ -544,20 +531,7 @@ export class InteractionSystem {
   }
 
   // -------------------------
-  // Persist (seleccionado)
-  // -------------------------
-  persistSelectedTransform() {
-    const id = this.selected?.userData?.componentId
-    if (!id) return
-    const p = this.selected.position
-    const q = this.selected.quaternion
-    this.appState.updateComponent(id, {
-      transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
-    })
-  }
-
-  // -------------------------
-  // Snap logic
+  // Snap logic (se queda para más adelante protoboard/holes)
   // -------------------------
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
@@ -647,7 +621,6 @@ export class InteractionSystem {
 
     const handsActive = this.isHandTrackingActive()
 
-    // Rays solo con controladores
     this.updateControllerRays(!handsActive)
 
     if (handsActive) {
@@ -655,7 +628,6 @@ export class InteractionSystem {
       this.updateHandPinchState()
     }
 
-    // ✅ si está agarrando algo, igual actualizamos velocidad
     if (this.selected) {
       this._updateHoldVelocity()
       return
