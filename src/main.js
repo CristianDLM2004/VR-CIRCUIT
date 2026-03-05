@@ -78,32 +78,41 @@ const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
 // ---------------------------
-// Anchors UI (en la escena, siguiendo la pose real del XR camera)
-// ---------------------------
-const headAnchor = new THREE.Group()
-headAnchor.name = "HeadAnchor"
-scene.add(headAnchor)
-
-const floorAnchor = new THREE.Group()
-floorAnchor.name = "FloorAnchor"
-scene.add(floorAnchor)
-
-// ---------------------------
-// Trash System (bote de basura)
+// Trash + Panel (UI estática en el mundo)
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
-// Bote en el piso, a tu izquierda y cerquita (relativo al usuario)
-const trash = trashSystem.createTrashBin({
-  parent: floorAnchor,
-  position: new THREE.Vector3(-0.45, 0.0, -0.35),
+// Creamos panel y bote y los agregamos a la escena (NO a la cabeza)
+const { group: vrPanel, buttons: panelButtons } = createVRPanel({
+  // posición temporal; se recalcula al iniciar XR
+  position: new THREE.Vector3(0.5, 1.2, -0.8),
+  rotationY: 0,
+  onAdd: addCube,
+  onSave: saveState,
+  onLoad: loadState,
+})
+scene.add(vrPanel)
+
+// Registrar botones como interactuables
+for (const b of panelButtons) interactionSystem.register(b)
+
+// Crear bote (posición temporal; se recalcula al iniciar XR)
+const trashBin = trashSystem.createTrashBin({
+  parent: scene,
+  position: new THREE.Vector3(-0.6, 0.0, -0.8),
 })
 
-// Refuerzo visual: que no dependa tanto de luces
-trash.traverse((o) => {
+// Más visible (no depender tanto de luces)
+trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
     if ("emissive" in o.material) o.material.emissive.setHex(0x222222)
+  }
+})
+vrPanel.traverse((o) => {
+  if (o.isMesh && o.material) {
+    o.material = o.material.clone()
+    if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
   }
 })
 
@@ -146,28 +155,76 @@ function loadState() {
 }
 
 // ---------------------------
-// Panel 3D (VR UI)
+// Posicionamiento estático cerca del usuario (solo 1 vez al entrar a VR)
 // ---------------------------
-const { group: vrPanel, buttons: panelButtons } = createVRPanel({
-  // derecha, a altura pecho, cerquita
-  position: new THREE.Vector3(0.32, -0.18, -0.35),
-  rotationY: -Math.PI / 6,
-  onAdd: addCube,
-  onSave: saveState,
-  onLoad: loadState,
-})
-headAnchor.add(vrPanel)
+let uiPlaced = false
 
-// Refuerzo visual del panel: más “brilla” para que se note
-vrPanel.traverse((o) => {
-  if (o.isMesh && o.material) {
-    o.material = o.material.clone()
-    if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
-  }
-})
+const _tmpPos = new THREE.Vector3()
+const _tmpQuat = new THREE.Quaternion()
+const _tmpScale = new THREE.Vector3()
+const _tmpEuler = new THREE.Euler()
+const _yawQuat = new THREE.Quaternion()
+const _forward = new THREE.Vector3()
+const _right = new THREE.Vector3()
 
-// Registrar botones como interactuables
-for (const b of panelButtons) interactionSystem.register(b)
+function getHeadPose(outPos, outQuat) {
+  const xrCam = renderer.xr.getCamera(camera)
+  const poseCam =
+    xrCam?.isArrayCamera && Array.isArray(xrCam.cameras) && xrCam.cameras.length > 0
+      ? xrCam.cameras[0]
+      : xrCam
+
+  poseCam.matrixWorld.decompose(outPos, outQuat, _tmpScale)
+}
+
+function placeUIOnceNearUser() {
+  // Toma pose actual de cabeza
+  getHeadPose(_tmpPos, _tmpQuat)
+
+  // Sacar solo yaw (rotación en Y) para que UI quede “enfrente” sin inclinarse por pitch/roll
+  _tmpEuler.setFromQuaternion(_tmpQuat, "YXZ")
+  const yaw = _tmpEuler.y
+  _yawQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+
+  // Vectores forward/right en XZ
+  _forward.set(0, 0, -1).applyQuaternion(_yawQuat).normalize()
+  _right.set(1, 0, 0).applyQuaternion(_yawQuat).normalize()
+
+  // --- Panel (derecha, un poco adelante, a altura pecho) ---
+  // ✅ Lo alejamos para que NO se corte:
+  // antes estaba muy cerca (0.35m); ahora ~0.85m adelante
+  const panelWorldPos = _tmpPos
+    .clone()
+    .add(_right.clone().multiplyScalar(0.55))   // derecha
+    .add(_forward.clone().multiplyScalar(0.85)) // adelante
+  panelWorldPos.y = Math.max(1.05, _tmpPos.y - 0.35) // altura pecho aprox
+
+  vrPanel.position.copy(panelWorldPos)
+
+  // Que mire hacia el usuario (en XZ)
+  vrPanel.lookAt(_tmpPos.x, vrPanel.position.y, _tmpPos.z)
+
+  // --- Bote (izquierda, adelante, en el piso) ---
+  const trashWorldPos = _tmpPos
+    .clone()
+    .add(_right.clone().multiplyScalar(-0.65))  // izquierda
+    .add(_forward.clone().multiplyScalar(0.80)) // adelante
+  trashWorldPos.y = 0.0 // piso
+
+  trashBin.position.copy(trashWorldPos)
+
+  // Opcional: que también “mire” al usuario
+  trashBin.lookAt(_tmpPos.x, trashBin.position.y, _tmpPos.z)
+
+  uiPlaced = true
+  console.log("✅ UI colocada en el mundo cerca del usuario (estática)")
+}
+
+// Cuando inicia XR, colocamos UI una vez
+renderer.xr.addEventListener("sessionstart", () => {
+  // Espera a que exista pose válida (primer frame). Lo hacemos con flag en el loop también.
+  uiPlaced = false
+})
 
 // ---------------------------
 // UI HTML (PC) opcional
@@ -189,33 +246,10 @@ stateSyncSystem.rebuildFromState()
 // ---------------------------
 // Loop
 // ---------------------------
-const _tmpPos = new THREE.Vector3()
-const _tmpQuat = new THREE.Quaternion()
-const _tmpScale = new THREE.Vector3()
-
 renderer.setAnimationLoop(() => {
-  // Actualizar anchors con la cámara real de XR
-  if (renderer.xr.isPresenting) {
-    const xrCam = renderer.xr.getCamera(camera)
-
-    // ✅ FIX CLAVE:
-    // En WebXR, xrCam suele ser ArrayCamera; la pose “real” está en xrCam.cameras[0]/[1].
-    const poseCam =
-      xrCam?.isArrayCamera && Array.isArray(xrCam.cameras) && xrCam.cameras.length > 0
-        ? xrCam.cameras[0]
-        : xrCam
-
-    poseCam.matrixWorld.decompose(_tmpPos, _tmpQuat, _tmpScale)
-
-    headAnchor.position.copy(_tmpPos)
-    headAnchor.quaternion.copy(_tmpQuat)
-
-    // Piso: mismo XZ, Y fijo a 0
-    floorAnchor.position.set(_tmpPos.x, 0.0, _tmpPos.z)
-    floorAnchor.quaternion.copy(_tmpQuat)
-
-    headAnchor.updateMatrixWorld(true)
-    floorAnchor.updateMatrixWorld(true)
+  // En cuanto haya XR presentando, colocamos UI una sola vez
+  if (renderer.xr.isPresenting && !uiPlaced) {
+    placeUIOnceNearUser()
   }
 
   interactionSystem.update()
