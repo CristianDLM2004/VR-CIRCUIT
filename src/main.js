@@ -9,6 +9,8 @@ import { createProtoboard } from "./components/Protoboard.js"
 import { HoleSystem } from "./systems/HoleSystem.js"
 import { createVRPanel } from "./components/VRPanel.js"
 
+import { TrashSystem } from "./systems/TrashSystem.js"
+
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
 
@@ -42,7 +44,6 @@ const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
 )
-// Antes: (0, 1.0, -1.0)
 table.position.set(0, 0.75, -0.8)
 scene.add(table)
 
@@ -75,6 +76,14 @@ interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
+
+// ---------------------------
+// Trash System (bote de basura)
+// ---------------------------
+const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
+
+// Debajo de la mesa, lado izquierdo (como pediste)
+trashSystem.createTrashBin(new THREE.Vector3(-0.6, 0.0, table.position.z))
 
 // ---------------------------
 // Helpers: IDs y acciones
@@ -117,9 +126,8 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI)
 // ---------------------------
-// ✅ Opción A: Panel a la derecha del usuario (tipo herramienta flotante)
-const panelPos = new THREE.Vector3(0.6, 1.25, -0.6)
-// Rotación para que mire hacia el usuario en (0,*,0): aprox -45°
+// ✅ Panel a la derecha, PERO más cerca (como pediste)
+const panelPos = new THREE.Vector3(0.5, 1.22, -0.45)
 const panelRotY = -Math.PI / 4
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
@@ -156,5 +164,9 @@ stateSyncSystem.rebuildFromState()
 // ---------------------------
 renderer.setAnimationLoop(() => {
   interactionSystem.update()
+
+  // ✅ Check del bote (solo borra objetos sueltos)
+  trashSystem.update(stateSyncSystem.meshById.values())
+
   sceneManager.render()
 })
