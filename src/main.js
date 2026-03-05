@@ -37,11 +37,13 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
+// ✅ Mesa más realista y más cómoda en VR
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
 )
-table.position.set(0, 1.0, -1.0)
+// Antes: (0, 1.0, -1.0)
+table.position.set(0, 0.75, -0.8)
 scene.add(table)
 
 table.updateMatrixWorld(true)
@@ -84,8 +86,11 @@ function genId(prefix = "cmp") {
 
 function addCube() {
   const id = genId("cube")
+
+  // ✅ Spawn cercano: sobre el protoboard pero ligeramente hacia el usuario
   const p = protoboard.position.clone()
   p.y += 0.15
+  p.z += 0.12 // acerca hacia el usuario (menos negativo = más cerca)
 
   appState.addComponent({
     id,
@@ -112,10 +117,14 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI)
 // ---------------------------
-// Posición frente al usuario, arriba de la mesa, ligeramente hacia él
+// ✅ Opción A: Panel a la derecha del usuario (tipo herramienta flotante)
+const panelPos = new THREE.Vector3(0.6, 1.25, -0.6)
+// Rotación para que mire hacia el usuario en (0,*,0): aprox -45°
+const panelRotY = -Math.PI / 4
+
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
-  position: new THREE.Vector3(0, 1.35, -0.55),
-  rotationY: 0,
+  position: panelPos,
+  rotationY: panelRotY,
   onAdd: addCube,
   onSave: saveState,
   onLoad: loadState,
