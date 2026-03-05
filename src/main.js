@@ -10,6 +10,7 @@ import { HoleSystem } from "./systems/HoleSystem.js"
 import { createVRPanel } from "./components/VRPanel.js"
 
 import { TrashSystem } from "./systems/TrashSystem.js"
+import { PhysicsSystem } from "./systems/PhysicsSystem.js"
 
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
@@ -118,9 +119,8 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI) - ESTÁTICO EN EL MUNDO
 // ---------------------------
-// ✅ Lo alejamos MÁS para evitar que se “corte” (queda ~0.8-1.0m frente al origen)
-const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
-const panelRotY = -Math.PI / 6 // 30° ligeramente hacia el centro
+const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.5)
+const panelRotY = -Math.PI / 6
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   position: panelWorldPos,
@@ -131,10 +131,10 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
 })
 scene.add(vrPanel)
 
-// Registrar botones como interactuables (para hover + ray + select)
+// Registrar botones como interactuables
 for (const b of panelButtons) interactionSystem.register(b)
 
-// Refuerzo visual para que se note
+// Refuerzo visual
 vrPanel.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -147,19 +147,23 @@ vrPanel.traverse((o) => {
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
-// ✅ En el piso, lado izquierdo del usuario (cerca del origen, sin moverse con la cabeza)
 const trashBin = trashSystem.createTrashBin({
   parent: scene,
-  position: new THREE.Vector3(-0.55, 0.00, -0.10),
+  position: new THREE.Vector3(-0.55, 0.0, -0.1),
 })
 
-// Refuerzo visual
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
     if ("emissive" in o.material) o.material.emissive.setHex(0x222222)
   }
 })
+
+// ---------------------------
+// ✅ Physics System
+// ---------------------------
+const physicsSystem = new PhysicsSystem(scene, camera, appState, stateSyncSystem, interactionSystem)
+const clock = new THREE.Clock()
 
 // ---------------------------
 // UI HTML (PC) opcional
@@ -182,9 +186,14 @@ stateSyncSystem.rebuildFromState()
 // Loop
 // ---------------------------
 renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.033, clock.getDelta()) // clamp ~30fps step
+
   interactionSystem.update()
 
-  // Check del bote (solo borra objetos sueltos)
+  // físicas para componentes sueltos
+  physicsSystem.update(stateSyncSystem.meshById.values(), dt)
+
+  // check del bote (solo borra objetos sueltos)
   trashSystem.update(stateSyncSystem.meshById.values())
 
   sceneManager.render()
