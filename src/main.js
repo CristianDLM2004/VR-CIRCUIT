@@ -119,7 +119,7 @@ function loadState() {
 // Panel 3D (VR UI) - ESTÁTICO EN EL MUNDO
 // ---------------------------
 // ✅ Lo alejamos MÁS para evitar que se “corte” (queda ~0.8-1.0m frente al origen)
-const panelWorldPos = new THREE.Vector3(0.85, 1.15, 0.05)
+const panelWorldPos = new THREE.Vector3(0.85, 1.15, -0.6)
 const panelRotY = -Math.PI / 6 // 30° ligeramente hacia el centro
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
