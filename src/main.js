@@ -39,7 +39,7 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
-// ✅ Mesa más realista y más cómoda en VR
+// Mesa cómoda en VR
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
@@ -78,12 +78,25 @@ const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
 // ---------------------------
+// UI Anchor (anclado al usuario)
+// ---------------------------
+// ✅ Esto hace que el panel y el bote SIEMPRE estén cerca del usuario (Quest / XR origin variable)
+const uiAnchor = new THREE.Group()
+uiAnchor.name = "UIAnchor"
+camera.add(uiAnchor) // anclado a la cámara
+uiAnchor.position.set(0, 0, 0)
+
+// ---------------------------
 // Trash System (bote de basura)
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
-// Debajo de la mesa, lado izquierdo (como pediste)
-trashSystem.createTrashBin(new THREE.Vector3(-0.6, 0.0, table.position.z))
+// ✅ Bote en el piso, pegado al usuario a la izquierda (relativo a la cámara)
+// Nota: como uiAnchor está en la cámara, y la cámara está a ~1.6m, usamos y negativo para llegar al piso.
+trashSystem.createTrashBin({
+  parent: uiAnchor,
+  position: new THREE.Vector3(-0.45, -1.25, -0.35), // izquierda, piso, cerquita
+})
 
 // ---------------------------
 // Helpers: IDs y acciones
@@ -96,10 +109,10 @@ function genId(prefix = "cmp") {
 function addCube() {
   const id = genId("cube")
 
-  // ✅ Spawn cercano: sobre el protoboard pero ligeramente hacia el usuario
+  // Spawn cercano: sobre el protoboard pero ligeramente hacia el usuario
   const p = protoboard.position.clone()
   p.y += 0.15
-  p.z += 0.12 // acerca hacia el usuario (menos negativo = más cerca)
+  p.z += 0.12
 
   appState.addComponent({
     id,
@@ -126,9 +139,9 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI)
 // ---------------------------
-// ✅ Panel a la derecha, PERO más cerca (como pediste)
-const panelPos = new THREE.Vector3(0.5, 1.22, -0.45)
-const panelRotY = -Math.PI / 4
+// ✅ Panel a la derecha, MÁS CERCA del usuario (relativo a cámara)
+const panelPos = new THREE.Vector3(0.35, -0.22, -0.35) // derecha, a altura pecho, cerquita
+const panelRotY = -Math.PI / 6 // 30° hacia el usuario
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   position: panelPos,
@@ -137,13 +150,15 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   onSave: saveState,
   onLoad: loadState,
 })
-scene.add(vrPanel)
 
-// Registrar botones como interactuables (para hover + ray + select)
+// Importante: agregamos el panel al anchor (no a la escena)
+uiAnchor.add(vrPanel)
+
+// Registrar botones como interactuables
 for (const b of panelButtons) interactionSystem.register(b)
 
 // ---------------------------
-// UI HTML (PC) se mantiene opcional
+// UI HTML (PC) opcional
 // ---------------------------
 document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
 
@@ -165,7 +180,7 @@ stateSyncSystem.rebuildFromState()
 renderer.setAnimationLoop(() => {
   interactionSystem.update()
 
-  // ✅ Check del bote (solo borra objetos sueltos)
+  // Check del bote (solo borra objetos sueltos)
   trashSystem.update(stateSyncSystem.meshById.values())
 
   sceneManager.render()
