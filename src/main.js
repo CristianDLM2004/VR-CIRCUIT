@@ -119,7 +119,7 @@ function loadState() {
 // Panel 3D (VR UI) - ESTÁTICO EN EL MUNDO
 // ---------------------------
 // ✅ Lo alejamos MÁS para evitar que se “corte” (queda ~0.8-1.0m frente al origen)
-const panelWorldPos = new THREE.Vector3(0.85, 1.15, 3)
+const panelWorldPos = new THREE.Vector3(0.85, 1.15, 8)
 const panelRotY = -Math.PI / 6 // 30° ligeramente hacia el centro
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
@@ -150,7 +150,7 @@ const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 // ✅ En el piso, lado izquierdo del usuario (cerca del origen, sin moverse con la cabeza)
 const trashBin = trashSystem.createTrashBin({
   parent: scene,
-  position: new THREE.Vector3(-0.2, 0.0, 1),
+  position: new THREE.Vector3(-0.2, 0.0, 3),
 })
 
 // Refuerzo visual
