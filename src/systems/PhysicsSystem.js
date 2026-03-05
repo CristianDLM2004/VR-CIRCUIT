@@ -15,28 +15,25 @@ export class PhysicsSystem {
     this._tmpCamPos = new THREE.Vector3()
     this._tmpEuler = new THREE.Euler()
     this._tmpQuat = new THREE.Quaternion()
+    this._targetQuat = new THREE.Quaternion()
 
     this.bodies = new Map()
 
-    // Tuning
     this.gravity = -9.8
-
-    // ✅ Menos drag => más alcance al lanzar
     this.linearDrag = 0.015
 
-    // rebote/fricción
     this.restitution = 0.18
     this.friction = 0.25
 
-    // sleep
     this.restSpeed = 0.12
     this.sleepAfterMs = 450
 
-    // rotación
     this.angularDrag = 0.10
-    this.spinFromThrow = 6.5 // rad/s por cada m/s (aprox)
+    this.spinFromThrow = 6.5
 
-    // Limpieza
+    // ✅ settle suave
+    this.settleDuration = 0.25 // segundos
+
     this.maxDistance = 10.0
     this.farAfterMs = 1500
     this.fallYKill = -3.0
@@ -55,6 +52,12 @@ export class PhysicsSystem {
         angVel: new THREE.Vector3(),
         freeSinceMs: performance.now(),
         sleepMs: 0,
+
+        // ✅ settle state
+        settling: false,
+        settleT: 0,
+        startQuat: new THREE.Quaternion(),
+        targetQuat: new THREE.Quaternion(),
       }
       this.bodies.set(id, body)
     }
@@ -62,19 +65,18 @@ export class PhysicsSystem {
     if (initialVel) {
       body.vel.copy(initialVel)
 
-      // ✅ spin proporcional a la velocidad (más real)
       const speed = initialVel.length()
       if (speed > 0.02) {
-        body.angVel.set(
-          (Math.random() * 2 - 1),
-          (Math.random() * 2 - 1),
-          (Math.random() * 2 - 1)
-        )
+        body.angVel.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1)
         body.angVel.normalize().multiplyScalar(Math.min(12, speed * this.spinFromThrow))
       } else {
         body.angVel.set(0, 0, 0)
       }
     }
+
+    // reset settle
+    body.settling = false
+    body.settleT = 0
 
     return body
   }
@@ -103,49 +105,72 @@ export class PhysicsSystem {
   }
 
   integrateRotation(mesh, angVel, dt) {
-    // integración simple: q = q * dq
     const ax = angVel.x * dt
     const ay = angVel.y * dt
     const az = angVel.z * dt
-
-    // small-angle approx quaternion
     this._tmpQuat.set(ax, ay, az, 1.0).normalize()
     mesh.quaternion.multiply(this._tmpQuat).normalize()
   }
 
-  settleToStablePose(mesh) {
-    // ✅ “asentar”: que no quede en esquina
-    // Para cubos (y en general), hacemos que quede "upright" (x/z ~ 0) conservando yaw.
+  computeUprightTargetQuat(mesh) {
+    // conservar yaw, poner pitch/roll 0
     this._tmpEuler.setFromQuaternion(mesh.quaternion, "YXZ")
     const yaw = this._tmpEuler.y
+    this._targetQuat.setFromEuler(new THREE.Euler(0, yaw, 0))
+    return this._targetQuat
+  }
 
-    const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0))
-    mesh.quaternion.slerp(target, 0.75) // asienta rápido
+  startSettling(mesh, body) {
+    body.settling = true
+    body.settleT = 0
+    body.startQuat.copy(mesh.quaternion)
+    body.targetQuat.copy(this.computeUprightTargetQuat(mesh))
+
+    // congelar velocidades
+    body.vel.set(0, 0, 0)
+    body.angVel.set(0, 0, 0)
+  }
+
+  updateSettling(mesh, body, dt) {
+    body.settleT += dt
+    const t = Math.min(1, body.settleT / this.settleDuration)
+
+    // slerp suave
+    mesh.quaternion.copy(body.startQuat).slerp(body.targetQuat, t)
+
+    if (t >= 1) {
+      mesh.quaternion.copy(body.targetQuat)
+      body.settling = false
+
+      // persistir y apagar body
+      this.bodies.delete(mesh.userData.componentId)
+      if (this.interactionSystem?.persistMeshTransform) this.interactionSystem.persistMeshTransform(mesh)
+    }
   }
 
   stepMesh(mesh, body, dt) {
-    // gravedad
+    // si está settling, solo interpolar rotación
+    if (body.settling) {
+      this.updateSettling(mesh, body, dt)
+      return
+    }
+
     body.vel.y += this.gravity * dt
 
-    // drag lineal (aire)
     const drag = Math.max(0, 1 - this.linearDrag * dt)
     body.vel.multiplyScalar(drag)
 
-    // drag angular
     const ad = Math.max(0, 1 - this.angularDrag * dt)
     body.angVel.multiplyScalar(ad)
 
-    // integrar posición
     mesh.position.x += body.vel.x * dt
     mesh.position.y += body.vel.y * dt
     mesh.position.z += body.vel.z * dt
 
-    // integrar rotación
     if (body.angVel.lengthSq() > 1e-6) {
       this.integrateRotation(mesh, body.angVel, dt)
     }
 
-    // colisión simple con superficie
     const hit = this.getSurfaceHitBelow(mesh)
     if (hit) {
       const bbox = new THREE.Box3().setFromObject(mesh)
@@ -153,52 +178,38 @@ export class PhysicsSystem {
       const halfY = this._tmpSize.y * 0.5
 
       const targetY = hit.point.y + halfY
-      const eps = 0.002
+
+      // ✅ eps más permisivo para evitar “levitar”
+      const eps = 0.006
 
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
         mesh.position.y = targetY
 
-        // rebote vertical
         body.vel.y = -body.vel.y * this.restitution
 
-        // fricción al contacto (XZ)
         const fr = Math.max(0, 1 - this.friction)
         body.vel.x *= fr
         body.vel.z *= fr
 
-        // amortiguar giro en contacto
         body.angVel.multiplyScalar(0.78)
 
-        // sleep logic
         const speed = body.vel.length() + body.angVel.length() * 0.08
-        if (speed < this.restSpeed) {
-          body.sleepMs += dt * 1000
-        } else {
-          body.sleepMs = 0
-        }
+        if (speed < this.restSpeed) body.sleepMs += dt * 1000
+        else body.sleepMs = 0
 
         if (body.sleepMs >= this.sleepAfterMs) {
-          // asentar a pose estable y persistir
-          this.settleToStablePose(mesh)
-
-          this.bodies.delete(mesh.userData.componentId)
-
-          if (this.interactionSystem?.persistMeshTransform)
-            this.interactionSystem.persistMeshTransform(mesh)
-
-          if (mesh.userData.physics) delete mesh.userData.physics
+          // ✅ settle suave (sin golpe)
+          this.startSettling(mesh, body)
           return
         }
       }
     }
 
-    // caídas al vacío
     if (mesh.position.y < this.fallYKill) {
       this.removeComponentById(mesh.userData.componentId)
       return
     }
 
-    // limpieza por distancia
     this.camera.getWorldPosition(this._tmpCamPos)
     const dist = mesh.position.distanceTo(this._tmpCamPos)
     const aliveMs = performance.now() - body.freeSinceMs

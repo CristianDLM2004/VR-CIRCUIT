@@ -89,18 +89,20 @@ function genId(prefix = "cmp") {
 function addCube() {
   const id = genId("cube")
 
-  // Spawn cercano: sobre el protoboard pero ligeramente hacia el usuario
   const p = protoboard.position.clone()
   p.y += 0.15
   p.z += 0.12
 
-  appState.addComponent({
+  const data = {
     id,
     type: "cube",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-  })
+  }
 
-  stateSyncSystem.rebuildFromState()
+  appState.addComponent(data)
+
+  // ✅ incremental (NO rebuild completo) -> evita “brincos”/disparos
+  stateSyncSystem.addMeshFromComponent(data)
 }
 
 function saveState() {
@@ -119,7 +121,7 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI) - ESTÁTICO EN EL MUNDO
 // ---------------------------
-const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.5)
+const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY = -Math.PI / 6
 
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
@@ -131,10 +133,8 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
 })
 scene.add(vrPanel)
 
-// Registrar botones como interactuables
 for (const b of panelButtons) interactionSystem.register(b)
 
-// Refuerzo visual
 vrPanel.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -143,13 +143,13 @@ vrPanel.traverse((o) => {
 })
 
 // ---------------------------
-// Trash System (bote) - ESTÁTICO EN EL MUNDO
+// Trash System (bote)
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
 const trashBin = trashSystem.createTrashBin({
   parent: scene,
-  position: new THREE.Vector3(-0.55, 0.0, -0.1),
+  position: new THREE.Vector3(-0.55, 0.0, -0.10),
 })
 
 trashBin.traverse((o) => {
@@ -160,7 +160,7 @@ trashBin.traverse((o) => {
 })
 
 // ---------------------------
-// ✅ Physics System
+// Physics
 // ---------------------------
 const physicsSystem = new PhysicsSystem(scene, camera, appState, stateSyncSystem, interactionSystem)
 const clock = new THREE.Clock()
@@ -186,14 +186,12 @@ stateSyncSystem.rebuildFromState()
 // Loop
 // ---------------------------
 renderer.setAnimationLoop(() => {
-  const dt = Math.min(0.033, clock.getDelta()) // clamp ~30fps step
+  const dt = Math.min(0.033, clock.getDelta())
 
   interactionSystem.update()
 
-  // físicas para componentes sueltos
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
 
-  // check del bote (solo borra objetos sueltos)
   trashSystem.update(stateSyncSystem.meshById.values())
 
   sceneManager.render()

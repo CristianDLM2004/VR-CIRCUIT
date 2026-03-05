@@ -30,6 +30,31 @@ export class StateSyncSystem {
     }
   }
 
+  addMeshFromComponent(componentData) {
+    if (!componentData?.id) return null
+
+    // si ya existe, no duplicar
+    if (this.meshById.has(componentData.id)) return this.meshById.get(componentData.id)
+
+    const mesh = ComponentFactory.createComponent(componentData)
+    if (!mesh) return null
+
+    this.scene.add(mesh)
+    this.meshById.set(componentData.id, mesh)
+
+    if (this.interactionSystem) this.interactionSystem.register(mesh)
+    return mesh
+  }
+
+  removeMeshById(id) {
+    const mesh = this.meshById.get(id)
+    if (!mesh) return false
+    if (this.interactionSystem) this.interactionSystem.unregister(mesh)
+    this.scene.remove(mesh)
+    this.meshById.delete(id)
+    return true
+  }
+
   getMeshById(id) {
     return this.meshById.get(id) || null
   }
