@@ -78,24 +78,31 @@ const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
 // ---------------------------
-// UI Anchor (anclado al usuario)
+// Anchors UI (en la escena, siguiendo el XR camera)
 // ---------------------------
-// ✅ Esto hace que el panel y el bote SIEMPRE estén cerca del usuario (Quest / XR origin variable)
-const uiAnchor = new THREE.Group()
-uiAnchor.name = "UIAnchor"
-camera.add(uiAnchor) // anclado a la cámara
-uiAnchor.position.set(0, 0, 0)
+// headAnchor: sigue pose de la cabeza (posición + rotación)
+const headAnchor = new THREE.Group()
+headAnchor.name = "HeadAnchor"
+scene.add(headAnchor)
+
+// floorAnchor: sigue XZ de la cabeza pero se queda en y=0 (piso)
+const floorAnchor = new THREE.Group()
+floorAnchor.name = "FloorAnchor"
+scene.add(floorAnchor)
+
+// Debug opcional: descomenta para ver una bolita donde está el anchor (solo para pruebas)
+// const dbg = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 12), new THREE.MeshStandardMaterial({ color: 0xff00ff }))
+// headAnchor.add(dbg)
 
 // ---------------------------
 // Trash System (bote de basura)
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 
-// ✅ Bote en el piso, pegado al usuario a la izquierda (relativo a la cámara)
-// Nota: como uiAnchor está en la cámara, y la cámara está a ~1.6m, usamos y negativo para llegar al piso.
+// Bote en el piso al lado izquierdo del usuario (RELATIVO al floorAnchor)
 trashSystem.createTrashBin({
-  parent: uiAnchor,
-  position: new THREE.Vector3(-0.45, -1.25, -0.35), // izquierda, piso, cerquita
+  parent: floorAnchor,
+  position: new THREE.Vector3(-0.45, 0.0, -0.35), // izquierda, piso, cerquita
 })
 
 // ---------------------------
@@ -139,20 +146,15 @@ function loadState() {
 // ---------------------------
 // Panel 3D (VR UI)
 // ---------------------------
-// ✅ Panel a la derecha, MÁS CERCA del usuario (relativo a cámara)
-const panelPos = new THREE.Vector3(0.35, -0.22, -0.35) // derecha, a altura pecho, cerquita
-const panelRotY = -Math.PI / 6 // 30° hacia el usuario
-
+// Panel a la derecha y más cerca (RELATIVO al headAnchor)
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
-  position: panelPos,
-  rotationY: panelRotY,
+  position: new THREE.Vector3(0.32, -0.18, -0.35), // derecha, a altura pecho, cerquita
+  rotationY: -Math.PI / 6, // 30° hacia el usuario
   onAdd: addCube,
   onSave: saveState,
   onLoad: loadState,
 })
-
-// Importante: agregamos el panel al anchor (no a la escena)
-uiAnchor.add(vrPanel)
+headAnchor.add(vrPanel)
 
 // Registrar botones como interactuables
 for (const b of panelButtons) interactionSystem.register(b)
@@ -177,7 +179,29 @@ stateSyncSystem.rebuildFromState()
 // ---------------------------
 // Loop
 // ---------------------------
+const _tmpPos = new THREE.Vector3()
+const _tmpQuat = new THREE.Quaternion()
+const _tmpScale = new THREE.Vector3()
+
 renderer.setAnimationLoop(() => {
+  // Actualizar anchors con la cámara real de XR
+  if (renderer.xr.isPresenting) {
+    const xrCam = renderer.xr.getCamera(camera)
+
+    // Pose de la "cabeza"
+    xrCam.matrixWorld.decompose(_tmpPos, _tmpQuat, _tmpScale)
+
+    headAnchor.position.copy(_tmpPos)
+    headAnchor.quaternion.copy(_tmpQuat)
+
+    // Piso: mismo XZ, Y fijo a 0
+    floorAnchor.position.set(_tmpPos.x, 0.0, _tmpPos.z)
+    floorAnchor.quaternion.copy(_tmpQuat)
+
+    headAnchor.updateMatrixWorld(true)
+    floorAnchor.updateMatrixWorld(true)
+  }
+
   interactionSystem.update()
 
   // Check del bote (solo borra objetos sueltos)
