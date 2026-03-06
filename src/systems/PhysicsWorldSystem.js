@@ -24,7 +24,9 @@ export class PhysicsWorldSystem {
     // id -> body
     this.bodyById = new Map()
 
-    this._tmpQ = new THREE.Quaternion()
+    // temporales
+    this._tmpWorldPos = new THREE.Vector3()
+    this._tmpWorldQuat = new THREE.Quaternion()
 
     this._accum = 0
     this.fixedTimeStep = 1 / 90
@@ -56,8 +58,13 @@ export class PhysicsWorldSystem {
     body.addShape(shape)
     body.position.set(center.x, center.y, center.z)
 
-    mesh.getWorldQuaternion(this._tmpQ)
-    body.quaternion.set(this._tmpQ.x, this._tmpQ.y, this._tmpQ.z, this._tmpQ.w)
+    mesh.getWorldQuaternion(this._tmpWorldQuat)
+    body.quaternion.set(
+      this._tmpWorldQuat.x,
+      this._tmpWorldQuat.y,
+      this._tmpWorldQuat.z,
+      this._tmpWorldQuat.w
+    )
 
     this.world.addBody(body)
     return body
@@ -85,7 +92,7 @@ export class PhysicsWorldSystem {
     if (!id) return null
     if (this.bodyById.has(id)) return this.bodyById.get(id)
 
-    // Por ahora solo cube 0.2
+    // Por ahora solo cubo 0.2
     const sx = 0.2
     const sy = 0.2
     const sz = 0.2
@@ -103,8 +110,18 @@ export class PhysicsWorldSystem {
     })
 
     body.addShape(shape)
-    body.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
-    body.quaternion.set(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+
+    // ✅ usar transform mundial inicial
+    mesh.getWorldPosition(this._tmpWorldPos)
+    mesh.getWorldQuaternion(this._tmpWorldQuat)
+
+    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
+    body.quaternion.set(
+      this._tmpWorldQuat.x,
+      this._tmpWorldQuat.y,
+      this._tmpWorldQuat.z,
+      this._tmpWorldQuat.w
+    )
 
     this.world.addBody(body)
     this.bodyById.set(id, body)
@@ -133,9 +150,17 @@ export class PhysicsWorldSystem {
       body.velocity.set(0, 0, 0)
       body.angularVelocity.set(0, 0, 0)
 
-      // ✅ IMPORTANTE: sincronizar body con mesh al empezar agarre
-      body.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
-      body.quaternion.set(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+      // ✅ sync con transform mundial actual
+      mesh.getWorldPosition(this._tmpWorldPos)
+      mesh.getWorldQuaternion(this._tmpWorldQuat)
+
+      body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
+      body.quaternion.set(
+        this._tmpWorldQuat.x,
+        this._tmpWorldQuat.y,
+        this._tmpWorldQuat.z,
+        this._tmpWorldQuat.w
+      )
 
       body.wakeUp()
     } else {
@@ -150,9 +175,17 @@ export class PhysicsWorldSystem {
     const body = this.ensureBodyForMesh(mesh)
     if (!body) return
 
-    // ✅ CLAVE: sincronizar body a la posición/rotación ACTUAL del mesh antes de soltar
-    body.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
-    body.quaternion.set(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+    // ✅ CLAVE: usar transform mundial del mesh ya suelto
+    mesh.getWorldPosition(this._tmpWorldPos)
+    mesh.getWorldQuaternion(this._tmpWorldQuat)
+
+    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
+    body.quaternion.set(
+      this._tmpWorldQuat.x,
+      this._tmpWorldQuat.y,
+      this._tmpWorldQuat.z,
+      this._tmpWorldQuat.w
+    )
 
     body.type = CANNON.Body.DYNAMIC
     body.mass = 0.25
@@ -168,6 +201,7 @@ export class PhysicsWorldSystem {
     }
   }
 
+  // Mientras está agarrado: body sigue la transform mundial del mesh
   syncBodyToMesh(mesh) {
     const id = mesh?.userData?.componentId
     if (!id) return
@@ -176,8 +210,17 @@ export class PhysicsWorldSystem {
     if (!body) return
     if (body.type !== CANNON.Body.KINEMATIC) return
 
-    body.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
-    body.quaternion.set(mesh.quaternion.x, mesh.quaternion.y, mesh.quaternion.z, mesh.quaternion.w)
+    mesh.getWorldPosition(this._tmpWorldPos)
+    mesh.getWorldQuaternion(this._tmpWorldQuat)
+
+    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
+    body.quaternion.set(
+      this._tmpWorldQuat.x,
+      this._tmpWorldQuat.y,
+      this._tmpWorldQuat.z,
+      this._tmpWorldQuat.w
+    )
+
     body.velocity.set(0, 0, 0)
     body.angularVelocity.set(0, 0, 0)
     body.wakeUp()
@@ -189,6 +232,9 @@ export class PhysicsWorldSystem {
 
     const body = this.bodyById.get(id)
     if (!body) return
+
+    // ✅ si el mesh sigue agarrado (parent != scene), NO lo pises desde el body
+    if (mesh.parent !== this.scene) return
     if (body.type === CANNON.Body.KINEMATIC) return
 
     mesh.position.set(body.position.x, body.position.y, body.position.z)
@@ -255,7 +301,6 @@ export class PhysicsWorldSystem {
       this.persistIfSleeping(mesh)
     }
 
-    // ✅ limpiar bodies de componentes ya eliminados
     this.cleanupBodies(meshesIterable)
   }
 }
