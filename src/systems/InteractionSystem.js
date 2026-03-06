@@ -27,12 +27,12 @@ export class InteractionSystem {
     this.nearEnabled = true
 
     // Rango general de evaluación de mano
-    this.nearRadius = 0.12
+    this.nearRadius = 0.14
 
-    // El punto de agarre debe estar realmente cerca del objeto
-    this.handGrabSurfaceMaxDist = 0.035
-    this.handGrabSurfaceSlack = 0.018
-    this.handHoverSurfaceMaxDist = 0.045
+    // Más permisivo para esquinas/caras, pero sin volver a capturar desde lejos
+    this.handGrabSurfaceMaxDist = 0.045
+    this.handGrabSurfaceSlack = 0.028
+    this.handHoverSurfaceMaxDist = 0.060
 
     this.pinchStartDist = 0.070
     this.pinchEndDist = 0.100
@@ -53,6 +53,7 @@ export class InteractionSystem {
     this._tmpC = new THREE.Vector3()
     this._tmpD = new THREE.Vector3()
     this._tmpE = new THREE.Vector3()
+    this._tmpSize = new THREE.Vector3()
     this._box = new THREE.Box3()
 
     this._lastPokedButton = null
@@ -479,7 +480,7 @@ export class InteractionSystem {
       if (centerDist > maxDist) continue
       if (surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) continue
 
-      const score = surfaceDist * 4 + centerDist
+      const score = surfaceDist * 3.5 + centerDist
       if (score < bestScore) {
         bestScore = score
         best = obj
@@ -581,6 +582,27 @@ export class InteractionSystem {
     return this.pickBestSurfaceHit(hits)
   }
 
+  resolveSurfacePenetration(object) {
+    if (!object || this.surfaces.length === 0) return false
+
+    const best = this.getBestSurfaceBelow(object)
+    if (!best) return false
+
+    this._box.setFromObject(object)
+    this._box.getSize(this._tmpSize)
+    const halfY = this._tmpSize.y * 0.5
+
+    const bottomY = object.position.y - halfY
+    const targetY = best.point.y + halfY
+
+    if (bottomY < best.point.y) {
+      object.position.y = targetY + 0.001
+      return true
+    }
+
+    return false
+  }
+
   tryPlaceObjectDirectly(object) {
     if (!object) return false
 
@@ -615,6 +637,9 @@ export class InteractionSystem {
 
     this.scene.attach(object)
     this.clearObjectOwner(object)
+
+    // Si se soltó atravesando mesa/protoboard/piso, primero corregir penetración
+    this.resolveSurfacePenetration(object)
 
     if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
       clearOwner()
@@ -805,7 +830,7 @@ export class InteractionSystem {
         if (centerDist > this.nearRadius) continue
         if (surfaceDist > this.handHoverSurfaceMaxDist) continue
 
-        const score = surfaceDist * 4 + centerDist
+        const score = surfaceDist * 3.5 + centerDist
         if (score < bestScore) {
           bestScore = score
           best = obj

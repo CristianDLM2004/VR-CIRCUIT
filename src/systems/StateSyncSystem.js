@@ -12,10 +12,26 @@ export class StateSyncSystem {
     this.interactionSystem = interactionSystem
   }
 
+  detachAndDisposeMesh(mesh) {
+    if (!mesh) return
+
+    if (this.interactionSystem) this.interactionSystem.unregister(mesh)
+
+    if (mesh.userData) {
+      mesh.userData.heldBy = null
+      delete mesh.userData.physics
+    }
+
+    if (mesh.parent) {
+      mesh.parent.remove(mesh)
+    } else {
+      this.scene.remove(mesh)
+    }
+  }
+
   rebuildFromState() {
     for (const mesh of this.meshById.values()) {
-      if (this.interactionSystem) this.interactionSystem.unregister(mesh)
-      this.scene.remove(mesh)
+      this.detachAndDisposeMesh(mesh)
     }
     this.meshById.clear()
 
@@ -48,8 +64,7 @@ export class StateSyncSystem {
     const mesh = this.meshById.get(id)
     if (!mesh) return false
 
-    if (this.interactionSystem) this.interactionSystem.unregister(mesh)
-    this.scene.remove(mesh)
+    this.detachAndDisposeMesh(mesh)
     this.meshById.delete(id)
     return true
   }
