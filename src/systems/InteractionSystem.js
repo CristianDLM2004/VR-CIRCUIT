@@ -22,11 +22,6 @@ export class InteractionSystem {
     this.holeSystem = null
 
     this.hovered = null
-    this.selected = null
-    this.selectedBy = null
-    this._selectedHandEntry = null
-    this._selectedController = null
-
     this.controllerRays = []
 
     this.nearEnabled = true
@@ -45,20 +40,12 @@ export class InteractionSystem {
 
     this._lastPokedButton = null
 
-    this.throwVelocityMultiplier = 2.4
-    this.throwMinSpeed = 0.03
+    // Más conservador: solo lanzar cuando de verdad hubo gesto de lanzamiento.
+    this.throwVelocityMultiplier = 1.9
+    this.throwMinSpeed = 0.22
 
-    this._hold = {
-      active: false,
-      lastPos: new THREE.Vector3(),
-      lastT: 0,
-      vel: new THREE.Vector3(),
-      source: null,
-      sourceType: null,
-      samples: [],
-      maxSamples: 8,
-      sampleWindowMs: 120,
-    }
+    // Si se suelta cerca de una superficie, colocarlo directo.
+    this.directPlaceMaxDrop = 0.12
 
     this.initXRInputs()
   }
@@ -96,6 +83,7 @@ export class InteractionSystem {
       existing.bounds = bounds
       return
     }
+
     this.surfaces.push({ mesh, type, bounds })
   }
 
@@ -105,8 +93,13 @@ export class InteractionSystem {
 
     for (let i = 0; i < 2; i++) {
       const controller = this.renderer.xr.getController(i)
+      controller.userData.sourceType = "controller"
+      controller.userData.sourceIndex = i
+      controller.userData.heldObject = null
+      controller.userData.hold = this.createHoldState("controller", controller)
+
       controller.addEventListener("selectstart", (e) => this.onControllerSelectStart(e))
-      controller.addEventListener("selectend", () => this.onControllerSelectEnd())
+      controller.addEventListener("selectend", (e) => this.onControllerSelectEnd(e))
       this.scene.add(controller)
 
       const controllerGrip = this.renderer.xr.getControllerGrip(i)
@@ -128,7 +121,28 @@ export class InteractionSystem {
       pinchPoint.name = `PinchPoint_${i}`
       hand.add(pinchPoint)
 
-      this.hands.push({ hand, pinchPoint, isPinching: false })
+      this.hands.push({
+        index: i,
+        hand,
+        pinchPoint,
+        isPinching: false,
+        heldObject: null,
+        hold: this.createHoldState("hand", null),
+      })
+    }
+  }
+
+  createHoldState(sourceType, source) {
+    return {
+      active: false,
+      sourceType,
+      source,
+      lastPos: new THREE.Vector3(),
+      lastT: 0,
+      vel: new THREE.Vector3(),
+      samples: [],
+      maxSamples: 8,
+      sampleWindowMs: 120,
     }
   }
 
@@ -164,10 +178,8 @@ export class InteractionSystem {
 
   isHandEntryTracked(handEntry) {
     if (!handEntry?.hand?.joints) return false
-
     const thumb = handEntry.hand.joints["thumb-tip"]
     const index = handEntry.hand.joints["index-finger-tip"]
-
     return this.isJointTracked(thumb) && this.isJointTracked(index)
   }
 
@@ -208,35 +220,70 @@ export class InteractionSystem {
     return null
   }
 
-  computeControllerHover() {
-    let best = null
+  isObjectFreeForGrab(obj) {
+    if (!obj) return false
+    if (obj.userData?.isUI) return true
+    if (!obj.userData?.componentId) return false
+    return obj.parent === this.scene
+  }
+
+  getHeldObjectsSet() {
+    const set = new Set()
+
+    for (const handEntry of this.hands) {
+      if (handEntry.heldObject) set.add(handEntry.heldObject)
+    }
 
     for (const controller of this.controllers) {
-      this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+      if (controller.userData?.heldObject) set.add(controller.userData.heldObject)
+    }
 
-      this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
-      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+    return set
+  }
 
-      const hits = this.raycaster.intersectObjects(this.interactables, true)
-      if (hits.length === 0) continue
+  computeControllerHoverFor(controller) {
+    let best = null
 
-      for (const h of hits) {
-        const picked = this.pickInteractableFromHitObject(h.object)
-        if (picked && this.interactables.includes(picked) && !picked.userData?.isSurface) {
-          best = picked
-          break
-        }
+    this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+    const hits = this.raycaster.intersectObjects(this.interactables, true)
+    if (hits.length === 0) return null
+
+    for (const h of hits) {
+      const picked = this.pickInteractableFromHitObject(h.object)
+      if (!picked) continue
+      if (!this.interactables.includes(picked)) continue
+      if (picked.userData?.isSurface) continue
+
+      if (picked.userData?.isUI) {
+        best = picked
+        break
       }
-      if (best) break
+
+      if (picked.userData?.componentId && this.isObjectFreeForGrab(picked)) {
+        best = picked
+        break
+      }
     }
 
     return best
+  }
+
+  computeControllerHover() {
+    for (const controller of this.controllers) {
+      const best = this.computeControllerHoverFor(controller)
+      if (best) return best
+    }
+    return null
   }
 
   updateControllerRays(visible) {
     for (const r of this.controllerRays) {
       r.line.visible = visible
       r.hitDot.visible = visible
+
       if (!visible) continue
 
       const controller = r.controller
@@ -248,7 +295,14 @@ export class InteractionSystem {
       const hits = this.raycaster.intersectObjects(this.interactables, true)
 
       let dist = 5
-      if (hits.length > 0) dist = Math.min(5, Math.max(0.05, hits[0].distance))
+      for (const h of hits) {
+        const picked = this.pickInteractableFromHitObject(h.object)
+        if (!picked) continue
+        if (picked.userData?.isUI || this.isObjectFreeForGrab(picked)) {
+          dist = Math.min(5, Math.max(0.05, h.distance))
+          break
+        }
+      }
 
       r.line.scale.z = dist
       r.hitDot.position.z = -dist
@@ -271,15 +325,17 @@ export class InteractionSystem {
   }
 
   updateUIPoke() {
-    if (this.selected) return
+    if (this.hands.some((h) => h.heldObject)) return
 
     if (this._lastPokedButton) {
       let minDist = Infinity
+
       for (const h of this.hands) {
         if (!this.isHandEntryTracked(h)) continue
         this.getIndexTipWorld(h, this._tmpA)
         minDist = Math.min(minDist, this.distanceToObjectSurface(this._lastPokedButton, this._tmpA))
       }
+
       if (minDist > this.uiReleaseRadius) this._lastPokedButton = null
       return
     }
@@ -289,6 +345,8 @@ export class InteractionSystem {
 
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h)) continue
+      if (h.heldObject) continue
+
       this.getIndexTipWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
@@ -320,6 +378,7 @@ export class InteractionSystem {
     ]
 
     let best = Infinity
+
     for (const name of candidates) {
       const p = this.getJointWorld(hand, name, this._tmpB)
       if (!p) continue
@@ -336,7 +395,9 @@ export class InteractionSystem {
       if (!this.isHandEntryTracked(h)) {
         if (h.isPinching) {
           h.isPinching = false
-          this.onHandPinchEnd()
+          this.onHandPinchEnd(h, { forceZeroVelocity: true })
+        } else if (h.heldObject) {
+          this.forceReleaseHand(h, true)
         }
         continue
       }
@@ -346,7 +407,9 @@ export class InteractionSystem {
       if (dist == null) {
         if (h.isPinching) {
           h.isPinching = false
-          this.onHandPinchEnd()
+          this.onHandPinchEnd(h, { forceZeroVelocity: true })
+        } else if (h.heldObject) {
+          this.forceReleaseHand(h, true)
         }
         continue
       }
@@ -356,7 +419,7 @@ export class InteractionSystem {
         this.onHandPinchStart(h)
       } else if (h.isPinching && dist >= this.pinchEndDist) {
         h.isPinching = false
-        this.onHandPinchEnd()
+        this.onHandPinchEnd(h)
       }
     }
   }
@@ -369,6 +432,8 @@ export class InteractionSystem {
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId) continue
+      if (!this.isObjectFreeForGrab(obj)) continue
+
       const d = this.distanceToObjectSurface(obj, this._tmpC)
       if (d < bestDist) {
         bestDist = d
@@ -382,173 +447,218 @@ export class InteractionSystem {
   persistMeshTransform(mesh) {
     const id = mesh?.userData?.componentId
     if (!id) return
+
     const p = mesh.position
     const q = mesh.quaternion
+
     this.appState.updateComponent(id, {
       transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
     })
   }
 
-  _startHoldTracking(sourceType, source) {
-    this._hold.active = true
-    this._hold.sourceType = sourceType
-    this._hold.source = source
-    this._hold.lastT = performance.now()
-    this._hold.vel.set(0, 0, 0)
-    this._hold.samples.length = 0
+  startHoldTracking(holdState, sourceType, source) {
+    holdState.active = true
+    holdState.sourceType = sourceType
+    holdState.source = source
+    holdState.lastT = performance.now()
+    holdState.vel.set(0, 0, 0)
+    holdState.samples.length = 0
 
-    if (sourceType === "controller") source.getWorldPosition(this._hold.lastPos)
-    else this.getIndexTipWorld(source, this._hold.lastPos)
+    if (sourceType === "controller") {
+      source.getWorldPosition(holdState.lastPos)
+    } else {
+      this.getIndexTipWorld(source, holdState.lastPos)
+    }
   }
 
-  _stopHoldTracking() {
-    this._hold.active = false
-    this._hold.sourceType = null
-    this._hold.source = null
-    this._hold.lastT = 0
-    this._hold.vel.set(0, 0, 0)
-    this._hold.samples.length = 0
+  stopHoldTracking(holdState) {
+    holdState.active = false
+    holdState.sourceType = null
+    holdState.source = null
+    holdState.lastT = 0
+    holdState.vel.set(0, 0, 0)
+    holdState.samples.length = 0
   }
 
-  _updateHoldVelocity() {
-    if (!this._hold.active || !this._hold.sourceType || !this._hold.source) return
+  updateHoldVelocity(holdState) {
+    if (!holdState?.active || !holdState.sourceType || !holdState.source) return
 
     const now = performance.now()
-    const dt = (now - this._hold.lastT) / 1000
+    const dt = (now - holdState.lastT) / 1000
     if (dt <= 0.0001) return
 
-    if (this._hold.sourceType === "controller") {
-      this._hold.source.getWorldPosition(this._tmpA)
+    if (holdState.sourceType === "controller") {
+      holdState.source.getWorldPosition(this._tmpA)
     } else {
-      if (!this.isHandEntryTracked(this._hold.source)) return
-      this.getIndexTipWorld(this._hold.source, this._tmpA)
+      if (!this.isHandEntryTracked(holdState.source)) return
+      this.getIndexTipWorld(holdState.source, this._tmpA)
     }
 
-    const v = this._tmpA.clone().sub(this._hold.lastPos).multiplyScalar(1 / dt)
+    const v = this._tmpA.clone().sub(holdState.lastPos).multiplyScalar(1 / dt)
 
-    this._hold.samples.push({ v, t: now })
-    while (this._hold.samples.length > this._hold.maxSamples) this._hold.samples.shift()
+    holdState.samples.push({ v, t: now })
+    while (holdState.samples.length > holdState.maxSamples) holdState.samples.shift()
 
-    const minT = now - this._hold.sampleWindowMs
-    while (this._hold.samples.length && this._hold.samples[0].t < minT) this._hold.samples.shift()
+    const minT = now - holdState.sampleWindowMs
+    while (holdState.samples.length && holdState.samples[0].t < minT) holdState.samples.shift()
 
-    if (this._hold.samples.length) {
-      this._hold.vel.set(0, 0, 0)
-      for (const s of this._hold.samples) this._hold.vel.add(s.v)
-      this._hold.vel.multiplyScalar(1 / this._hold.samples.length)
+    if (holdState.samples.length) {
+      holdState.vel.set(0, 0, 0)
+      for (const s of holdState.samples) holdState.vel.add(s.v)
+      holdState.vel.multiplyScalar(1 / holdState.samples.length)
     } else {
-      this._hold.vel.copy(v)
+      holdState.vel.copy(v)
     }
 
-    this._hold.lastPos.copy(this._tmpA)
-    this._hold.lastT = now
+    holdState.lastPos.copy(this._tmpA)
+    holdState.lastT = now
   }
 
-  _getReleaseVelocity() {
-    const v = this._hold.vel.clone().multiplyScalar(this.throwVelocityMultiplier)
+  getReleaseVelocity(holdState, forceZeroVelocity = false) {
+    if (forceZeroVelocity) return new THREE.Vector3(0, 0, 0)
+
+    const v = holdState.vel.clone().multiplyScalar(this.throwVelocityMultiplier)
     if (v.length() < this.throwMinSpeed) v.set(0, 0, 0)
     return v
   }
 
-  _forceReleaseSelected() {
-    if (!this.selected) return
+  getBestSurfaceBelow(object) {
+    if (!object || this.surfaces.length === 0) return null
 
-    this._updateHoldVelocity()
-    const releaseVel = this._getReleaseVelocity()
+    const origin = object.position.clone()
+    origin.y += 2
 
-    this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
+    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
-    this.selected = null
-    this.selectedBy = null
-    this._selectedHandEntry = null
-    this._selectedController = null
-    this._stopHoldTracking()
+    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
+    const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
+    if (hits.length === 0) return null
+
+    return this.pickBestSurfaceHit(hits)
+  }
+
+  tryPlaceObjectDirectly(object) {
+    if (!object) return false
+
+    const best = this.getBestSurfaceBelow(object)
+    if (!best) return false
+
+    const bbox = new THREE.Box3().setFromObject(object)
+    const size = new THREE.Vector3()
+    bbox.getSize(size)
+
+    const halfY = size.y / 2
+    const bottomY = object.position.y - halfY
+    const drop = bottomY - best.point.y
+
+    if (drop < -0.03) return false
+    if (drop > this.directPlaceMaxDrop) return false
+
+    object.position.y = best.point.y + halfY
+
+    if (this.holeSystem) this.holeSystem.trySnapObject(object, 0.03)
+    this.persistMeshTransform(object)
+    return true
+  }
+
+  releaseHeldObject(object, holdState, clearOwner, options = {}) {
+    if (!object) return
+
+    const { forceZeroVelocity = false } = options
+
+    this.updateHoldVelocity(holdState)
+    const releaseVel = this.getReleaseVelocity(holdState, forceZeroVelocity)
+
+    this.scene.attach(object)
+
+    if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
+      clearOwner()
+      this.stopHoldTracking(holdState)
+      return
+    }
+
+    object.userData.physics = { active: true, vel: releaseVel }
+    clearOwner()
+    this.stopHoldTracking(holdState)
   }
 
   onHandPinchStart(handEntry) {
-    if (this.selected) return
     if (!this.isHandEntryTracked(handEntry)) return
+    if (handEntry.heldObject) return
 
     const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
     if (!target) return
 
-    this.selected = target
-    this.selectedBy = "hand"
-    this._selectedHandEntry = handEntry
-
-    this._startHoldTracking("hand", handEntry)
+    handEntry.heldObject = target
+    this.startHoldTracking(handEntry.hold, "hand", handEntry)
 
     const joint = handEntry.hand.joints?.["index-finger-tip"]
-    if (this.isJointTracked(joint)) joint.attach(this.selected)
-    else handEntry.pinchPoint.attach(this.selected)
+    if (this.isJointTracked(joint)) joint.attach(target)
+    else handEntry.pinchPoint.attach(target)
   }
 
-  onHandPinchEnd() {
-    if (!this.selected) return
-    if (this.selectedBy !== "hand") return
+  onHandPinchEnd(handEntry, options = {}) {
+    if (!handEntry?.heldObject) return
 
-    this._updateHoldVelocity()
-    const releaseVel = this._getReleaseVelocity()
+    const object = handEntry.heldObject
 
-    this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
+    this.releaseHeldObject(
+      object,
+      handEntry.hold,
+      () => {
+        handEntry.heldObject = null
+      },
+      options
+    )
+  }
 
-    this.selected = null
-    this.selectedBy = null
-    this._selectedHandEntry = null
-    this._stopHoldTracking()
+  forceReleaseHand(handEntry, forceZeroVelocity = true) {
+    if (!handEntry?.heldObject) return
+    this.onHandPinchEnd(handEntry, { forceZeroVelocity })
+    handEntry.isPinching = false
   }
 
   onControllerSelectStart(event) {
     const controller = event.target
-    if (!this.hovered) return
-    if (this.hovered.userData?.isSurface) return
+    if (!controller) return
+    if (controller.userData?.heldObject) return
 
-    if (this.hovered.userData?.isUI && typeof this.hovered.userData?.onPress === "function") {
-      this.hovered.userData.onPress()
+    const target = this.computeControllerHoverFor(controller)
+    if (!target) return
+    if (target.userData?.isSurface) return
+
+    if (target.userData?.isUI && typeof target.userData?.onPress === "function") {
+      target.userData.onPress()
       return
     }
 
-    if (!this.hovered.userData?.componentId) return
+    if (!target.userData?.componentId) return
+    if (!this.isObjectFreeForGrab(target)) return
 
-    this.selected = this.hovered
-    this.selectedBy = "controller"
-    this._selectedController = controller
-
-    this._startHoldTracking("controller", controller)
-
-    controller.attach(this.selected)
+    controller.userData.heldObject = target
+    this.startHoldTracking(controller.userData.hold, "controller", controller)
+    controller.attach(target)
   }
 
-  onControllerSelectEnd() {
-    if (!this.selected) return
-    if (this.selectedBy !== "controller") return
+  onControllerSelectEnd(event) {
+    const controller = event?.target
+    if (!controller?.userData?.heldObject) return
 
-    this._updateHoldVelocity()
-    const releaseVel = this._getReleaseVelocity()
+    const object = controller.userData.heldObject
 
-    this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
-
-    this.selected = null
-    this.selectedBy = null
-    this._selectedController = null
-    this._stopHoldTracking()
+    this.releaseHeldObject(
+      object,
+      controller.userData.hold,
+      () => {
+        controller.userData.heldObject = null
+      }
+    )
   }
 
   snapToSurface(object) {
     if (!object || this.surfaces.length === 0) return
 
-    const origin = object.position.clone()
-    origin.y += 2
-    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
-
-    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
-    const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
-    if (hits.length === 0) return
-
-    const best = this.pickBestSurfaceHit(hits)
+    const best = this.getBestSurfaceBelow(object)
     if (!best) return
 
     const bbox = new THREE.Box3().setFromObject(object)
@@ -564,6 +674,7 @@ export class InteractionSystem {
     const getSurfaceEntry = (hitObj) => {
       for (const s of this.surfaces) {
         if (hitObj === s.mesh) return s
+
         let cur = hitObj
         while (cur) {
           if (cur === s.mesh) return s
@@ -589,6 +700,7 @@ export class InteractionSystem {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
     }
+
     return null
   }
 
@@ -600,10 +712,15 @@ export class InteractionSystem {
 
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h)) continue
+      if (h.heldObject) continue
+
       this.getIndexTipWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
         if (!obj || obj.userData?.isSurface) continue
+
+        if (obj.userData?.componentId && !this.isObjectFreeForGrab(obj)) continue
+
         const d = this.distanceToObjectSurface(obj, this._tmpA)
         if (d < bestDist) {
           bestDist = d
@@ -615,6 +732,33 @@ export class InteractionSystem {
     return best
   }
 
+  updateHeldObjects() {
+    for (const handEntry of this.hands) {
+      if (handEntry.heldObject) this.updateHoldVelocity(handEntry.hold)
+    }
+
+    for (const controller of this.controllers) {
+      if (controller.userData?.heldObject) this.updateHoldVelocity(controller.userData.hold)
+    }
+  }
+
+  cleanupDetachedHolds() {
+    for (const handEntry of this.hands) {
+      if (handEntry.heldObject && handEntry.heldObject.parent === this.scene) {
+        handEntry.heldObject = null
+        this.stopHoldTracking(handEntry.hold)
+      }
+    }
+
+    for (const controller of this.controllers) {
+      const held = controller.userData?.heldObject
+      if (held && held.parent === this.scene) {
+        controller.userData.heldObject = null
+        this.stopHoldTracking(controller.userData.hold)
+      }
+    }
+  }
+
   update() {
     if (!this.renderer.xr.isPresenting) return
 
@@ -622,37 +766,25 @@ export class InteractionSystem {
 
     this.updateControllerRays(!handsActive)
 
-    if (!handsActive && this.selected && this.selectedBy === "hand") {
-      this._forceReleaseSelected()
-    }
-
     if (handsActive) {
       this.updateUIPoke()
       this.updateHandPinchState()
-
-      if (
-        this.selected &&
-        this.selectedBy === "hand" &&
-        (
-          !this._selectedHandEntry ||
-          !this._selectedHandEntry.isPinching ||
-          !this.isHandEntryTracked(this._selectedHandEntry)
-        )
-      ) {
-        this._forceReleaseSelected()
+    } else {
+      for (const handEntry of this.hands) {
+        if (handEntry.heldObject) this.forceReleaseHand(handEntry, true)
+        handEntry.isPinching = false
       }
     }
 
-    if (this.selected && this.selected.parent === this.scene) {
-      this.selected = null
-      this.selectedBy = null
-      this._selectedHandEntry = null
-      this._selectedController = null
-      this._stopHoldTracking()
-    }
+    this.cleanupDetachedHolds()
+    this.updateHeldObjects()
 
-    if (this.selected) {
-      this._updateHoldVelocity()
+    const anyHeld =
+      this.hands.some((h) => !!h.heldObject) ||
+      this.controllers.some((c) => !!c.userData?.heldObject)
+
+    if (anyHeld) {
+      this.setHover(null)
       return
     }
 
