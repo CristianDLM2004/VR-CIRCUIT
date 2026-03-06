@@ -7,12 +7,10 @@ export class PhysicsWorldSystem {
     this.appState = appState
     this.stateSyncSystem = stateSyncSystem
 
-    // Cannon world
     this.world = new CANNON.World({
       gravity: new CANNON.Vec3(0, -9.82, 0),
     })
 
-    // Materiales
     this.matDefault = new CANNON.Material("default")
     this.contactDefault = new CANNON.ContactMaterial(this.matDefault, this.matDefault, {
       friction: 0.55,
@@ -21,10 +19,8 @@ export class PhysicsWorldSystem {
     this.world.defaultContactMaterial = this.contactDefault
     this.world.allowSleep = true
 
-    // id -> body
     this.bodyById = new Map()
 
-    // temporales
     this._tmpWorldPos = new THREE.Vector3()
     this._tmpWorldQuat = new THREE.Quaternion()
 
@@ -92,11 +88,9 @@ export class PhysicsWorldSystem {
     if (!id) return null
     if (this.bodyById.has(id)) return this.bodyById.get(id)
 
-    // Por ahora solo cubo 0.2
     const sx = 0.2
     const sy = 0.2
     const sz = 0.2
-
     const shape = new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2))
 
     const body = new CANNON.Body({
@@ -111,7 +105,6 @@ export class PhysicsWorldSystem {
 
     body.addShape(shape)
 
-    // ✅ usar transform mundial inicial
     mesh.getWorldPosition(this._tmpWorldPos)
     mesh.getWorldQuaternion(this._tmpWorldQuat)
 
@@ -123,9 +116,12 @@ export class PhysicsWorldSystem {
       this._tmpWorldQuat.w
     )
 
+    // ✅ asegurarnos que no nazca dormido
+    body.sleepState = CANNON.Body.AWAKE
+    body.wakeUp()
+
     this.world.addBody(body)
     this.bodyById.set(id, body)
-
     return body
   }
 
@@ -143,39 +139,40 @@ export class PhysicsWorldSystem {
     const body = this.ensureBodyForMesh(mesh)
     if (!body) return
 
+    // ✅ siempre sincronizamos con transform mundial antes de cambiar tipo
+    mesh.getWorldPosition(this._tmpWorldPos)
+    mesh.getWorldQuaternion(this._tmpWorldQuat)
+    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
+    body.quaternion.set(
+      this._tmpWorldQuat.x,
+      this._tmpWorldQuat.y,
+      this._tmpWorldQuat.z,
+      this._tmpWorldQuat.w
+    )
+
+    body.velocity.set(0, 0, 0)
+    body.angularVelocity.set(0, 0, 0)
+
     if (grabbed) {
       body.type = CANNON.Body.KINEMATIC
       body.mass = 0
       body.updateMassProperties()
-      body.velocity.set(0, 0, 0)
-      body.angularVelocity.set(0, 0, 0)
-
-      // ✅ sync con transform mundial actual
-      mesh.getWorldPosition(this._tmpWorldPos)
-      mesh.getWorldQuaternion(this._tmpWorldQuat)
-
-      body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
-      body.quaternion.set(
-        this._tmpWorldQuat.x,
-        this._tmpWorldQuat.y,
-        this._tmpWorldQuat.z,
-        this._tmpWorldQuat.w
-      )
-
-      body.wakeUp()
     } else {
       body.type = CANNON.Body.DYNAMIC
       body.mass = 0.25
       body.updateMassProperties()
-      body.wakeUp()
     }
+
+    // ✅ CLAVE: forzar awake real (si no, puede quedarse "colgado")
+    body.sleepState = CANNON.Body.AWAKE
+    body.wakeUp()
   }
 
   applyReleaseVelocity(mesh, linearVel, angularVel = null) {
     const body = this.ensureBodyForMesh(mesh)
     if (!body) return
 
-    // ✅ CLAVE: usar transform mundial del mesh ya suelto
+    // ✅ usar transform mundial del mesh suelto
     mesh.getWorldPosition(this._tmpWorldPos)
     mesh.getWorldQuaternion(this._tmpWorldQuat)
 
@@ -187,21 +184,32 @@ export class PhysicsWorldSystem {
       this._tmpWorldQuat.w
     )
 
+    // volver dinámico
     body.type = CANNON.Body.DYNAMIC
     body.mass = 0.25
     body.updateMassProperties()
-    body.wakeUp()
 
-    body.velocity.set(linearVel.x, linearVel.y, linearVel.z)
+    // ✅ micro-impulso hacia abajo si sueltas sin lanzar (evita "sleep en el aire")
+    const vx = linearVel?.x ?? 0
+    const vy = linearVel?.y ?? 0
+    const vz = linearVel?.z ?? 0
+    const speed2 = vx * vx + vy * vy + vz * vz
+    const minDown = -0.03
+
+    body.velocity.set(vx, speed2 < 0.0004 ? Math.min(vy, minDown) : vy, vz)
 
     if (angularVel) {
       body.angularVelocity.set(angularVel.x, angularVel.y, angularVel.z)
     } else {
       body.angularVelocity.set(0, 0, 0)
     }
+
+    // ✅ forzar awake después de setear vels
+    body.sleepState = CANNON.Body.AWAKE
+    body.wakeUp()
   }
 
-  // Mientras está agarrado: body sigue la transform mundial del mesh
+  // KINEMATIC: body sigue al mesh
   syncBodyToMesh(mesh) {
     const id = mesh?.userData?.componentId
     if (!id) return
@@ -223,9 +231,12 @@ export class PhysicsWorldSystem {
 
     body.velocity.set(0, 0, 0)
     body.angularVelocity.set(0, 0, 0)
+
+    body.sleepState = CANNON.Body.AWAKE
     body.wakeUp()
   }
 
+  // DYNAMIC: mesh sigue al body
   syncMeshFromBody(mesh) {
     const id = mesh?.userData?.componentId
     if (!id) return
@@ -233,7 +244,7 @@ export class PhysicsWorldSystem {
     const body = this.bodyById.get(id)
     if (!body) return
 
-    // ✅ si el mesh sigue agarrado (parent != scene), NO lo pises desde el body
+    // si sigue agarrado, no pises el mesh
     if (mesh.parent !== this.scene) return
     if (body.type === CANNON.Body.KINEMATIC) return
 
@@ -271,7 +282,6 @@ export class PhysicsWorldSystem {
       const id = mesh?.userData?.componentId
       if (id) aliveIds.add(id)
     }
-
     for (const id of this.bodyById.keys()) {
       if (!aliveIds.has(id)) this.removeBodyById(id)
     }
@@ -291,13 +301,8 @@ export class PhysicsWorldSystem {
       if (!mesh?.userData?.componentId) continue
 
       this.ensureBodyForMesh(mesh)
-
-      // agarrado -> body sigue al mesh
       this.syncBodyToMesh(mesh)
-
-      // libre -> mesh sigue al body
       this.syncMeshFromBody(mesh)
-
       this.persistIfSleeping(mesh)
     }
 
