@@ -13,12 +13,15 @@ export class PhysicsSystem {
     this._tmpDir = new THREE.Vector3(0, -1, 0)
     this._tmpSize = new THREE.Vector3()
     this._tmpCamPos = new THREE.Vector3()
-    this._tmpEuler = new THREE.Euler()
     this._tmpQuat = new THREE.Quaternion()
-    this._targetQuat = new THREE.Quaternion()
+    this._tmpQuat2 = new THREE.Quaternion()
+    this._tmpMatrix = new THREE.Matrix4()
+    this._tmpVecA = new THREE.Vector3()
+    this._tmpVecB = new THREE.Vector3()
 
     this.bodies = new Map()
 
+    // Dinámica base
     this.gravity = -9.8
     this.linearDrag = 0.015
 
@@ -31,13 +34,77 @@ export class PhysicsSystem {
     this.angularDrag = 0.10
     this.spinFromThrow = 6.5
 
-    this.settleDuration = 0.25
+    // ✅ settle más suave y menos brusco
+    this.settleDuration = 0.42
 
+    // Limpieza
     this.maxDistance = 10.0
     this.farAfterMs = 1500
     this.fallYKill = -3.0
     this.floorTimeoutMs = 45000
     this.floorTimeoutDist = 4.5
+
+    // ✅ Orientaciones estables para cubo (24 posibles)
+    this.stableCubeQuaternions = this.buildStableCubeQuaternions()
+  }
+
+  buildStableCubeQuaternions() {
+    const dirs = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+    ]
+
+    const quats = []
+    const up = new THREE.Vector3(0, 1, 0)
+
+    for (const yAxis of dirs) {
+      for (const zAxis of dirs) {
+        // Deben ser perpendiculares
+        if (Math.abs(yAxis.dot(zAxis)) > 1e-6) continue
+
+        // x = y × z para formar base ortonormal derecha
+        const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis)
+        if (xAxis.lengthSq() < 1e-6) continue
+        xAxis.normalize()
+
+        const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
+        const q = new THREE.Quaternion().setFromRotationMatrix(m)
+
+        // evitar duplicados
+        let duplicate = false
+        for (const existing of quats) {
+          const dot = Math.abs(existing.dot(q))
+          if (dot > 0.9999) {
+            duplicate = true
+            break
+          }
+        }
+
+        if (!duplicate) quats.push(q)
+      }
+    }
+
+    // Deben salir 24
+    return quats
+  }
+
+  getNearestStableQuaternion(currentQuat) {
+    let best = this.stableCubeQuaternions[0]
+    let bestDot = -Infinity
+
+    for (const q of this.stableCubeQuaternions) {
+      const dot = Math.abs(currentQuat.dot(q))
+      if (dot > bestDot) {
+        bestDot = dot
+        best = q
+      }
+    }
+
+    return best
   }
 
   ensureBodyForMesh(mesh, initialVel = null) {
@@ -51,6 +118,7 @@ export class PhysicsSystem {
         angVel: new THREE.Vector3(),
         freeSinceMs: performance.now(),
         sleepMs: 0,
+
         settling: false,
         settleT: 0,
         startQuat: new THREE.Quaternion(),
@@ -64,7 +132,11 @@ export class PhysicsSystem {
 
       const speed = initialVel.length()
       if (speed > 0.02) {
-        body.angVel.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1)
+        body.angVel.set(
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1
+        )
         body.angVel.normalize().multiplyScalar(Math.min(12, speed * this.spinFromThrow))
       } else {
         body.angVel.set(0, 0, 0)
@@ -73,6 +145,7 @@ export class PhysicsSystem {
 
     body.settling = false
     body.settleT = 0
+    body.sleepMs = 0
 
     return body
   }
@@ -104,22 +177,19 @@ export class PhysicsSystem {
     const ax = angVel.x * dt
     const ay = angVel.y * dt
     const az = angVel.z * dt
+
     this._tmpQuat.set(ax, ay, az, 1.0).normalize()
     mesh.quaternion.multiply(this._tmpQuat).normalize()
-  }
-
-  computeUprightTargetQuat(mesh) {
-    this._tmpEuler.setFromQuaternion(mesh.quaternion, "YXZ")
-    const yaw = this._tmpEuler.y
-    this._targetQuat.setFromEuler(new THREE.Euler(0, yaw, 0))
-    return this._targetQuat
   }
 
   startSettling(mesh, body) {
     body.settling = true
     body.settleT = 0
     body.startQuat.copy(mesh.quaternion)
-    body.targetQuat.copy(this.computeUprightTargetQuat(mesh))
+
+    // ✅ En vez de "upright" genérico, usar la cara estable MÁS cercana
+    body.targetQuat.copy(this.getNearestStableQuaternion(mesh.quaternion))
+
     body.vel.set(0, 0, 0)
     body.angVel.set(0, 0, 0)
   }
@@ -127,12 +197,17 @@ export class PhysicsSystem {
   updateSettling(mesh, body, dt) {
     body.settleT += dt
     const t = Math.min(1, body.settleT / this.settleDuration)
-    mesh.quaternion.copy(body.startQuat).slerp(body.targetQuat, t)
+
+    // ease suave para que no se vea jalón
+    const eased = 1 - Math.pow(1 - t, 3)
+
+    mesh.quaternion.copy(body.startQuat).slerp(body.targetQuat, eased)
 
     if (t >= 1) {
       mesh.quaternion.copy(body.targetQuat)
       body.settling = false
       this.bodies.delete(mesh.userData.componentId)
+
       if (this.interactionSystem?.persistMeshTransform) {
         this.interactionSystem.persistMeshTransform(mesh)
       }
@@ -145,22 +220,28 @@ export class PhysicsSystem {
       return
     }
 
+    // gravedad
     body.vel.y += this.gravity * dt
 
+    // drag lineal
     const drag = Math.max(0, 1 - this.linearDrag * dt)
     body.vel.multiplyScalar(drag)
 
+    // drag angular
     const ad = Math.max(0, 1 - this.angularDrag * dt)
     body.angVel.multiplyScalar(ad)
 
+    // integrar posición
     mesh.position.x += body.vel.x * dt
     mesh.position.y += body.vel.y * dt
     mesh.position.z += body.vel.z * dt
 
+    // integrar rotación
     if (body.angVel.lengthSq() > 1e-6) {
       this.integrateRotation(mesh, body.angVel, dt)
     }
 
+    // colisión simple con superficie
     const hit = this.getSurfaceHitBelow(mesh)
     if (hit) {
       const bbox = new THREE.Box3().setFromObject(mesh)
@@ -173,17 +254,23 @@ export class PhysicsSystem {
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
         mesh.position.y = targetY
 
+        // rebote vertical
         body.vel.y = -body.vel.y * this.restitution
 
+        // fricción al contacto
         const fr = Math.max(0, 1 - this.friction)
         body.vel.x *= fr
         body.vel.z *= fr
 
+        // amortiguar giro en contacto
         body.angVel.multiplyScalar(0.78)
 
         const speed = body.vel.length() + body.angVel.length() * 0.08
-        if (speed < this.restSpeed) body.sleepMs += dt * 1000
-        else body.sleepMs = 0
+        if (speed < this.restSpeed) {
+          body.sleepMs += dt * 1000
+        } else {
+          body.sleepMs = 0
+        }
 
         if (body.sleepMs >= this.sleepAfterMs) {
           this.startSettling(mesh, body)
