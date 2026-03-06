@@ -25,12 +25,11 @@ export class InteractionSystem {
     this.controllerRays = []
 
     this.nearEnabled = true
-    this.nearRadius = 0.12
+    this.nearRadius = 0.16
 
-    // Umbrales más robustos
     this.pinchStartDist = 0.060
     this.pinchEndDist = 0.090
-    this.pinchReleaseResetDist = 0.100
+    this.pinchReleaseResetDist = 0.105
 
     this.uiPokeRadius = 0.020
     this.uiReleaseRadius = 0.040
@@ -57,6 +56,7 @@ export class InteractionSystem {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
     mesh.userData.interactable = true
+    if (!("heldBy" in mesh.userData)) mesh.userData.heldBy = null
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
   }
 
@@ -125,6 +125,7 @@ export class InteractionSystem {
         hand,
         pinchPoint,
         isPinching: false,
+        pinchArmed: true,
         heldObject: null,
         hold: this.createHoldState("hand", null),
       })
@@ -219,11 +220,30 @@ export class InteractionSystem {
     return null
   }
 
+  makeOwnerToken(type, index) {
+    return `${type}:${index}`
+  }
+
+  getObjectOwner(obj) {
+    return obj?.userData?.heldBy || null
+  }
+
+  setObjectOwner(obj, ownerToken) {
+    if (!obj) return
+    obj.userData.heldBy = ownerToken
+  }
+
+  clearObjectOwner(obj) {
+    if (!obj) return
+    obj.userData.heldBy = null
+  }
+
   isObjectFreeForGrab(obj) {
     if (!obj) return false
     if (obj.userData?.isUI) return true
     if (!obj.userData?.componentId) return false
-    return obj.parent === this.scene
+    if (obj.parent !== this.scene) return false
+    return !this.getObjectOwner(obj)
   }
 
   computeControllerHoverFor(controller) {
@@ -302,8 +322,7 @@ export class InteractionSystem {
   }
 
   getIndexTipWorld(handEntry, out) {
-    const hand = handEntry.hand
-    const p = this.getJointWorld(hand, "index-finger-tip", out)
+    const p = this.getJointWorld(handEntry.hand, "index-finger-tip", out)
     if (p) return p
     handEntry.pinchPoint.getWorldPosition(out)
     return out
@@ -373,63 +392,6 @@ export class InteractionSystem {
 
     if (!isFinite(best)) return null
     return best
-  }
-
-  resetHandPinchIfOpen(handEntry, dist) {
-    if (!handEntry) return
-    if (handEntry.heldObject) return
-    if (dist == null) return
-
-    if (dist >= this.pinchReleaseResetDist) {
-      handEntry.isPinching = false
-      this.stopHoldTracking(handEntry.hold)
-    }
-  }
-
-  updateHandPinchState() {
-    for (const h of this.hands) {
-      if (!this.isHandEntryTracked(h)) {
-        if (h.isPinching) {
-          h.isPinching = false
-          this.onHandPinchEnd(h, { forceZeroVelocity: true })
-        } else if (h.heldObject) {
-          this.forceReleaseHand(h, true)
-        } else {
-          this.stopHoldTracking(h.hold)
-        }
-        continue
-      }
-
-      const dist = this.computePinchDistance(h.hand)
-
-      if (dist == null) {
-        if (h.isPinching) {
-          h.isPinching = false
-          this.onHandPinchEnd(h, { forceZeroVelocity: true })
-        } else if (h.heldObject) {
-          this.forceReleaseHand(h, true)
-        } else {
-          this.stopHoldTracking(h.hold)
-        }
-        continue
-      }
-
-      if (!h.heldObject) {
-        this.resetHandPinchIfOpen(h, dist)
-      }
-
-      if (!h.isPinching && dist <= this.pinchStartDist) {
-        h.isPinching = true
-        this.onHandPinchStart(h)
-      } else if (h.isPinching && dist >= this.pinchEndDist) {
-        h.isPinching = false
-        this.onHandPinchEnd(h)
-      }
-
-      if (!h.heldObject && dist > this.pinchEndDist) {
-        h.isPinching = false
-      }
-    }
   }
 
   findNearestComponentToHand(handEntry, maxDist) {
@@ -578,6 +540,7 @@ export class InteractionSystem {
     const releaseVel = this.getReleaseVelocity(holdState, forceZeroVelocity)
 
     this.scene.attach(object)
+    this.clearObjectOwner(object)
 
     if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
       clearOwner()
@@ -593,11 +556,17 @@ export class InteractionSystem {
   onHandPinchStart(handEntry) {
     if (!this.isHandEntryTracked(handEntry)) return
     if (handEntry.heldObject) return
+    if (!handEntry.pinchArmed) return
 
     const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
+
+    handEntry.isPinching = true
+    handEntry.pinchArmed = false
+
     if (!target) return
 
     handEntry.heldObject = target
+    this.setObjectOwner(target, this.makeOwnerToken("hand", handEntry.index))
     this.startHoldTracking(handEntry.hold, "hand", handEntry)
 
     const joint = handEntry.hand.joints?.["index-finger-tip"]
@@ -606,7 +575,11 @@ export class InteractionSystem {
   }
 
   onHandPinchEnd(handEntry, options = {}) {
-    if (!handEntry?.heldObject) return
+    if (!handEntry) return
+
+    handEntry.isPinching = false
+
+    if (!handEntry.heldObject) return
 
     const object = handEntry.heldObject
 
@@ -621,9 +594,15 @@ export class InteractionSystem {
   }
 
   forceReleaseHand(handEntry, forceZeroVelocity = true) {
-    if (!handEntry?.heldObject) return
-    this.onHandPinchEnd(handEntry, { forceZeroVelocity })
+    if (!handEntry) return
     handEntry.isPinching = false
+
+    if (!handEntry.heldObject) {
+      this.stopHoldTracking(handEntry.hold)
+      return
+    }
+
+    this.onHandPinchEnd(handEntry, { forceZeroVelocity })
   }
 
   onControllerSelectStart(event) {
@@ -644,6 +623,7 @@ export class InteractionSystem {
     if (!this.isObjectFreeForGrab(target)) return
 
     controller.userData.heldObject = target
+    this.setObjectOwner(target, this.makeOwnerToken("controller", controller.userData.sourceIndex))
     this.startHoldTracking(controller.userData.hold, "controller", controller)
     controller.attach(target)
   }
@@ -751,7 +731,9 @@ export class InteractionSystem {
 
   cleanupDetachedHolds() {
     for (const handEntry of this.hands) {
-      if (handEntry.heldObject && handEntry.heldObject.parent === this.scene) {
+      const held = handEntry.heldObject
+      if (held && held.parent === this.scene) {
+        this.clearObjectOwner(held)
         handEntry.heldObject = null
         handEntry.isPinching = false
         this.stopHoldTracking(handEntry.hold)
@@ -761,8 +743,46 @@ export class InteractionSystem {
     for (const controller of this.controllers) {
       const held = controller.userData?.heldObject
       if (held && held.parent === this.scene) {
+        this.clearObjectOwner(held)
         controller.userData.heldObject = null
         this.stopHoldTracking(controller.userData.hold)
+      }
+    }
+  }
+
+  updateHandPinchState() {
+    for (const h of this.hands) {
+      if (!this.isHandEntryTracked(h)) {
+        this.forceReleaseHand(h, true)
+        h.pinchArmed = true
+        continue
+      }
+
+      const dist = this.computePinchDistance(h.hand)
+
+      if (dist == null) {
+        this.forceReleaseHand(h, true)
+        h.pinchArmed = true
+        continue
+      }
+
+      if (dist >= this.pinchReleaseResetDist) {
+        h.pinchArmed = true
+      }
+
+      if (h.heldObject) {
+        if (dist >= this.pinchEndDist) {
+          this.onHandPinchEnd(h)
+        } else {
+          h.isPinching = true
+        }
+        continue
+      }
+
+      if (dist <= this.pinchStartDist && h.pinchArmed) {
+        this.onHandPinchStart(h)
+      } else if (dist > this.pinchEndDist) {
+        h.isPinching = false
       }
     }
   }
@@ -779,9 +799,8 @@ export class InteractionSystem {
       this.updateHandPinchState()
     } else {
       for (const handEntry of this.hands) {
-        if (handEntry.heldObject) this.forceReleaseHand(handEntry, true)
-        handEntry.isPinching = false
-        this.stopHoldTracking(handEntry.hold)
+        this.forceReleaseHand(handEntry, true)
+        handEntry.pinchArmed = true
       }
     }
 
