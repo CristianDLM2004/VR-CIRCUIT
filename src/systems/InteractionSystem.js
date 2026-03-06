@@ -25,7 +25,14 @@ export class InteractionSystem {
     this.controllerRays = []
 
     this.nearEnabled = true
-    this.nearRadius = 0.20
+
+    // Rango general de evaluación de mano
+    this.nearRadius = 0.12
+
+    // El punto de agarre debe estar realmente cerca del objeto
+    this.handGrabSurfaceMaxDist = 0.035
+    this.handGrabSurfaceSlack = 0.018
+    this.handHoverSurfaceMaxDist = 0.045
 
     this.pinchStartDist = 0.070
     this.pinchEndDist = 0.100
@@ -38,7 +45,6 @@ export class InteractionSystem {
     this.throwMinSpeed = 0.22
     this.directPlaceMaxDrop = 0.12
 
-    // Tolerancia para hand tracking
     this.handTrackingReleaseGraceMs = 280
     this.handOpenReleaseGraceMs = 80
 
@@ -46,6 +52,7 @@ export class InteractionSystem {
     this._tmpB = new THREE.Vector3()
     this._tmpC = new THREE.Vector3()
     this._tmpD = new THREE.Vector3()
+    this._tmpE = new THREE.Vector3()
     this._box = new THREE.Box3()
 
     this._lastPokedButton = null
@@ -216,6 +223,12 @@ export class InteractionSystem {
   distanceToObjectSurface(obj, worldPoint) {
     this._box.setFromObject(obj)
     return this._box.distanceToPoint(worldPoint)
+  }
+
+  getObjectCenterDistance(obj, worldPoint) {
+    this._box.setFromObject(obj)
+    this._box.getCenter(this._tmpE)
+    return this._tmpE.distanceTo(worldPoint)
   }
 
   pickInteractableFromHitObject(hitObject) {
@@ -435,19 +448,40 @@ export class InteractionSystem {
     return best
   }
 
+  canHandGrabObject(handEntry, obj) {
+    if (!obj?.userData?.componentId) return false
+    if (!this.isObjectFreeForGrab(obj)) return false
+
+    this.getGrabPointWorld(handEntry, this._tmpC)
+
+    const surfaceDist = this.distanceToObjectSurface(obj, this._tmpC)
+    const centerDist = this.getObjectCenterDistance(obj, this._tmpC)
+
+    if (centerDist > this.nearRadius) return false
+    if (surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+
+    return true
+  }
+
   findNearestComponentToHand(handEntry, maxDist) {
     this.getGrabPointWorld(handEntry, this._tmpC)
 
     let best = null
-    let bestDist = maxDist
+    let bestScore = Infinity
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId) continue
       if (!this.isObjectFreeForGrab(obj)) continue
 
-      const d = this.distanceToObjectSurface(obj, this._tmpC)
-      if (d < bestDist) {
-        bestDist = d
+      const surfaceDist = this.distanceToObjectSurface(obj, this._tmpC)
+      const centerDist = this.getObjectCenterDistance(obj, this._tmpC)
+
+      if (centerDist > maxDist) continue
+      if (surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) continue
+
+      const score = surfaceDist * 4 + centerDist
+      if (score < bestScore) {
+        bestScore = score
         best = obj
       }
     }
@@ -606,6 +640,7 @@ export class InteractionSystem {
     handEntry.openPinchMs = 0
 
     if (!target) return
+    if (!this.canHandGrabObject(handEntry, target)) return
 
     handEntry.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("hand", handEntry.index))
@@ -743,7 +778,7 @@ export class InteractionSystem {
     if (!this.nearEnabled) return null
 
     let best = null
-    let bestDist = this.nearRadius
+    let bestScore = Infinity
 
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h)) continue
@@ -755,9 +790,24 @@ export class InteractionSystem {
         if (!obj || obj.userData?.isSurface) continue
         if (obj.userData?.componentId && !this.isObjectFreeForGrab(obj)) continue
 
-        const d = this.distanceToObjectSurface(obj, this._tmpA)
-        if (d < bestDist) {
-          bestDist = d
+        if (obj.userData?.isUI) {
+          const d = this.distanceToObjectSurface(obj, this._tmpA)
+          if (d < bestScore && d < this.uiPokeRadius * 2) {
+            bestScore = d
+            best = obj
+          }
+          continue
+        }
+
+        const surfaceDist = this.distanceToObjectSurface(obj, this._tmpA)
+        const centerDist = this.getObjectCenterDistance(obj, this._tmpA)
+
+        if (centerDist > this.nearRadius) continue
+        if (surfaceDist > this.handHoverSurfaceMaxDist) continue
+
+        const score = surfaceDist * 4 + centerDist
+        if (score < bestScore) {
+          bestScore = score
           best = obj
         }
       }
