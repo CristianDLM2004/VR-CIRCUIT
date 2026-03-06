@@ -26,13 +26,20 @@ export class InteractionSystem {
 
     this.nearEnabled = true
 
-    // Rango general de evaluación de mano
-    this.nearRadius = 0.14
+    // Base general
+    this.nearRadius = 0.145
 
-    // Más permisivo para esquinas/caras, pero sin volver a capturar desde lejos
-    this.handGrabSurfaceMaxDist = 0.045
-    this.handGrabSurfaceSlack = 0.028
-    this.handHoverSurfaceMaxDist = 0.060
+    // Pulido final de agarre por manos:
+    // - tolerancia real para esquinas/caras
+    // - sin volver a capturar desde muy lejos
+    this.handGrabSurfaceMaxDist = 0.050
+    this.handGrabSurfaceSlack = 0.030
+    this.handHoverSurfaceMaxDist = 0.065
+
+    // Caja expandida para mejorar esquinas
+    this.handGrabExpandedBoxMargin = 0.020
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.026
+    this.handHoverExpandedBoxMargin = 0.016
 
     this.pinchStartDist = 0.070
     this.pinchEndDist = 0.100
@@ -53,8 +60,10 @@ export class InteractionSystem {
     this._tmpC = new THREE.Vector3()
     this._tmpD = new THREE.Vector3()
     this._tmpE = new THREE.Vector3()
+    this._tmpF = new THREE.Vector3()
     this._tmpSize = new THREE.Vector3()
     this._box = new THREE.Box3()
+    this._box2 = new THREE.Box3()
 
     this._lastPokedButton = null
     this._lastUpdateTime = performance.now()
@@ -232,6 +241,12 @@ export class InteractionSystem {
     return this._tmpE.distanceTo(worldPoint)
   }
 
+  getExpandedBoxDistance(obj, worldPoint, margin = 0.02) {
+    this._box2.setFromObject(obj)
+    this._box2.expandByScalar(margin)
+    return this._box2.distanceToPoint(worldPoint)
+  }
+
   pickInteractableFromHitObject(hitObject) {
     let obj = hitObject
     while (obj && obj.parent) {
@@ -269,6 +284,10 @@ export class InteractionSystem {
     if (!obj.userData?.componentId) return false
     if (obj.parent !== this.scene) return false
     return !this.getObjectOwner(obj)
+  }
+
+  isAnyOtherHandHolding(handEntry) {
+    return this.hands.some((h) => h !== handEntry && !!h.heldObject)
   }
 
   computeControllerHoverFor(controller) {
@@ -453,13 +472,20 @@ export class InteractionSystem {
     if (!obj?.userData?.componentId) return false
     if (!this.isObjectFreeForGrab(obj)) return false
 
+    const extraMargin = this.isAnyOtherHandHolding(handEntry)
+      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
+      : this.handGrabExpandedBoxMargin
+
     this.getGrabPointWorld(handEntry, this._tmpC)
 
     const surfaceDist = this.distanceToObjectSurface(obj, this._tmpC)
     const centerDist = this.getObjectCenterDistance(obj, this._tmpC)
+    const expandedDist = this.getExpandedBoxDistance(obj, this._tmpC, extraMargin)
 
     if (centerDist > this.nearRadius) return false
-    if (surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+    if (expandedDist > 0.0001 && surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) {
+      return false
+    }
 
     return true
   }
@@ -470,17 +496,26 @@ export class InteractionSystem {
     let best = null
     let bestScore = Infinity
 
+    const extraMargin = this.isAnyOtherHandHolding(handEntry)
+      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
+      : this.handGrabExpandedBoxMargin
+
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId) continue
       if (!this.isObjectFreeForGrab(obj)) continue
 
       const surfaceDist = this.distanceToObjectSurface(obj, this._tmpC)
       const centerDist = this.getObjectCenterDistance(obj, this._tmpC)
+      const expandedDist = this.getExpandedBoxDistance(obj, this._tmpC, extraMargin)
 
       if (centerDist > maxDist) continue
-      if (surfaceDist > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) continue
 
-      const score = surfaceDist * 3.5 + centerDist
+      const nearEnoughBySurface = surfaceDist <= this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack
+      const nearEnoughByExpandedBox = expandedDist <= 0.0001
+
+      if (!nearEnoughBySurface && !nearEnoughByExpandedBox) continue
+
+      const score = expandedDist * 6 + surfaceDist * 2.4 + centerDist
       if (score < bestScore) {
         bestScore = score
         best = obj
@@ -638,7 +673,6 @@ export class InteractionSystem {
     this.scene.attach(object)
     this.clearObjectOwner(object)
 
-    // Si se soltó atravesando mesa/protoboard/piso, primero corregir penetración
     this.resolveSurfacePenetration(object)
 
     if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
@@ -826,11 +860,12 @@ export class InteractionSystem {
 
         const surfaceDist = this.distanceToObjectSurface(obj, this._tmpA)
         const centerDist = this.getObjectCenterDistance(obj, this._tmpA)
+        const expandedDist = this.getExpandedBoxDistance(obj, this._tmpA, this.handHoverExpandedBoxMargin)
 
         if (centerDist > this.nearRadius) continue
-        if (surfaceDist > this.handHoverSurfaceMaxDist) continue
+        if (surfaceDist > this.handHoverSurfaceMaxDist && expandedDist > 0.0001) continue
 
-        const score = surfaceDist * 3.5 + centerDist
+        const score = expandedDist * 6 + surfaceDist * 2.4 + centerDist
         if (score < bestScore) {
           bestScore = score
           best = obj
