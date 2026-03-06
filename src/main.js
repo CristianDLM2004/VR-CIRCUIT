@@ -8,9 +8,9 @@ import { InteractionSystem } from "./systems/InteractionSystem.js"
 import { createProtoboard } from "./components/Protoboard.js"
 import { HoleSystem } from "./systems/HoleSystem.js"
 import { createVRPanel } from "./components/VRPanel.js"
-
 import { TrashSystem } from "./systems/TrashSystem.js"
-import { PhysicsSystem } from "./systems/PhysicsSystem.js"
+
+import { PhysicsWorldSystem } from "./systems/PhysicsWorldSystem.js"
 
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
@@ -30,7 +30,7 @@ dir.position.set(2, 4, 2)
 scene.add(dir)
 
 // ---------------------------
-// Piso + Mesa (surfaces)
+// Piso + Mesa
 // ---------------------------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(50, 50),
@@ -40,7 +40,6 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
-// Mesa cómoda en VR
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
@@ -79,7 +78,21 @@ const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
 // ---------------------------
-// Helpers: IDs y acciones
+// Física real (Cannon)
+// ---------------------------
+const physics = new PhysicsWorldSystem(scene, appState, stateSyncSystem)
+interactionSystem.setPhysicsSystem(physics)
+
+// Colliders estáticos:
+// piso como plano infinito (más estable que box)
+physics.addStaticFloorPlane(0)
+
+// mesa y protoboard como cajas estáticas
+physics.addStaticBoxFromMesh(table)
+physics.addStaticBoxFromMesh(protoSurface)
+
+// ---------------------------
+// Helpers
 // ---------------------------
 function genId(prefix = "cmp") {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
@@ -100,9 +113,10 @@ function addCube() {
   }
 
   appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
 
-  // ✅ incremental (NO rebuild completo) -> evita “brincos”/disparos
-  stateSyncSystem.addMeshFromComponent(data)
+  // ✅ crea body desde el inicio para que caiga “real”
+  if (mesh) physics.ensureBodyForMesh(mesh)
 }
 
 function saveState() {
@@ -115,11 +129,15 @@ function loadState() {
   if (!raw) return console.log("⚠️ No hay estado guardado")
   appState.loadFromObject(JSON.parse(raw))
   stateSyncSystem.rebuildFromState()
+
+  // recrear bodies
+  for (const mesh of stateSyncSystem.meshById.values()) physics.ensureBodyForMesh(mesh)
+
   console.log("✅ Estado cargado y reconstruido")
 }
 
 // ---------------------------
-// Panel 3D (VR UI) - ESTÁTICO EN EL MUNDO
+// Panel VR
 // ---------------------------
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY = -Math.PI / 6
@@ -132,7 +150,6 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   onLoad: loadState,
 })
 scene.add(vrPanel)
-
 for (const b of panelButtons) interactionSystem.register(b)
 
 vrPanel.traverse((o) => {
@@ -143,15 +160,13 @@ vrPanel.traverse((o) => {
 })
 
 // ---------------------------
-// Trash System (bote)
+// Trash System
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
-
 const trashBin = trashSystem.createTrashBin({
   parent: scene,
   position: new THREE.Vector3(-0.55, 0.0, -0.10),
 })
-
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -160,13 +175,7 @@ trashBin.traverse((o) => {
 })
 
 // ---------------------------
-// Physics
-// ---------------------------
-const physicsSystem = new PhysicsSystem(scene, camera, appState, stateSyncSystem, interactionSystem)
-const clock = new THREE.Clock()
-
-// ---------------------------
-// UI HTML (PC) opcional
+// UI HTML (PC)
 // ---------------------------
 document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
 
@@ -181,16 +190,20 @@ window.addEventListener("keydown", (e) => {
 // Init
 // ---------------------------
 stateSyncSystem.rebuildFromState()
+for (const mesh of stateSyncSystem.meshById.values()) physics.ensureBodyForMesh(mesh)
 
 // ---------------------------
 // Loop
 // ---------------------------
+const clock = new THREE.Clock()
+
 renderer.setAnimationLoop(() => {
   const dt = Math.min(0.033, clock.getDelta())
 
   interactionSystem.update()
 
-  physicsSystem.update(stateSyncSystem.meshById.values(), dt)
+  // ✅ físicas reales
+  physics.step(stateSyncSystem.meshById.values(), dt)
 
   trashSystem.update(stateSyncSystem.meshById.values())
 

@@ -11,6 +11,8 @@ export class InteractionSystem {
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
 
+    this.physicsSystem = null
+
     this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
     this.tempMatrix = new THREE.Matrix4()
@@ -25,7 +27,6 @@ export class InteractionSystem {
     this.selected = null
     this.selectedBy = null // "controller" | "hand"
     this._selectedHandEntry = null
-    this._selectedController = null
 
     this.controllerRays = []
 
@@ -64,6 +65,10 @@ export class InteractionSystem {
     this.initXRInputs()
   }
 
+  setPhysicsSystem(physicsSystem) {
+    this.physicsSystem = physicsSystem
+  }
+
   setHoleSystem(holeSystem) {
     this.holeSystem = holeSystem
   }
@@ -81,7 +86,6 @@ export class InteractionSystem {
 
   registerSurface(mesh, options = {}) {
     if (!mesh) return
-
     const type = options.type || "floor"
     const bounds = options.bounds || null
 
@@ -355,16 +359,6 @@ export class InteractionSystem {
     return best
   }
 
-  persistMeshTransform(mesh) {
-    const id = mesh?.userData?.componentId
-    if (!id) return
-    const p = mesh.position
-    const q = mesh.quaternion
-    this.appState.updateComponent(id, {
-      transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w },
-    })
-  }
-
   _startHoldTracking(sourceType, source) {
     this._hold.active = true
     this._hold.sourceType = sourceType
@@ -422,25 +416,6 @@ export class InteractionSystem {
     return v
   }
 
-  // ✅ failsafe: soltar forzado (por pérdida de tracking, etc.)
-  _forceReleaseSelected() {
-    if (!this.selected) return
-
-    // última vel disponible
-    this._updateHoldVelocity()
-    const releaseVel = this._getReleaseVelocity()
-
-    // suelta al mundo
-    this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
-
-    this.selected = null
-    this.selectedBy = null
-    this._selectedHandEntry = null
-    this._selectedController = null
-    this._stopHoldTracking()
-  }
-
   onHandPinchStart(handEntry) {
     if (this.selected) return
 
@@ -452,6 +427,10 @@ export class InteractionSystem {
     this._selectedHandEntry = handEntry
 
     this._startHoldTracking("hand", handEntry)
+
+    // ✅ KINEMATIC mientras está agarrado
+    this.physicsSystem?.ensureBodyForMesh?.(this.selected)
+    this.physicsSystem?.setGrabbed?.(this.selected, true)
 
     const joint = handEntry.hand.joints?.["index-finger-tip"]
     if (joint) joint.attach(this.selected)
@@ -465,8 +444,18 @@ export class InteractionSystem {
     this._updateHoldVelocity()
     const releaseVel = this._getReleaseVelocity()
 
+    // spin basado en dirección (simple pero natural)
+    const spin = new THREE.Vector3(
+      (Math.random() * 2 - 1) * 6,
+      (Math.random() * 2 - 1) * 6,
+      (Math.random() * 2 - 1) * 6
+    )
+
     this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
+
+    // ✅ aplicar dinámica real
+    this.physicsSystem?.applyReleaseVelocity?.(this.selected, releaseVel, spin)
+    this.physicsSystem?.setGrabbed?.(this.selected, false)
 
     this.selected = null
     this.selectedBy = null
@@ -488,9 +477,11 @@ export class InteractionSystem {
 
     this.selected = this.hovered
     this.selectedBy = "controller"
-    this._selectedController = controller
 
     this._startHoldTracking("controller", controller)
+
+    this.physicsSystem?.ensureBodyForMesh?.(this.selected)
+    this.physicsSystem?.setGrabbed?.(this.selected, true)
 
     controller.attach(this.selected)
   }
@@ -501,69 +492,20 @@ export class InteractionSystem {
 
     this._updateHoldVelocity()
     const releaseVel = this._getReleaseVelocity()
+    const spin = new THREE.Vector3(
+      (Math.random() * 2 - 1) * 7,
+      (Math.random() * 2 - 1) * 7,
+      (Math.random() * 2 - 1) * 7
+    )
 
     this.scene.attach(this.selected)
-    this.selected.userData.physics = { active: true, vel: releaseVel }
+
+    this.physicsSystem?.applyReleaseVelocity?.(this.selected, releaseVel, spin)
+    this.physicsSystem?.setGrabbed?.(this.selected, false)
 
     this.selected = null
     this.selectedBy = null
-    this._selectedController = null
     this._stopHoldTracking()
-  }
-
-  snapToSurface(object) {
-    if (!object || this.surfaces.length === 0) return
-
-    const origin = object.position.clone()
-    origin.y += 2
-    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
-
-    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
-    const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
-    if (hits.length === 0) return
-
-    const best = this.pickBestSurfaceHit(hits)
-    if (!best) return
-
-    const bbox = new THREE.Box3().setFromObject(object)
-    const size = new THREE.Vector3()
-    bbox.getSize(size)
-
-    object.position.y = best.point.y + size.y / 2
-
-    if (this.holeSystem) this.holeSystem.trySnapObject(object, 0.03)
-  }
-
-  pickBestSurfaceHit(hits) {
-    const getSurfaceEntry = (hitObj) => {
-      for (const s of this.surfaces) {
-        if (hitObj === s.mesh) return s
-        let cur = hitObj
-        while (cur) {
-          if (cur === s.mesh) return s
-          cur = cur.parent
-        }
-      }
-      return null
-    }
-
-    for (const h of hits) {
-      const surf = getSurfaceEntry(h.object)
-      if (surf?.type === "protoboard") return { ...h, surface: surf }
-    }
-    for (const h of hits) {
-      const surf = getSurfaceEntry(h.object)
-      if (surf?.type === "table") return { ...h, surface: surf }
-    }
-    for (const h of hits) {
-      const surf = getSurfaceEntry(h.object)
-      if (surf?.type === "floor") return { ...h, surface: surf }
-    }
-    for (const h of hits) {
-      const surf = getSurfaceEntry(h.object)
-      if (surf) return { ...h, surface: surf }
-    }
-    return null
   }
 
   computeHandHover() {
@@ -584,7 +526,6 @@ export class InteractionSystem {
         }
       }
     }
-
     return best
   }
 
@@ -592,29 +533,14 @@ export class InteractionSystem {
     if (!this.renderer.xr.isPresenting) return
 
     const handsActive = this.isHandTrackingActive()
-
     this.updateControllerRays(!handsActive)
-
-    // ✅ failsafe: si estabas agarrando con mano y se perdió tracking => suelta
-    if (!handsActive && this.selected && this.selectedBy === "hand") {
-      this._forceReleaseSelected()
-    }
 
     if (handsActive) {
       this.updateUIPoke()
       this.updateHandPinchState()
     }
 
-    // ✅ failsafe extra: selected atorado pero ya está en scene
-    if (this.selected && this.selected.parent === this.scene) {
-      // ya no está realmente agarrado, liberar estado para permitir re-grab
-      this.selected = null
-      this.selectedBy = null
-      this._selectedHandEntry = null
-      this._selectedController = null
-      this._stopHoldTracking()
-    }
-
+    // Mientras se agarra: el body kinematic seguirá al mesh (PhysicsWorldSystem hace syncBodyToMesh)
     if (this.selected) {
       this._updateHoldVelocity()
       return
