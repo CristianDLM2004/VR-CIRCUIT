@@ -186,6 +186,10 @@ export class PhysicsSystem {
     return body
   }
 
+  clearAllBodies() {
+    this.bodies.clear()
+  }
+
   removeComponentById(id) {
     this.bodies.delete(id)
     this.appState.removeComponent(id)

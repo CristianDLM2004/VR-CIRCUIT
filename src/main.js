@@ -112,8 +112,17 @@ function loadState() {
   const raw = localStorage.getItem("vr_circuit_state")
   if (!raw) return console.log("⚠️ No hay estado guardado")
   appState.loadFromObject(JSON.parse(raw))
+  physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
   console.log("✅ Estado cargado y reconstruido")
+}
+
+function clearScene() {
+  appState.components = []
+  appState.connections = []
+  physicsSystem.clearAllBodies()
+  stateSyncSystem.rebuildFromState()
+  console.log("🧹 Escena limpiada")
 }
 
 // ---------------------------
@@ -137,6 +146,73 @@ vrPanel.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
     if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
+  }
+})
+
+// ---------------------------
+// Botón 3D de limpiar escena
+// ---------------------------
+function createClearSceneButton({
+  position = new THREE.Vector3(0.95, 0.82, -0.25),
+  rotationY = -Math.PI / 5,
+  onPress = () => {},
+} = {}) {
+  const group = new THREE.Group()
+  group.name = "ClearSceneButton"
+  group.position.copy(position)
+  group.rotation.y = rotationY
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.11, 0.08, 20),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
+  )
+  base.position.y = 0.04
+  base.receiveShadow = true
+  group.add(base)
+
+  const button = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.07, 0.035, 24),
+    new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.55 })
+  )
+  button.name = "BtnClearScene"
+  button.position.y = 0.095
+  button.userData.isUI = true
+  button.userData.uiAction = "clear-scene"
+  button.userData._lastPressMs = 0
+  button.userData._cooldownMs = 500
+  button.userData.onPress = () => {
+    const now = performance.now()
+    if (now - button.userData._lastPressMs < button.userData._cooldownMs) return
+    button.userData._lastPressMs = now
+    onPress()
+  }
+  group.add(button)
+
+  const iconMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
+
+  const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
+  const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
+  bar1.rotation.z = Math.PI / 4
+  bar2.rotation.z = -Math.PI / 4
+  bar1.position.y = 0.02
+  bar2.position.y = 0.02
+  button.add(bar1, bar2)
+
+  return { group, button }
+}
+
+const { group: clearSceneButtonGroup, button: clearSceneButton } = createClearSceneButton({
+  position: new THREE.Vector3(0.95, 0.82, -0.25),
+  rotationY: -Math.PI / 5,
+  onPress: clearScene,
+})
+scene.add(clearSceneButtonGroup)
+interactionSystem.register(clearSceneButton)
+
+clearSceneButtonGroup.traverse((o) => {
+  if (o.isMesh && o.material) {
+    o.material = o.material.clone()
+    if ("emissive" in o.material) o.material.emissive.setHex(0x222222)
   }
 })
 
@@ -173,6 +249,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "c") addCube()
   if (k === "s") saveState()
   if (k === "l") loadState()
+  if (k === "x") clearScene()
 })
 
 // ---------------------------
