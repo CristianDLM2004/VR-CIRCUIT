@@ -25,25 +25,31 @@ export class InteractionSystem {
     this.controllerRays = []
 
     this.nearEnabled = true
-    this.nearRadius = 0.16
+    this.nearRadius = 0.20
 
-    this.pinchStartDist = 0.060
-    this.pinchEndDist = 0.090
-    this.pinchReleaseResetDist = 0.105
+    this.pinchStartDist = 0.070
+    this.pinchEndDist = 0.100
+    this.pinchReleaseResetDist = 0.115
 
     this.uiPokeRadius = 0.020
     this.uiReleaseRadius = 0.040
 
-    this._tmpA = new THREE.Vector3()
-    this._tmpB = new THREE.Vector3()
-    this._tmpC = new THREE.Vector3()
-    this._box = new THREE.Box3()
-
-    this._lastPokedButton = null
-
     this.throwVelocityMultiplier = 1.9
     this.throwMinSpeed = 0.22
     this.directPlaceMaxDrop = 0.12
+
+    // Tolerancia para hand tracking
+    this.handTrackingReleaseGraceMs = 280
+    this.handOpenReleaseGraceMs = 80
+
+    this._tmpA = new THREE.Vector3()
+    this._tmpB = new THREE.Vector3()
+    this._tmpC = new THREE.Vector3()
+    this._tmpD = new THREE.Vector3()
+    this._box = new THREE.Box3()
+
+    this._lastPokedButton = null
+    this._lastUpdateTime = performance.now()
 
     this.initXRInputs()
   }
@@ -55,8 +61,10 @@ export class InteractionSystem {
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
+
     mesh.userData.interactable = true
     if (!("heldBy" in mesh.userData)) mesh.userData.heldBy = null
+
     if (!this.interactables.includes(mesh)) this.interactables.push(mesh)
   }
 
@@ -128,6 +136,8 @@ export class InteractionSystem {
         pinchArmed: true,
         heldObject: null,
         hold: this.createHoldState("hand", null),
+        lostTrackingMs: 0,
+        openPinchMs: 0,
       })
     }
   }
@@ -215,6 +225,7 @@ export class InteractionSystem {
       if (obj.userData?.componentId) return obj
       obj = obj.parent
     }
+
     if (hitObject?.userData?.isUI) return hitObject
     if (hitObject?.userData?.componentId) return hitObject
     return null
@@ -328,6 +339,36 @@ export class InteractionSystem {
     return out
   }
 
+  getThumbTipWorld(handEntry, out) {
+    const p = this.getJointWorld(handEntry.hand, "thumb-tip", out)
+    if (p) return p
+    handEntry.pinchPoint.getWorldPosition(out)
+    return out
+  }
+
+  getGrabPointWorld(handEntry, out) {
+    const thumb = this.getThumbTipWorld(handEntry, this._tmpA)
+    const index = this.getIndexTipWorld(handEntry, this._tmpB)
+
+    if (thumb && index) {
+      out.copy(thumb).add(index).multiplyScalar(0.5)
+      return out
+    }
+
+    if (index) {
+      out.copy(index)
+      return out
+    }
+
+    if (thumb) {
+      out.copy(thumb)
+      return out
+    }
+
+    handEntry.pinchPoint.getWorldPosition(out)
+    return out
+  }
+
   updateUIPoke() {
     if (this.hands.some((h) => h.heldObject)) return
 
@@ -395,7 +436,7 @@ export class InteractionSystem {
   }
 
   findNearestComponentToHand(handEntry, maxDist) {
-    this.getIndexTipWorld(handEntry, this._tmpC)
+    this.getGrabPointWorld(handEntry, this._tmpC)
 
     let best = null
     let bestDist = maxDist
@@ -437,7 +478,7 @@ export class InteractionSystem {
     if (sourceType === "controller") {
       source.getWorldPosition(holdState.lastPos)
     } else {
-      this.getIndexTipWorld(source, holdState.lastPos)
+      this.getGrabPointWorld(source, holdState.lastPos)
     }
   }
 
@@ -460,8 +501,7 @@ export class InteractionSystem {
     if (holdState.sourceType === "controller") {
       holdState.source.getWorldPosition(this._tmpA)
     } else {
-      if (!this.isHandEntryTracked(holdState.source)) return
-      this.getIndexTipWorld(holdState.source, this._tmpA)
+      this.getGrabPointWorld(holdState.source, this._tmpA)
     }
 
     const v = this._tmpA.clone().sub(holdState.lastPos).multiplyScalar(1 / dt)
@@ -562,6 +602,8 @@ export class InteractionSystem {
 
     handEntry.isPinching = true
     handEntry.pinchArmed = false
+    handEntry.lostTrackingMs = 0
+    handEntry.openPinchMs = 0
 
     if (!target) return
 
@@ -578,6 +620,8 @@ export class InteractionSystem {
     if (!handEntry) return
 
     handEntry.isPinching = false
+    handEntry.openPinchMs = 0
+    handEntry.lostTrackingMs = 0
 
     if (!handEntry.heldObject) return
 
@@ -595,7 +639,10 @@ export class InteractionSystem {
 
   forceReleaseHand(handEntry, forceZeroVelocity = true) {
     if (!handEntry) return
+
     handEntry.isPinching = false
+    handEntry.openPinchMs = 0
+    handEntry.lostTrackingMs = 0
 
     if (!handEntry.heldObject) {
       this.stopHoldTracking(handEntry.hold)
@@ -702,7 +749,7 @@ export class InteractionSystem {
       if (!this.isHandEntryTracked(h)) continue
       if (h.heldObject) continue
 
-      this.getIndexTipWorld(h, this._tmpA)
+      this.getGrabPointWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
         if (!obj || obj.userData?.isSurface) continue
@@ -736,6 +783,8 @@ export class InteractionSystem {
         this.clearObjectOwner(held)
         handEntry.heldObject = null
         handEntry.isPinching = false
+        handEntry.openPinchMs = 0
+        handEntry.lostTrackingMs = 0
         this.stopHoldTracking(handEntry.hold)
       }
     }
@@ -750,21 +799,29 @@ export class InteractionSystem {
     }
   }
 
-  updateHandPinchState() {
+  updateHandPinchState(dtMs) {
     for (const h of this.hands) {
-      if (!this.isHandEntryTracked(h)) {
-        this.forceReleaseHand(h, true)
-        h.pinchArmed = true
+      const tracked = this.isHandEntryTracked(h)
+      const dist = tracked ? this.computePinchDistance(h.hand) : null
+
+      if (!tracked || dist == null) {
+        if (h.heldObject) {
+          h.lostTrackingMs += dtMs
+          if (h.lostTrackingMs >= this.handTrackingReleaseGraceMs) {
+            this.forceReleaseHand(h, true)
+            h.pinchArmed = true
+          }
+        } else {
+          h.isPinching = false
+          h.pinchArmed = true
+          h.openPinchMs = 0
+          h.lostTrackingMs = 0
+          this.stopHoldTracking(h.hold)
+        }
         continue
       }
 
-      const dist = this.computePinchDistance(h.hand)
-
-      if (dist == null) {
-        this.forceReleaseHand(h, true)
-        h.pinchArmed = true
-        continue
-      }
+      h.lostTrackingMs = 0
 
       if (dist >= this.pinchReleaseResetDist) {
         h.pinchArmed = true
@@ -772,12 +829,18 @@ export class InteractionSystem {
 
       if (h.heldObject) {
         if (dist >= this.pinchEndDist) {
-          this.onHandPinchEnd(h)
+          h.openPinchMs += dtMs
+          if (h.openPinchMs >= this.handOpenReleaseGraceMs) {
+            this.onHandPinchEnd(h)
+          }
         } else {
+          h.openPinchMs = 0
           h.isPinching = true
         }
         continue
       }
+
+      h.openPinchMs = 0
 
       if (dist <= this.pinchStartDist && h.pinchArmed) {
         this.onHandPinchStart(h)
@@ -790,13 +853,17 @@ export class InteractionSystem {
   update() {
     if (!this.renderer.xr.isPresenting) return
 
+    const now = performance.now()
+    const dtMs = Math.min(50, now - this._lastUpdateTime)
+    this._lastUpdateTime = now
+
     const handsActive = this.isHandTrackingActive()
 
     this.updateControllerRays(!handsActive)
 
     if (handsActive) {
       this.updateUIPoke()
-      this.updateHandPinchState()
+      this.updateHandPinchState(dtMs)
     } else {
       for (const handEntry of this.hands) {
         this.forceReleaseHand(handEntry, true)
