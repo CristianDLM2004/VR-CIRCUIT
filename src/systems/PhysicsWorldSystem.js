@@ -1,311 +1,459 @@
 import * as THREE from "three"
-import * as CANNON from "cannon-es"
 
-export class PhysicsWorldSystem {
-  constructor(scene, appState, stateSyncSystem) {
+export class PhysicsSystem {
+  constructor(scene, camera, appState, stateSyncSystem, interactionSystem) {
     this.scene = scene
+    this.camera = camera
     this.appState = appState
     this.stateSyncSystem = stateSyncSystem
+    this.interactionSystem = interactionSystem
 
-    this.world = new CANNON.World({
-      gravity: new CANNON.Vec3(0, -9.82, 0),
-    })
+    this._ray = new THREE.Raycaster()
+    this._tmpOrigin = new THREE.Vector3()
+    this._tmpDir = new THREE.Vector3(0, -1, 0)
+    this._tmpSize = new THREE.Vector3()
+    this._tmpCamPos = new THREE.Vector3()
+    this._tmpQuat = new THREE.Quaternion()
 
-    this.matDefault = new CANNON.Material("default")
-    this.contactDefault = new CANNON.ContactMaterial(this.matDefault, this.matDefault, {
-      friction: 0.55,
-      restitution: 0.12,
-    })
-    this.world.defaultContactMaterial = this.contactDefault
-    this.world.allowSleep = true
+    this.bodies = new Map()
 
-    this.bodyById = new Map()
+    // ---------------------------
+    // Dinámica base
+    // ---------------------------
+    this.gravity = -9.8
+    this.linearDrag = 0.015
+    this.angularDrag = 0.10
 
-    this._tmpWorldPos = new THREE.Vector3()
-    this._tmpWorldQuat = new THREE.Quaternion()
+    this.restitution = 0.18
+    this.friction = 0.25
 
-    this._accum = 0
-    this.fixedTimeStep = 1 / 90
-    this.maxSubSteps = 3
+    // Umbrales de reposo
+    this.restLinearSpeed = 0.06
+    this.restAngularSpeed = 0.55
+    this.restHoldMs = 90
+
+    // Legacy
+    this.sleepAfterMs = 120
+
+    // Solo meter spin si realmente fue lanzamiento
+    this.spinFromThrow = 6.5
+    this.spinThrowSpeedThreshold = 0.85
+
+    // Damping de contacto
+    this.contactAngularDamping = 0.55
+    this.contactAngularStop = 0.35
+    this.contactLinearStop = 0.025
+
+    // ---------------------------
+    // Tip-over + settle
+    // ---------------------------
+    this.tipOverDuration = 0.28
+    this.tipOverAngleThreshold = THREE.MathUtils.degToRad(10)
+    this.settleDuration = 0.14
+
+    // ---------------------------
+    // Limpieza
+    // ---------------------------
+    this.maxDistance = 10.0
+    this.farAfterMs = 1500
+    this.fallYKill = -3.0
+    this.floorTimeoutMs = 45000
+    this.floorTimeoutDist = 4.5
+
+    // 24 orientaciones estables de un cubo
+    this.stableCubeQuaternions = this.buildStableCubeQuaternions()
   }
 
   // ---------------------------
-  // Estáticos
+  // Orientaciones estables cubo
   // ---------------------------
-  addStaticBoxFromMesh(mesh, options = {}) {
-    const { material = this.matDefault } = options
+  buildStableCubeQuaternions() {
+    const dirs = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+    ]
 
-    const box3 = new THREE.Box3().setFromObject(mesh)
-    const size = new THREE.Vector3()
-    box3.getSize(size)
+    const quats = []
 
-    const center = new THREE.Vector3()
-    box3.getCenter(center)
+    for (const yAxis of dirs) {
+      for (const zAxis of dirs) {
+        if (Math.abs(yAxis.dot(zAxis)) > 1e-6) continue
+        const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis)
+        if (xAxis.lengthSq() < 1e-6) continue
+        xAxis.normalize()
 
-    const half = new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2)
-    const shape = new CANNON.Box(half)
+        const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
+        const q = new THREE.Quaternion().setFromRotationMatrix(m)
 
-    const body = new CANNON.Body({
-      type: CANNON.Body.STATIC,
-      mass: 0,
-      material,
-    })
+        let duplicate = false
+        for (const existing of quats) {
+          const dot = Math.abs(existing.dot(q))
+          if (dot > 0.9999) {
+            duplicate = true
+            break
+          }
+        }
+        if (!duplicate) quats.push(q)
+      }
+    }
 
-    body.addShape(shape)
-    body.position.set(center.x, center.y, center.z)
-
-    mesh.getWorldQuaternion(this._tmpWorldQuat)
-    body.quaternion.set(
-      this._tmpWorldQuat.x,
-      this._tmpWorldQuat.y,
-      this._tmpWorldQuat.z,
-      this._tmpWorldQuat.w
-    )
-
-    this.world.addBody(body)
-    return body
+    return quats
   }
 
-  addStaticFloorPlane(y = 0) {
-    const body = new CANNON.Body({
-      mass: 0,
-      type: CANNON.Body.STATIC,
-      material: this.matDefault,
-    })
-    const shape = new CANNON.Plane()
-    body.addShape(shape)
-    body.position.set(0, y, 0)
-    body.quaternion.setFromEuler(-Math.PI / 2, 0, 0)
-    this.world.addBody(body)
-    return body
+  getNearestStableQuaternion(currentQuat) {
+    let best = this.stableCubeQuaternions[0]
+    let bestDot = -Infinity
+    for (const q of this.stableCubeQuaternions) {
+      const dot = Math.abs(currentQuat.dot(q))
+      if (dot > bestDot) {
+        bestDot = dot
+        best = q
+      }
+    }
+    return best
+  }
+
+  getQuatAngularDistance(a, b) {
+    const dot = THREE.MathUtils.clamp(Math.abs(a.dot(b)), -1, 1)
+    return 2 * Math.acos(dot)
+  }
+
+  getRestSnapMode(mesh) {
+    return mesh?.userData?.restSnapMode || "freeze"
+  }
+
+  resolveRestTargetQuaternion(mesh) {
+    const mode = this.getRestSnapMode(mesh)
+
+    if (mode === "stable-face") {
+      return this.getNearestStableQuaternion(mesh.quaternion)
+    }
+
+    return new THREE.Quaternion().copy(mesh.quaternion)
   }
 
   // ---------------------------
-  // Dinámicos
+  // Bodies
   // ---------------------------
-  ensureBodyForMesh(mesh) {
+  ensureBodyForMesh(mesh, initialVel = null) {
     const id = mesh?.userData?.componentId
     if (!id) return null
-    if (this.bodyById.has(id)) return this.bodyById.get(id)
 
-    const sx = 0.2
-    const sy = 0.2
-    const sz = 0.2
-    const shape = new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2))
+    let body = this.bodies.get(id)
+    if (!body) {
+      body = {
+        vel: new THREE.Vector3(),
+        angVel: new THREE.Vector3(),
+        freeSinceMs: performance.now(),
 
-    const body = new CANNON.Body({
-      mass: 0.25,
-      material: this.matDefault,
-      linearDamping: 0.02,
-      angularDamping: 0.04,
-      allowSleep: true,
-      sleepSpeedLimit: 0.12,
-      sleepTimeLimit: 0.35,
-    })
+        sleepMs: 0,
+        restTimeMs: 0,
 
-    body.addShape(shape)
+        tipping: false,
+        tipT: 0,
+        tipStartQuat: new THREE.Quaternion(),
+        tipTargetQuat: new THREE.Quaternion(),
 
-    mesh.getWorldPosition(this._tmpWorldPos)
-    mesh.getWorldQuaternion(this._tmpWorldQuat)
+        settling: false,
+        settleT: 0,
+        settleStartQuat: new THREE.Quaternion(),
+        settleTargetQuat: new THREE.Quaternion(),
+      }
+      this.bodies.set(id, body)
+    }
 
-    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
-    body.quaternion.set(
-      this._tmpWorldQuat.x,
-      this._tmpWorldQuat.y,
-      this._tmpWorldQuat.z,
-      this._tmpWorldQuat.w
-    )
+    if (initialVel) {
+      body.vel.copy(initialVel)
+      const speed = initialVel.length()
 
-    // ✅ asegurarnos que no nazca dormido
-    body.sleepState = CANNON.Body.AWAKE
-    body.wakeUp()
+      if (speed > this.spinThrowSpeedThreshold) {
+        body.angVel.set(
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1,
+          Math.random() * 2 - 1
+        )
+        body.angVel.normalize().multiplyScalar(Math.min(12, speed * this.spinFromThrow))
+      } else {
+        body.angVel.set(0, 0, 0)
+      }
+    } else {
+      body.vel.set(0, 0, 0)
+      body.angVel.set(0, 0, 0)
+    }
 
-    this.world.addBody(body)
-    this.bodyById.set(id, body)
+    body.sleepMs = 0
+    body.restTimeMs = 0
+    body.tipping = false
+    body.tipT = 0
+    body.settling = false
+    body.settleT = 0
+
     return body
   }
 
-  removeBodyById(id) {
-    const body = this.bodyById.get(id)
-    if (!body) return
-    this.world.removeBody(body)
-    this.bodyById.delete(id)
+  removeComponentById(id) {
+    this.bodies.delete(id)
+    this.appState.removeComponent(id)
+    this.stateSyncSystem.rebuildFromState()
   }
 
-  setGrabbed(mesh, grabbed) {
-    const id = mesh?.userData?.componentId
-    if (!id) return
+  // ---------------------------
+  // Surface helpers
+  // ---------------------------
+  getSurfaceHitBelow(mesh) {
+    if (!this.interactionSystem?.surfaces?.length) return null
 
-    const body = this.ensureBodyForMesh(mesh)
-    if (!body) return
+    this._tmpOrigin.copy(mesh.position)
+    this._tmpOrigin.y += 1.5
+    this._ray.set(this._tmpOrigin, this._tmpDir)
 
-    // ✅ siempre sincronizamos con transform mundial antes de cambiar tipo
-    mesh.getWorldPosition(this._tmpWorldPos)
-    mesh.getWorldQuaternion(this._tmpWorldQuat)
-    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
-    body.quaternion.set(
-      this._tmpWorldQuat.x,
-      this._tmpWorldQuat.y,
-      this._tmpWorldQuat.z,
-      this._tmpWorldQuat.w
-    )
+    const surfaceMeshes = this.interactionSystem.surfaces.map((s) => s.mesh)
+    const hits = this._ray.intersectObjects(surfaceMeshes, true)
+    if (!hits || hits.length === 0) return null
 
-    body.velocity.set(0, 0, 0)
-    body.angularVelocity.set(0, 0, 0)
+    if (typeof this.interactionSystem.pickBestSurfaceHit === "function") {
+      return this.interactionSystem.pickBestSurfaceHit(hits)
+    }
+    return hits[0]
+  }
 
-    if (grabbed) {
-      body.type = CANNON.Body.KINEMATIC
-      body.mass = 0
-      body.updateMassProperties()
+  alignHeightToSurface(mesh) {
+    const hit = this.getSurfaceHitBelow(mesh)
+    if (!hit) return
+
+    const bbox = new THREE.Box3().setFromObject(mesh)
+    bbox.getSize(this._tmpSize)
+    const halfY = this._tmpSize.y * 0.5
+    mesh.position.y = hit.point.y + halfY
+  }
+
+  // ---------------------------
+  // Rotación
+  // ---------------------------
+  integrateRotation(mesh, angVel, dt) {
+    const ax = angVel.x * dt
+    const ay = angVel.y * dt
+    const az = angVel.z * dt
+    this._tmpQuat.set(ax, ay, az, 1.0).normalize()
+    mesh.quaternion.multiply(this._tmpQuat).normalize()
+  }
+
+  // ---------------------------
+  // Tip-over + settle
+  // ---------------------------
+  startTipOver(mesh, body, targetQuat) {
+    body.tipping = true
+    body.tipT = 0
+    body.tipStartQuat.copy(mesh.quaternion)
+    body.tipTargetQuat.copy(targetQuat)
+    body.vel.set(0, 0, 0)
+    body.angVel.set(0, 0, 0)
+  }
+
+  updateTipOver(mesh, body, dt) {
+    body.tipT += dt
+    const t = Math.min(1, body.tipT / this.tipOverDuration)
+    const eased = t * t * (3 - 2 * t)
+    mesh.quaternion.copy(body.tipStartQuat).slerp(body.tipTargetQuat, eased)
+    this.alignHeightToSurface(mesh)
+
+    if (t >= 1) {
+      body.tipping = false
+      this.startSettling(mesh, body, body.tipTargetQuat)
+    }
+  }
+
+  startSettling(mesh, body, targetQuat = null) {
+    body.settling = true
+    body.settleT = 0
+    body.settleStartQuat.copy(mesh.quaternion)
+    body.settleTargetQuat.copy(targetQuat || this.resolveRestTargetQuaternion(mesh))
+    body.vel.set(0, 0, 0)
+    body.angVel.set(0, 0, 0)
+  }
+
+  updateSettling(mesh, body, dt) {
+    body.settleT += dt
+    const t = Math.min(1, body.settleT / this.settleDuration)
+    const eased = 1 - Math.pow(1 - t, 3)
+    mesh.quaternion.copy(body.settleStartQuat).slerp(body.settleTargetQuat, eased)
+    this.alignHeightToSurface(mesh)
+
+    if (t >= 1) {
+      mesh.quaternion.copy(body.settleTargetQuat)
+      body.settling = false
+      this.bodies.delete(mesh.userData.componentId)
+
+      if (this.interactionSystem?.persistMeshTransform) {
+        this.interactionSystem.persistMeshTransform(mesh)
+      }
+    }
+  }
+
+  // ---------------------------
+  // Simulación principal
+  // ---------------------------
+  stepMesh(mesh, body, dt) {
+    if (body.tipping) {
+      this.updateTipOver(mesh, body, dt)
+      return
+    }
+    if (body.settling) {
+      this.updateSettling(mesh, body, dt)
+      return
+    }
+
+    // gravedad
+    body.vel.y += this.gravity * dt
+
+    // drag lineal
+    const drag = Math.max(0, 1 - this.linearDrag * dt)
+    body.vel.multiplyScalar(drag)
+
+    // drag angular
+    const ad = Math.max(0, 1 - this.angularDrag * dt)
+    body.angVel.multiplyScalar(ad)
+
+    // integrar posición
+    mesh.position.x += body.vel.x * dt
+    mesh.position.y += body.vel.y * dt
+    mesh.position.z += body.vel.z * dt
+
+    // integrar rotación
+    if (body.angVel.lengthSq() > 1e-6) {
+      this.integrateRotation(mesh, body.angVel, dt)
+    }
+
+    // contacto con superficie
+    const hit = this.getSurfaceHitBelow(mesh)
+    let onSurface = false
+
+    if (hit) {
+      const bbox = new THREE.Box3().setFromObject(mesh)
+      bbox.getSize(this._tmpSize)
+      const halfY = this._tmpSize.y * 0.5
+
+      const targetY = hit.point.y + halfY
+      const eps = 0.006
+
+      if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
+        onSurface = true
+        mesh.position.y = targetY
+
+        // rebote
+        body.vel.y = -body.vel.y * this.restitution
+
+        // cortar rebote residual
+        if (Math.abs(body.vel.y) < 0.08) body.vel.y = 0
+
+        // fricción horizontal
+        const fr = Math.max(0, 1 - this.friction)
+        body.vel.x *= fr
+        body.vel.z *= fr
+
+        if (Math.abs(body.vel.x) < this.contactLinearStop) body.vel.x = 0
+        if (Math.abs(body.vel.z) < this.contactLinearStop) body.vel.z = 0
+
+        // amortiguar giro al tocar
+        body.angVel.multiplyScalar(this.contactAngularDamping)
+        if (body.angVel.length() < this.contactAngularStop) {
+          body.angVel.set(0, 0, 0)
+        }
+
+        const legacySpeed = body.vel.length() + body.angVel.length() * 0.08
+        if (legacySpeed < 0.14) body.sleepMs += dt * 1000
+        else body.sleepMs = 0
+      }
+    }
+
+    if (onSurface) {
+      const lin = body.vel.length()
+      const ang = body.angVel.length()
+
+      if (lin < this.restLinearSpeed && ang < this.restAngularSpeed) {
+        body.restTimeMs += dt * 1000
+      } else {
+        body.restTimeMs = 0
+      }
+
+      if (body.restTimeMs >= this.restHoldMs) {
+        const mode = this.getRestSnapMode(mesh)
+        const targetQuat = this.resolveRestTargetQuaternion(mesh)
+
+        if (mode === "stable-face") {
+          const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
+          if (angle > this.tipOverAngleThreshold) this.startTipOver(mesh, body, targetQuat)
+          else this.startSettling(mesh, body, targetQuat)
+        } else {
+          this.startSettling(mesh, body, targetQuat)
+        }
+
+        return
+      }
     } else {
-      body.type = CANNON.Body.DYNAMIC
-      body.mass = 0.25
-      body.updateMassProperties()
+      body.restTimeMs = 0
     }
 
-    // ✅ CLAVE: forzar awake real (si no, puede quedarse "colgado")
-    body.sleepState = CANNON.Body.AWAKE
-    body.wakeUp()
-  }
+    if (body.sleepMs >= this.sleepAfterMs && onSurface) {
+      const mode = this.getRestSnapMode(mesh)
+      const targetQuat = this.resolveRestTargetQuaternion(mesh)
 
-  applyReleaseVelocity(mesh, linearVel, angularVel = null) {
-    const body = this.ensureBodyForMesh(mesh)
-    if (!body) return
-
-    // ✅ usar transform mundial del mesh suelto
-    mesh.getWorldPosition(this._tmpWorldPos)
-    mesh.getWorldQuaternion(this._tmpWorldQuat)
-
-    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
-    body.quaternion.set(
-      this._tmpWorldQuat.x,
-      this._tmpWorldQuat.y,
-      this._tmpWorldQuat.z,
-      this._tmpWorldQuat.w
-    )
-
-    // volver dinámico
-    body.type = CANNON.Body.DYNAMIC
-    body.mass = 0.25
-    body.updateMassProperties()
-
-    // ✅ micro-impulso hacia abajo si sueltas sin lanzar (evita "sleep en el aire")
-    const vx = linearVel?.x ?? 0
-    const vy = linearVel?.y ?? 0
-    const vz = linearVel?.z ?? 0
-    const speed2 = vx * vx + vy * vy + vz * vz
-    const minDown = -0.03
-
-    body.velocity.set(vx, speed2 < 0.0004 ? Math.min(vy, minDown) : vy, vz)
-
-    if (angularVel) {
-      body.angularVelocity.set(angularVel.x, angularVel.y, angularVel.z)
-    } else {
-      body.angularVelocity.set(0, 0, 0)
+      if (mode === "stable-face") {
+        const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
+        if (angle > this.tipOverAngleThreshold) this.startTipOver(mesh, body, targetQuat)
+        else this.startSettling(mesh, body, targetQuat)
+      } else {
+        this.startSettling(mesh, body, targetQuat)
+      }
+      return
     }
 
-    // ✅ forzar awake después de setear vels
-    body.sleepState = CANNON.Body.AWAKE
-    body.wakeUp()
-  }
+    // cleanup
+    if (mesh.position.y < this.fallYKill) {
+      this.removeComponentById(mesh.userData.componentId)
+      return
+    }
 
-  // KINEMATIC: body sigue al mesh
-  syncBodyToMesh(mesh) {
-    const id = mesh?.userData?.componentId
-    if (!id) return
+    this.camera.getWorldPosition(this._tmpCamPos)
+    const dist = mesh.position.distanceTo(this._tmpCamPos)
+    const aliveMs = performance.now() - body.freeSinceMs
 
-    const body = this.ensureBodyForMesh(mesh)
-    if (!body) return
-    if (body.type !== CANNON.Body.KINEMATIC) return
+    if (dist > this.maxDistance && aliveMs > this.farAfterMs) {
+      this.removeComponentById(mesh.userData.componentId)
+      return
+    }
 
-    mesh.getWorldPosition(this._tmpWorldPos)
-    mesh.getWorldQuaternion(this._tmpWorldQuat)
-
-    body.position.set(this._tmpWorldPos.x, this._tmpWorldPos.y, this._tmpWorldPos.z)
-    body.quaternion.set(
-      this._tmpWorldQuat.x,
-      this._tmpWorldQuat.y,
-      this._tmpWorldQuat.z,
-      this._tmpWorldQuat.w
-    )
-
-    body.velocity.set(0, 0, 0)
-    body.angularVelocity.set(0, 0, 0)
-
-    body.sleepState = CANNON.Body.AWAKE
-    body.wakeUp()
-  }
-
-  // DYNAMIC: mesh sigue al body
-  syncMeshFromBody(mesh) {
-    const id = mesh?.userData?.componentId
-    if (!id) return
-
-    const body = this.bodyById.get(id)
-    if (!body) return
-
-    // si sigue agarrado, no pises el mesh
-    if (mesh.parent !== this.scene) return
-    if (body.type === CANNON.Body.KINEMATIC) return
-
-    mesh.position.set(body.position.x, body.position.y, body.position.z)
-    mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w)
-  }
-
-  persistIfSleeping(mesh) {
-    const id = mesh?.userData?.componentId
-    if (!id) return
-
-    const body = this.bodyById.get(id)
-    if (!body) return
-
-    if (body.sleepState === CANNON.Body.SLEEPING) {
-      const p = mesh.position
-      const q = mesh.quaternion
-      this.appState.updateComponent(id, {
-        transform: {
-          x: p.x,
-          y: p.y,
-          z: p.z,
-          qx: q.x,
-          qy: q.y,
-          qz: q.z,
-          qw: q.w,
-        },
-      })
+    if (aliveMs > this.floorTimeoutMs && dist > this.floorTimeoutDist) {
+      this.removeComponentById(mesh.userData.componentId)
+      return
     }
   }
 
-  cleanupBodies(meshesIterable) {
-    const aliveIds = new Set()
-    for (const mesh of meshesIterable) {
-      const id = mesh?.userData?.componentId
-      if (id) aliveIds.add(id)
-    }
-    for (const id of this.bodyById.keys()) {
-      if (!aliveIds.has(id)) this.removeBodyById(id)
-    }
-  }
+  update(meshIterable, dt) {
+    if (!meshIterable) return
+    if (!dt || !isFinite(dt)) return
 
-  step(meshesIterable, dt) {
-    this._accum += dt
-    const maxAccum = this.fixedTimeStep * this.maxSubSteps
-    if (this._accum > maxAccum) this._accum = maxAccum
-
-    while (this._accum >= this.fixedTimeStep) {
-      this.world.step(this.fixedTimeStep)
-      this._accum -= this.fixedTimeStep
-    }
-
-    for (const mesh of meshesIterable) {
+    for (const mesh of meshIterable) {
       if (!mesh?.userData?.componentId) continue
+      if (mesh.parent !== this.scene) continue
 
-      this.ensureBodyForMesh(mesh)
-      this.syncBodyToMesh(mesh)
-      this.syncMeshFromBody(mesh)
-      this.persistIfSleeping(mesh)
+      const id = mesh.userData.componentId
+
+      const phys = mesh.userData.physics
+      if (phys?.active) {
+        const body = this.ensureBodyForMesh(mesh, phys.vel || null)
+        delete mesh.userData.physics
+        if (body) body.freeSinceMs = performance.now()
+      }
+
+      const body = this.bodies.get(id)
+      if (!body) continue
+
+      this.stepMesh(mesh, body, dt)
     }
-
-    this.cleanupBodies(meshesIterable)
   }
 }

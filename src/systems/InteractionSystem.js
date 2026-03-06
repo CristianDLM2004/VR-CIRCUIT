@@ -156,6 +156,21 @@ export class InteractionSystem {
     return Array.from(session.inputSources || []).some((src) => !!src.hand)
   }
 
+  isJointTracked(joint) {
+    if (!joint) return false
+    if (joint.visible === false) return false
+    return true
+  }
+
+  isHandEntryTracked(handEntry) {
+    if (!handEntry?.hand?.joints) return false
+
+    const thumb = handEntry.hand.joints["thumb-tip"]
+    const index = handEntry.hand.joints["index-finger-tip"]
+
+    return this.isJointTracked(thumb) && this.isJointTracked(index)
+  }
+
   setHover(newHovered) {
     if (this.hovered === newHovered) return
 
@@ -242,7 +257,7 @@ export class InteractionSystem {
 
   getJointWorld(hand, jointName, out) {
     const j = hand.joints?.[jointName]
-    if (!j) return null
+    if (!this.isJointTracked(j)) return null
     j.getWorldPosition(out)
     return out
   }
@@ -261,6 +276,7 @@ export class InteractionSystem {
     if (this._lastPokedButton) {
       let minDist = Infinity
       for (const h of this.hands) {
+        if (!this.isHandEntryTracked(h)) continue
         this.getIndexTipWorld(h, this._tmpA)
         minDist = Math.min(minDist, this.distanceToObjectSurface(this._lastPokedButton, this._tmpA))
       }
@@ -272,6 +288,7 @@ export class InteractionSystem {
     let bestDist = this.uiPokeRadius
 
     for (const h of this.hands) {
+      if (!this.isHandEntryTracked(h)) continue
       this.getIndexTipWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
@@ -316,6 +333,14 @@ export class InteractionSystem {
 
   updateHandPinchState() {
     for (const h of this.hands) {
+      if (!this.isHandEntryTracked(h)) {
+        if (h.isPinching) {
+          h.isPinching = false
+          this.onHandPinchEnd()
+        }
+        continue
+      }
+
       const dist = this.computePinchDistance(h.hand)
 
       if (dist == null) {
@@ -392,8 +417,12 @@ export class InteractionSystem {
     const dt = (now - this._hold.lastT) / 1000
     if (dt <= 0.0001) return
 
-    if (this._hold.sourceType === "controller") this._hold.source.getWorldPosition(this._tmpA)
-    else this.getIndexTipWorld(this._hold.source, this._tmpA)
+    if (this._hold.sourceType === "controller") {
+      this._hold.source.getWorldPosition(this._tmpA)
+    } else {
+      if (!this.isHandEntryTracked(this._hold.source)) return
+      this.getIndexTipWorld(this._hold.source, this._tmpA)
+    }
 
     const v = this._tmpA.clone().sub(this._hold.lastPos).multiplyScalar(1 / dt)
 
@@ -439,6 +468,7 @@ export class InteractionSystem {
 
   onHandPinchStart(handEntry) {
     if (this.selected) return
+    if (!this.isHandEntryTracked(handEntry)) return
 
     const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
     if (!target) return
@@ -450,7 +480,7 @@ export class InteractionSystem {
     this._startHoldTracking("hand", handEntry)
 
     const joint = handEntry.hand.joints?.["index-finger-tip"]
-    if (joint) joint.attach(this.selected)
+    if (this.isJointTracked(joint)) joint.attach(this.selected)
     else handEntry.pinchPoint.attach(this.selected)
   }
 
@@ -569,6 +599,7 @@ export class InteractionSystem {
     let bestDist = this.nearRadius
 
     for (const h of this.hands) {
+      if (!this.isHandEntryTracked(h)) continue
       this.getIndexTipWorld(h, this._tmpA)
 
       for (const obj of this.interactables) {
@@ -598,6 +629,18 @@ export class InteractionSystem {
     if (handsActive) {
       this.updateUIPoke()
       this.updateHandPinchState()
+
+      if (
+        this.selected &&
+        this.selectedBy === "hand" &&
+        (
+          !this._selectedHandEntry ||
+          !this._selectedHandEntry.isPinching ||
+          !this.isHandEntryTracked(this._selectedHandEntry)
+        )
+      ) {
+        this._forceReleaseSelected()
+      }
     }
 
     if (this.selected && this.selected.parent === this.scene) {

@@ -25,6 +25,11 @@ export class ComponentFactory {
     mesh.userData.interactable = true
     mesh.userData.isSurface = false
 
+    // Comportamiento físico por defecto:
+    // - NO auto-acomodar a una cara estable al reposar
+    // - pensado para futuros componentes electrónicos
+    mesh.userData.restSnapMode = "freeze"
+
     // ✅ NO layers: evitar bug de render por ojo en XR
     return mesh
   }
