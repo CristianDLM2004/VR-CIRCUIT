@@ -27,11 +27,13 @@ export class PhysicsSystem {
     this.restitution = 0.18
     this.friction = 0.25
 
-    // ✅ umbral “ya casi quieto”
-    this.restSpeed = 0.14
+    // Umbrales de reposo
+    this.restLinearSpeed = 0.06       // m/s
+    this.restAngularSpeed = 0.55      // rad/s aprox (en nuestro sistema es “arbitrario” pero consistente)
+    this.restHoldMs = 90              // ✅ tiempo mínimo en reposo antes de tip/settle (casi imperceptible)
 
-    // ✅ antes 450ms -> ahora casi inmediato (evita tiempo muerto)
-    this.sleepAfterMs = 90
+    // “Legacy” (ya no manda, pero lo dejamos por seguridad)
+    this.sleepAfterMs = 120
 
     this.spinFromThrow = 6.5
 
@@ -126,7 +128,12 @@ export class PhysicsSystem {
         vel: new THREE.Vector3(),
         angVel: new THREE.Vector3(),
         freeSinceMs: performance.now(),
+
+        // legacy
         sleepMs: 0,
+
+        // ✅ nuevo: reposo continuo
+        restTimeMs: 0,
 
         tipping: false,
         tipT: 0,
@@ -137,9 +144,6 @@ export class PhysicsSystem {
         settleT: 0,
         settleStartQuat: new THREE.Quaternion(),
         settleTargetQuat: new THREE.Quaternion(),
-
-        // ✅ contacto reciente para detectar reposo inmediato
-        onSurface: false,
       }
       this.bodies.set(id, body)
     }
@@ -156,11 +160,11 @@ export class PhysicsSystem {
     }
 
     body.sleepMs = 0
+    body.restTimeMs = 0
     body.tipping = false
     body.tipT = 0
     body.settling = false
     body.settleT = 0
-    body.onSurface = false
 
     return body
   }
@@ -257,6 +261,7 @@ export class PhysicsSystem {
       mesh.quaternion.copy(body.settleTargetQuat)
       body.settling = false
       this.bodies.delete(mesh.userData.componentId)
+
       if (this.interactionSystem?.persistMeshTransform) {
         this.interactionSystem.persistMeshTransform(mesh)
       }
@@ -276,24 +281,30 @@ export class PhysicsSystem {
       return
     }
 
+    // gravedad
     body.vel.y += this.gravity * dt
 
+    // drag lineal
     const drag = Math.max(0, 1 - this.linearDrag * dt)
     body.vel.multiplyScalar(drag)
 
+    // drag angular
     const ad = Math.max(0, 1 - this.angularDrag * dt)
     body.angVel.multiplyScalar(ad)
 
+    // integrar posición
     mesh.position.x += body.vel.x * dt
     mesh.position.y += body.vel.y * dt
     mesh.position.z += body.vel.z * dt
 
+    // integrar rotación
     if (body.angVel.lengthSq() > 1e-6) {
       this.integrateRotation(mesh, body.angVel, dt)
     }
 
+    // contacto con superficie
     const hit = this.getSurfaceHitBelow(mesh)
-    body.onSurface = false
+    let onSurface = false
 
     if (hit) {
       const bbox = new THREE.Box3().setFromObject(mesh)
@@ -304,39 +315,65 @@ export class PhysicsSystem {
       const eps = 0.006
 
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
-        body.onSurface = true
+        onSurface = true
         mesh.position.y = targetY
 
+        // rebote
         body.vel.y = -body.vel.y * this.restitution
 
+        // si el rebote ya es mínimo, cortarlo (evita “vibración eterna”)
+        if (Math.abs(body.vel.y) < 0.08) body.vel.y = 0
+
+        // fricción
         const fr = Math.max(0, 1 - this.friction)
         body.vel.x *= fr
         body.vel.z *= fr
 
+        // amortiguar giro fuerte al tocar
         body.angVel.multiplyScalar(0.78)
 
-        const speed = body.vel.length() + body.angVel.length() * 0.08
-
-        // ✅ Acumula reposo más rápido cuando ya está en superficie y casi quieto
-        if (speed < this.restSpeed) {
-          body.sleepMs += dt * 1000 * 1.8
-        } else {
-          body.sleepMs = 0
-        }
-
-        // ✅ ya no esperar “medio segundo”
-        if (body.sleepMs >= this.sleepAfterMs) {
-          const targetQuat = this.getNearestStableQuaternion(mesh.quaternion)
-          const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
-
-          if (angle > this.tipOverAngleThreshold) this.startTipOver(mesh, body, targetQuat)
-          else this.startSettling(mesh, body, targetQuat)
-
-          return
-        }
+        // legacy counter por si acaso
+        const legacySpeed = body.vel.length() + body.angVel.length() * 0.08
+        if (legacySpeed < 0.14) body.sleepMs += dt * 1000
+        else body.sleepMs = 0
       }
     }
 
+    // ✅ NUEVO: si está en superficie y realmente ya casi quieto, acumular reposo continuo
+    if (onSurface) {
+      const lin = body.vel.length()
+      const ang = body.angVel.length()
+
+      if (lin < this.restLinearSpeed && ang < this.restAngularSpeed) {
+        body.restTimeMs += dt * 1000
+      } else {
+        body.restTimeMs = 0
+      }
+
+      // ✅ dispara tip/settle sin esperar “un segundo”
+      if (body.restTimeMs >= this.restHoldMs) {
+        const targetQuat = this.getNearestStableQuaternion(mesh.quaternion)
+        const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
+
+        if (angle > this.tipOverAngleThreshold) this.startTipOver(mesh, body, targetQuat)
+        else this.startSettling(mesh, body, targetQuat)
+
+        return
+      }
+    } else {
+      body.restTimeMs = 0
+    }
+
+    // fallback legacy (por seguridad)
+    if (body.sleepMs >= this.sleepAfterMs && onSurface) {
+      const targetQuat = this.getNearestStableQuaternion(mesh.quaternion)
+      const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
+      if (angle > this.tipOverAngleThreshold) this.startTipOver(mesh, body, targetQuat)
+      else this.startSettling(mesh, body, targetQuat)
+      return
+    }
+
+    // cleanup
     if (mesh.position.y < this.fallYKill) {
       this.removeComponentById(mesh.userData.componentId)
       return
