@@ -32,8 +32,6 @@ export class StateSyncSystem {
 
   addMeshFromComponent(componentData) {
     if (!componentData?.id) return null
-
-    // si ya existe, no duplicar
     if (this.meshById.has(componentData.id)) return this.meshById.get(componentData.id)
 
     const mesh = ComponentFactory.createComponent(componentData)
@@ -49,6 +47,7 @@ export class StateSyncSystem {
   removeMeshById(id) {
     const mesh = this.meshById.get(id)
     if (!mesh) return false
+
     if (this.interactionSystem) this.interactionSystem.unregister(mesh)
     this.scene.remove(mesh)
     this.meshById.delete(id)

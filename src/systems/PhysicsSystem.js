@@ -31,8 +31,7 @@ export class PhysicsSystem {
     this.angularDrag = 0.10
     this.spinFromThrow = 6.5
 
-    // ✅ settle suave
-    this.settleDuration = 0.25 // segundos
+    this.settleDuration = 0.25
 
     this.maxDistance = 10.0
     this.farAfterMs = 1500
@@ -52,8 +51,6 @@ export class PhysicsSystem {
         angVel: new THREE.Vector3(),
         freeSinceMs: performance.now(),
         sleepMs: 0,
-
-        // ✅ settle state
         settling: false,
         settleT: 0,
         startQuat: new THREE.Quaternion(),
@@ -74,7 +71,6 @@ export class PhysicsSystem {
       }
     }
 
-    // reset settle
     body.settling = false
     body.settleT = 0
 
@@ -113,7 +109,6 @@ export class PhysicsSystem {
   }
 
   computeUprightTargetQuat(mesh) {
-    // conservar yaw, poner pitch/roll 0
     this._tmpEuler.setFromQuaternion(mesh.quaternion, "YXZ")
     const yaw = this._tmpEuler.y
     this._targetQuat.setFromEuler(new THREE.Euler(0, yaw, 0))
@@ -125,8 +120,6 @@ export class PhysicsSystem {
     body.settleT = 0
     body.startQuat.copy(mesh.quaternion)
     body.targetQuat.copy(this.computeUprightTargetQuat(mesh))
-
-    // congelar velocidades
     body.vel.set(0, 0, 0)
     body.angVel.set(0, 0, 0)
   }
@@ -134,22 +127,19 @@ export class PhysicsSystem {
   updateSettling(mesh, body, dt) {
     body.settleT += dt
     const t = Math.min(1, body.settleT / this.settleDuration)
-
-    // slerp suave
     mesh.quaternion.copy(body.startQuat).slerp(body.targetQuat, t)
 
     if (t >= 1) {
       mesh.quaternion.copy(body.targetQuat)
       body.settling = false
-
-      // persistir y apagar body
       this.bodies.delete(mesh.userData.componentId)
-      if (this.interactionSystem?.persistMeshTransform) this.interactionSystem.persistMeshTransform(mesh)
+      if (this.interactionSystem?.persistMeshTransform) {
+        this.interactionSystem.persistMeshTransform(mesh)
+      }
     }
   }
 
   stepMesh(mesh, body, dt) {
-    // si está settling, solo interpolar rotación
     if (body.settling) {
       this.updateSettling(mesh, body, dt)
       return
@@ -178,8 +168,6 @@ export class PhysicsSystem {
       const halfY = this._tmpSize.y * 0.5
 
       const targetY = hit.point.y + halfY
-
-      // ✅ eps más permisivo para evitar “levitar”
       const eps = 0.006
 
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
@@ -198,7 +186,6 @@ export class PhysicsSystem {
         else body.sleepMs = 0
 
         if (body.sleepMs >= this.sleepAfterMs) {
-          // ✅ settle suave (sin golpe)
           this.startSettling(mesh, body)
           return
         }
