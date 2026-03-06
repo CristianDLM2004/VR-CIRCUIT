@@ -14,16 +14,16 @@ export class PhysicsSystem {
     this._tmpSize = new THREE.Vector3()
     this._tmpCamPos = new THREE.Vector3()
     this._tmpQuat = new THREE.Quaternion()
-    this._tmpQuat2 = new THREE.Quaternion()
-    this._tmpMatrix = new THREE.Matrix4()
-    this._tmpVecA = new THREE.Vector3()
-    this._tmpVecB = new THREE.Vector3()
+    this._tmpVec3 = new THREE.Vector3()
 
     this.bodies = new Map()
 
+    // ---------------------------
     // Dinámica base
+    // ---------------------------
     this.gravity = -9.8
     this.linearDrag = 0.015
+    this.angularDrag = 0.10
 
     this.restitution = 0.18
     this.friction = 0.25
@@ -31,23 +31,32 @@ export class PhysicsSystem {
     this.restSpeed = 0.12
     this.sleepAfterMs = 450
 
-    this.angularDrag = 0.10
     this.spinFromThrow = 6.5
 
-    // ✅ settle más suave y menos brusco
-    this.settleDuration = 0.42
+    // ---------------------------
+    // Tip-over + settle
+    // ---------------------------
+    this.tipOverDuration = 0.28
+    this.tipOverAngleThreshold = THREE.MathUtils.degToRad(10)
 
+    this.settleDuration = 0.18
+
+    // ---------------------------
     // Limpieza
+    // ---------------------------
     this.maxDistance = 10.0
     this.farAfterMs = 1500
     this.fallYKill = -3.0
     this.floorTimeoutMs = 45000
     this.floorTimeoutDist = 4.5
 
-    // ✅ Orientaciones estables para cubo (24 posibles)
+    // 24 orientaciones estables de un cubo
     this.stableCubeQuaternions = this.buildStableCubeQuaternions()
   }
 
+  // ---------------------------
+  // Orientaciones estables cubo
+  // ---------------------------
   buildStableCubeQuaternions() {
     const dirs = [
       new THREE.Vector3(1, 0, 0),
@@ -59,14 +68,11 @@ export class PhysicsSystem {
     ]
 
     const quats = []
-    const up = new THREE.Vector3(0, 1, 0)
 
     for (const yAxis of dirs) {
       for (const zAxis of dirs) {
-        // Deben ser perpendiculares
         if (Math.abs(yAxis.dot(zAxis)) > 1e-6) continue
 
-        // x = y × z para formar base ortonormal derecha
         const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis)
         if (xAxis.lengthSq() < 1e-6) continue
         xAxis.normalize()
@@ -74,7 +80,6 @@ export class PhysicsSystem {
         const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)
         const q = new THREE.Quaternion().setFromRotationMatrix(m)
 
-        // evitar duplicados
         let duplicate = false
         for (const existing of quats) {
           const dot = Math.abs(existing.dot(q))
@@ -88,7 +93,6 @@ export class PhysicsSystem {
       }
     }
 
-    // Deben salir 24
     return quats
   }
 
@@ -107,6 +111,14 @@ export class PhysicsSystem {
     return best
   }
 
+  getQuatAngularDistance(a, b) {
+    const dot = THREE.MathUtils.clamp(Math.abs(a.dot(b)), -1, 1)
+    return 2 * Math.acos(dot)
+  }
+
+  // ---------------------------
+  // Bodies
+  // ---------------------------
   ensureBodyForMesh(mesh, initialVel = null) {
     const id = mesh?.userData?.componentId
     if (!id) return null
@@ -119,10 +131,15 @@ export class PhysicsSystem {
         freeSinceMs: performance.now(),
         sleepMs: 0,
 
+        tipping: false,
+        tipT: 0,
+        tipStartQuat: new THREE.Quaternion(),
+        tipTargetQuat: new THREE.Quaternion(),
+
         settling: false,
         settleT: 0,
-        startQuat: new THREE.Quaternion(),
-        targetQuat: new THREE.Quaternion(),
+        settleStartQuat: new THREE.Quaternion(),
+        settleTargetQuat: new THREE.Quaternion(),
       }
       this.bodies.set(id, body)
     }
@@ -143,9 +160,11 @@ export class PhysicsSystem {
       }
     }
 
+    body.sleepMs = 0
+    body.tipping = false
+    body.tipT = 0
     body.settling = false
     body.settleT = 0
-    body.sleepMs = 0
 
     return body
   }
@@ -156,6 +175,9 @@ export class PhysicsSystem {
     this.stateSyncSystem.rebuildFromState()
   }
 
+  // ---------------------------
+  // Surface contact
+  // ---------------------------
   getSurfaceHitBelow(mesh) {
     if (!this.interactionSystem?.surfaces?.length) return null
 
@@ -170,9 +192,23 @@ export class PhysicsSystem {
     if (typeof this.interactionSystem.pickBestSurfaceHit === "function") {
       return this.interactionSystem.pickBestSurfaceHit(hits)
     }
+
     return hits[0]
   }
 
+  alignHeightToSurface(mesh) {
+    const hit = this.getSurfaceHitBelow(mesh)
+    if (!hit) return
+
+    const bbox = new THREE.Box3().setFromObject(mesh)
+    bbox.getSize(this._tmpSize)
+    const halfY = this._tmpSize.y * 0.5
+    mesh.position.y = hit.point.y + halfY
+  }
+
+  // ---------------------------
+  // Rotación
+  // ---------------------------
   integrateRotation(mesh, angVel, dt) {
     const ax = angVel.x * dt
     const ay = angVel.y * dt
@@ -182,13 +218,45 @@ export class PhysicsSystem {
     mesh.quaternion.multiply(this._tmpQuat).normalize()
   }
 
-  startSettling(mesh, body) {
+  // ---------------------------
+  // Tip-over
+  // ---------------------------
+  startTipOver(mesh, body, targetQuat) {
+    body.tipping = true
+    body.tipT = 0
+    body.tipStartQuat.copy(mesh.quaternion)
+    body.tipTargetQuat.copy(targetQuat)
+
+    body.vel.set(0, 0, 0)
+    body.angVel.set(0, 0, 0)
+  }
+
+  updateTipOver(mesh, body, dt) {
+    body.tipT += dt
+    const t = Math.min(1, body.tipT / this.tipOverDuration)
+
+    // easing más orgánico, como si “venciera”
+    const eased = t * t * (3 - 2 * t)
+
+    mesh.quaternion.copy(body.tipStartQuat).slerp(body.tipTargetQuat, eased)
+
+    // mantener contacto con la superficie mientras se “vence”
+    this.alignHeightToSurface(mesh)
+
+    if (t >= 1) {
+      body.tipping = false
+      this.startSettling(mesh, body, body.tipTargetQuat)
+    }
+  }
+
+  // ---------------------------
+  // Settle final
+  // ---------------------------
+  startSettling(mesh, body, targetQuat = null) {
     body.settling = true
     body.settleT = 0
-    body.startQuat.copy(mesh.quaternion)
-
-    // ✅ En vez de "upright" genérico, usar la cara estable MÁS cercana
-    body.targetQuat.copy(this.getNearestStableQuaternion(mesh.quaternion))
+    body.settleStartQuat.copy(mesh.quaternion)
+    body.settleTargetQuat.copy(targetQuat || this.getNearestStableQuaternion(mesh.quaternion))
 
     body.vel.set(0, 0, 0)
     body.angVel.set(0, 0, 0)
@@ -198,13 +266,13 @@ export class PhysicsSystem {
     body.settleT += dt
     const t = Math.min(1, body.settleT / this.settleDuration)
 
-    // ease suave para que no se vea jalón
     const eased = 1 - Math.pow(1 - t, 3)
+    mesh.quaternion.copy(body.settleStartQuat).slerp(body.settleTargetQuat, eased)
 
-    mesh.quaternion.copy(body.startQuat).slerp(body.targetQuat, eased)
+    this.alignHeightToSurface(mesh)
 
     if (t >= 1) {
-      mesh.quaternion.copy(body.targetQuat)
+      mesh.quaternion.copy(body.settleTargetQuat)
       body.settling = false
       this.bodies.delete(mesh.userData.componentId)
 
@@ -214,7 +282,15 @@ export class PhysicsSystem {
     }
   }
 
+  // ---------------------------
+  // Simulación principal
+  // ---------------------------
   stepMesh(mesh, body, dt) {
+    if (body.tipping) {
+      this.updateTipOver(mesh, body, dt)
+      return
+    }
+
     if (body.settling) {
       this.updateSettling(mesh, body, dt)
       return
@@ -241,7 +317,6 @@ export class PhysicsSystem {
       this.integrateRotation(mesh, body.angVel, dt)
     }
 
-    // colisión simple con superficie
     const hit = this.getSurfaceHitBelow(mesh)
     if (hit) {
       const bbox = new THREE.Box3().setFromObject(mesh)
@@ -254,15 +329,15 @@ export class PhysicsSystem {
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {
         mesh.position.y = targetY
 
-        // rebote vertical
+        // rebote
         body.vel.y = -body.vel.y * this.restitution
 
-        // fricción al contacto
+        // fricción
         const fr = Math.max(0, 1 - this.friction)
         body.vel.x *= fr
         body.vel.z *= fr
 
-        // amortiguar giro en contacto
+        // amortiguar giro
         body.angVel.multiplyScalar(0.78)
 
         const speed = body.vel.length() + body.angVel.length() * 0.08
@@ -273,7 +348,16 @@ export class PhysicsSystem {
         }
 
         if (body.sleepMs >= this.sleepAfterMs) {
-          this.startSettling(mesh, body)
+          const targetQuat = this.getNearestStableQuaternion(mesh.quaternion)
+          const angle = this.getQuatAngularDistance(mesh.quaternion, targetQuat)
+
+          // ✅ si está bastante inclinado, primero tip-over
+          if (angle > this.tipOverAngleThreshold) {
+            this.startTipOver(mesh, body, targetQuat)
+          } else {
+            // si ya casi estaba estable, solo settle corto
+            this.startSettling(mesh, body, targetQuat)
+          }
           return
         }
       }
