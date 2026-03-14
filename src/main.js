@@ -103,6 +103,26 @@ function addCube() {
   stateSyncSystem.addMeshFromComponent(data)
 }
 
+function addLed() {
+  const id = genId("led")
+
+  const p = protoboard.position.clone()
+  p.y += 0.25
+  p.z += 0.12
+
+  const data = {
+    id,
+    type: "led",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {
+      color: "red",
+    },
+  }
+
+  appState.addComponent(data)
+  stateSyncSystem.addMeshFromComponent(data)
+}
+
 function saveState() {
   localStorage.setItem("vr_circuit_state", appState.toJSON())
   console.log("✅ Estado guardado")
@@ -247,6 +267,7 @@ document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase()
   if (k === "c") addCube()
+  if (k === "v") addLed()
   if (k === "s") saveState()
   if (k === "l") loadState()
   if (k === "x") clearScene()
