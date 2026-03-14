@@ -93,14 +93,34 @@ export class ComponentFactory {
         {
           id: "anode",
           label: "Ánodo",
-          localPos: new THREE.Vector3(-0.01, -0.04, 0),
+          localPos: new THREE.Vector3(-0.01, -0.055, 0),
         },
         {
           id: "cathode",
           label: "Cátodo",
-          localPos: new THREE.Vector3(0.01, -0.04, 0),
+          localPos: new THREE.Vector3(0.01, -0.038, 0),
         },
       ]
+    }
+
+    mesh.userData.getPinWorldPositions = function () {
+      const results = []
+      const worldPos = new THREE.Vector3()
+
+      if (!this.pins || !Array.isArray(this.pins)) return results
+
+      for (const pin of this.pins) {
+        worldPos.copy(pin.localPos)
+        mesh.localToWorld(worldPos)
+
+        results.push({
+          id: pin.id,
+          label: pin.label,
+          worldPos: worldPos.clone(),
+        })
+      }
+
+      return results
     }
 
     return mesh

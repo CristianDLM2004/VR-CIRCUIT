@@ -638,6 +638,35 @@ export class InteractionSystem {
     return false
   }
 
+  //Verificar holes válidos y todo lo relacionado
+  trySnapComponentPinsToHoles(object, maxDist = 0.02) {
+    if (!object) return false
+    if (!this.holeSystem) return false
+    if (!object.userData?.getPinWorldPositions) return false
+    if (!Array.isArray(object.userData?.pins) || object.userData.pins.length === 0) return false
+
+    const pinWorldPositions = object.userData.getPinWorldPositions()
+    const matches = this.holeSystem.getNearestHolesForPins(pinWorldPositions, maxDist)
+
+    if (!Array.isArray(matches) || matches.length === 0) return false
+
+    const validMatches = matches.filter((m) => !!m.hole)
+    if (validMatches.length !== object.userData.pins.length) return false
+
+    const anchorMatch = validMatches.find((m) => m.pinId === "anode") || validMatches[0]
+    const anchorPin = object.userData.pins.find((p) => p.id === anchorMatch.pinId)
+
+    if (!anchorPin) return false
+
+    const currentAnchorWorld = new THREE.Vector3().copy(anchorPin.localPos)
+    object.localToWorld(currentAnchorWorld)
+
+    const delta = new THREE.Vector3().subVectors(anchorMatch.hole.worldPos, currentAnchorWorld)
+    object.position.add(delta)
+
+    this.persistMeshTransform(object)
+    return true
+  }
   tryPlaceObjectDirectly(object) {
     if (!object) return false
 

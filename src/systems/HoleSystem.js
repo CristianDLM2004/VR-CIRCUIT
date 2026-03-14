@@ -127,6 +127,55 @@ export class HoleSystem {
     return best
   }
 
+  //Detectar holes cercanos (creo xd)
+  getNearestHolesForPins(pinWorldPositions, maxDist = 0.03) {
+  if (!Array.isArray(pinWorldPositions) || pinWorldPositions.length === 0) return []
+
+  // refresca world positions por si el protoboard se moviera
+  this.updateWorldPositions()
+
+  const results = []
+  const usedHoleIds = new Set()
+
+  for (const pin of pinWorldPositions) {
+    let best = null
+    let bestD2 = maxDist * maxDist
+
+    for (const hole of this.holes) {
+      if (usedHoleIds.has(hole.id)) continue
+
+      const d2 = hole.worldPos.distanceToSquared(pin.worldPos)
+      if (d2 < bestD2) {
+        bestD2 = d2
+        best = hole
+      }
+    }
+
+    if (best) {
+      usedHoleIds.add(best.id)
+
+      results.push({
+        pinId: pin.id,
+        pinLabel: pin.label,
+        pinWorldPos: pin.worldPos.clone(),
+        hole: best,
+        distance: Math.sqrt(bestD2),
+      })
+    } else {
+      results.push({
+        pinId: pin.id,
+        pinLabel: pin.label,
+        pinWorldPos: pin.worldPos.clone(),
+        hole: null,
+        distance: null,
+      })
+    }
+  }
+
+  return results
+}
+  
+
   /**
    * Intenta snapear un objeto a un hole cercano (solo XZ).
    * Devuelve true si snapeó.
