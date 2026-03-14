@@ -640,7 +640,7 @@ export class InteractionSystem {
   }
 
   //Verificar holes válidos y todo lo relacionado
-  trySnapComponentPinsToHoles(object, maxDist = 0.02) {
+  trySnapComponentPinsToHoles(object, maxDist = 0.05) {
     if (!object) return false
     if (!this.holeSystem) return false
     if (!object.userData?.getPinWorldPositions) return false
@@ -665,6 +665,7 @@ export class InteractionSystem {
     const delta = new THREE.Vector3().subVectors(anchorMatch.hole.worldPos, currentAnchorWorld)
     object.position.add(delta)
 
+    this.resolveSurfacePenetration(object)
     this.persistMeshTransform(object)
     return true
   }
@@ -705,19 +706,27 @@ export class InteractionSystem {
 
     this.resolveSurfacePenetration(object)
 
-    if (releaseVel.lengthSq() === 0) {
-      const snappedByPins = this.trySnapComponentPinsToHoles(object, 0.025)
+    const snappedByPins = this.trySnapComponentPinsToHoles(object, 0.05)
 
-      if (snappedByPins || this.tryPlaceObjectDirectly(object)) {
-        clearOwner()
-        this.stopHoldTracking(holdState)
-        return
-      }
+    if (snappedByPins) {
+      object.userData.physics = null
+      clearOwner()
+      this.stopHoldTracking(holdState)
+      this.clearActivePinHoleMarkers()
+      return
+    }
+
+    if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
+      clearOwner()
+      this.stopHoldTracking(holdState)
+      this.clearActivePinHoleMarkers()
+      return
     }
 
     object.userData.physics = { active: true, vel: releaseVel }
     clearOwner()
     this.stopHoldTracking(holdState)
+    this.clearActivePinHoleMarkers()
   }
 
   onHandPinchStart(handEntry) {
@@ -911,12 +920,26 @@ export class InteractionSystem {
   }
 
   updateHeldObjects() {
+    let activeHeldObject = null
+
     for (const handEntry of this.hands) {
-      if (handEntry.heldObject) this.updateHoldVelocity(handEntry.hold)
+      if (handEntry.heldObject) {
+        this.updateHoldVelocity(handEntry.hold)
+        activeHeldObject = handEntry.heldObject
+      }
     }
 
     for (const controller of this.controllers) {
-      if (controller.userData?.heldObject) this.updateHoldVelocity(controller.userData.hold)
+      if (controller.userData?.heldObject) {
+        this.updateHoldVelocity(controller.userData.hold)
+        activeHeldObject = controller.userData.heldObject
+      }
+    }
+
+    if (activeHeldObject) {
+      this.updatePinHoleMarkersForHeldObject(activeHeldObject)
+    } else {
+      this.clearActivePinHoleMarkers()
     }
   }
 
@@ -996,36 +1019,36 @@ export class InteractionSystem {
 
   //Borra los puntos blancos viejos para que no se queden flotando.
   clearActivePinHoleMarkers() {
-  for (const marker of this._activePinHoleMarkers) {
-    if (marker?.parent) marker.parent.remove(marker)
+    for (const marker of this._activePinHoleMarkers) {
+      if (marker?.parent) marker.parent.remove(marker)
+    }
+    this._activePinHoleMarkers.length = 0
   }
-  this._activePinHoleMarkers.length = 0
-}
 
-//Dibuja bolas blancas y encuentra holes cercanos mientras se sostiene el objeto
-updatePinHoleMarkersForHeldObject(object) {
-  this.clearActivePinHoleMarkers()
+  //Dibuja bolas blancas y encuentra holes cercanos mientras se sostiene el objeto
+  updatePinHoleMarkersForHeldObject(object) {
+    this.clearActivePinHoleMarkers()
 
-  if (!object) return
-  if (!this.holeSystem) return
-  if (!object.userData?.getPinWorldPositions) return
+    if (!object) return
+    if (!this.holeSystem) return
+    if (!object.userData?.getPinWorldPositions) return
 
-  const pinWorldPositions = object.userData.getPinWorldPositions()
-  const matches = this.holeSystem.getNearestHolesForPins(pinWorldPositions, 0.025)
+    const pinWorldPositions = object.userData.getPinWorldPositions()
+    const matches = this.holeSystem.getNearestHolesForPins(pinWorldPositions, 0.05)
 
-  for (const match of matches) {
-    if (!match.hole) continue
+    for (const match of matches) {
+      if (!match.hole) continue
 
-    const marker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.0045, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    )
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.006, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      )
 
-    marker.position.copy(match.hole.worldPos)
-    this.scene.add(marker)
-    this._activePinHoleMarkers.push(marker)
+      marker.position.copy(match.hole.worldPos)
+      this.scene.add(marker)
+      this._activePinHoleMarkers.push(marker)
+    }
   }
-}
   update() {
     if (!this.renderer.xr.isPresenting) return
 
