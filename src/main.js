@@ -155,6 +155,7 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   position: panelWorldPos,
   rotationY: panelRotY,
   onAdd: addCube,
+  onLed: addLed,
   onSave: saveState,
   onLoad: loadState,
 })
