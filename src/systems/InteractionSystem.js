@@ -698,15 +698,15 @@ export class InteractionSystem {
     const delta = new THREE.Vector3().subVectors(anodeMatch.hole.worldPos, rotatedAnodeWorld)
     object.position.add(delta)
 
-    // Bajarlo un poco para que parezca insertado
-    object.position.y -= 0.01
+    // Profundidad de inserción visual en la protoboard
+    object.position.y -= 0.02
 
     object.updateMatrixWorld(true)
 
-    this.resolveSurfacePenetration(object)
     this.persistMeshTransform(object)
     return true
   }
+
   tryPlaceObjectDirectly(object) {
     if (!object) return false
 
