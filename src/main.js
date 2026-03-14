@@ -134,62 +134,7 @@ function addLed() {
   }
 
   appState.addComponent(data)
-
-  const mesh = stateSyncSystem.addMeshFromComponent(data)
-
-  if (mesh?.userData?.getPinWorldPositions) {
-    const pins = mesh.userData.getPinWorldPositions()
-
-    console.log("LED creado:", data.id)
-
-    const nearestMatches = holeSystem.getNearestHolesForPins(pins, 0.04)
-
-    // DEBUG visual: resaltar holes detectados para el LED
-    for (const match of nearestMatches) {
-      if (!match.hole) continue
-
-      const holeMarker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.0045, 10, 10),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
-      )
-
-      holeMarker.position.copy(match.hole.worldPos)
-      scene.add(holeMarker)
-    }
-
-    for (const pin of pins) {
-      console.log(`Pin ${pin.id}:`, {
-        x: Number(pin.worldPos.x.toFixed(4)),
-        y: Number(pin.worldPos.y.toFixed(4)),
-        z: Number(pin.worldPos.z.toFixed(4)),
-      })
-
-      // DEBUG visual: línea desde el LED hasta el pin
-      const points = [mesh.position.clone(), pin.worldPos.clone()]
-      const geo = new THREE.BufferGeometry().setFromPoints(points)
-      const mat = new THREE.LineBasicMaterial({
-        color: pin.id === "anode" ? 0x00ff88 : 0x4488ff,
-      })
-      const line = new THREE.Line(geo, mat)
-
-      scene.add(line)
-    }
-
-    for (const match of nearestMatches) {
-      if (match.hole) {
-        console.log(`Hole cercano para ${match.pinId}:`, {
-          holeId: match.hole.id,
-          groupKey: match.hole.groupKey,
-          distance: Number(match.distance.toFixed(4)),
-          x: Number(match.hole.worldPos.x.toFixed(4)),
-          y: Number(match.hole.worldPos.y.toFixed(4)),
-          z: Number(match.hole.worldPos.z.toFixed(4)),
-        })
-      } else {
-        console.log(`Hole cercano para ${match.pinId}: ninguno`)
-      }
-    }
-  }
+  stateSyncSystem.addMeshFromComponent(data)
 }
 
 function saveState() {

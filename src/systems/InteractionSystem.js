@@ -67,6 +67,7 @@ export class InteractionSystem {
 
     this._lastPokedButton = null
     this._lastUpdateTime = performance.now()
+    this._activePinHoleMarkers = []
 
     this.initXRInputs()
   }
@@ -704,10 +705,14 @@ export class InteractionSystem {
 
     this.resolveSurfacePenetration(object)
 
-    if (releaseVel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
-      clearOwner()
-      this.stopHoldTracking(holdState)
-      return
+    if (releaseVel.lengthSq() === 0) {
+      const snappedByPins = this.trySnapComponentPinsToHoles(object, 0.025)
+
+      if (snappedByPins || this.tryPlaceObjectDirectly(object)) {
+        clearOwner()
+        this.stopHoldTracking(holdState)
+        return
+      }
     }
 
     object.userData.physics = { active: true, vel: releaseVel }
@@ -989,6 +994,38 @@ export class InteractionSystem {
     }
   }
 
+  //Borra los puntos blancos viejos para que no se queden flotando.
+  clearActivePinHoleMarkers() {
+  for (const marker of this._activePinHoleMarkers) {
+    if (marker?.parent) marker.parent.remove(marker)
+  }
+  this._activePinHoleMarkers.length = 0
+}
+
+//Dibuja bolas blancas y encuentra holes cercanos mientras se sostiene el objeto
+updatePinHoleMarkersForHeldObject(object) {
+  this.clearActivePinHoleMarkers()
+
+  if (!object) return
+  if (!this.holeSystem) return
+  if (!object.userData?.getPinWorldPositions) return
+
+  const pinWorldPositions = object.userData.getPinWorldPositions()
+  const matches = this.holeSystem.getNearestHolesForPins(pinWorldPositions, 0.025)
+
+  for (const match of matches) {
+    if (!match.hole) continue
+
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0045, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    )
+
+    marker.position.copy(match.hole.worldPos)
+    this.scene.add(marker)
+    this._activePinHoleMarkers.push(marker)
+  }
+}
   update() {
     if (!this.renderer.xr.isPresenting) return
 
