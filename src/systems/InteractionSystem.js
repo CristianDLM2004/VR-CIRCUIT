@@ -654,16 +654,54 @@ export class InteractionSystem {
     const validMatches = matches.filter((m) => !!m.hole)
     if (validMatches.length !== object.userData.pins.length) return false
 
-    const anchorMatch = validMatches.find((m) => m.pinId === "anode") || validMatches[0]
-    const anchorPin = object.userData.pins.find((p) => p.id === anchorMatch.pinId)
+    const anodeMatch = validMatches.find((m) => m.pinId === "anode")
+    const cathodeMatch = validMatches.find((m) => m.pinId === "cathode")
 
-    if (!anchorPin) return false
+    if (!anodeMatch || !cathodeMatch) return false
 
-    const currentAnchorWorld = new THREE.Vector3().copy(anchorPin.localPos)
-    object.localToWorld(currentAnchorWorld)
+    const anodePin = object.userData.pins.find((p) => p.id === "anode")
+    const cathodePin = object.userData.pins.find((p) => p.id === "cathode")
 
-    const delta = new THREE.Vector3().subVectors(anchorMatch.hole.worldPos, currentAnchorWorld)
+    if (!anodePin || !cathodePin) return false
+
+    // Dirección actual entre pines del LED (en mundo)
+    const currentAnodeWorld = new THREE.Vector3().copy(anodePin.localPos)
+    const currentCathodeWorld = new THREE.Vector3().copy(cathodePin.localPos)
+    object.localToWorld(currentAnodeWorld)
+    object.localToWorld(currentCathodeWorld)
+
+    const currentDir = new THREE.Vector3()
+      .subVectors(currentCathodeWorld, currentAnodeWorld)
+      .setY(0)
+
+    // Dirección objetivo entre holes
+    const targetDir = new THREE.Vector3()
+      .subVectors(cathodeMatch.hole.worldPos, anodeMatch.hole.worldPos)
+      .setY(0)
+
+    if (currentDir.lengthSq() < 1e-8 || targetDir.lengthSq() < 1e-8) return false
+
+    currentDir.normalize()
+    targetDir.normalize()
+
+    const currentAngle = Math.atan2(currentDir.x, currentDir.z)
+    const targetAngle = Math.atan2(targetDir.x, targetDir.z)
+    const deltaAngle = targetAngle - currentAngle
+
+    object.rotation.y += deltaAngle
+    object.updateMatrixWorld(true)
+
+    // Recalcular después de rotar
+    const rotatedAnodeWorld = new THREE.Vector3().copy(anodePin.localPos)
+    object.localToWorld(rotatedAnodeWorld)
+
+    const delta = new THREE.Vector3().subVectors(anodeMatch.hole.worldPos, rotatedAnodeWorld)
     object.position.add(delta)
+
+    // Bajarlo un poco para que parezca insertado
+    object.position.y -= 0.01
+
+    object.updateMatrixWorld(true)
 
     this.resolveSurfacePenetration(object)
     this.persistMeshTransform(object)

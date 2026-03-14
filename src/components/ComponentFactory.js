@@ -22,27 +22,27 @@ export class ComponentFactory {
 
         // cuerpo principal
         const body = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.025, 0.025, 0.04, 20),
+          new THREE.CylinderGeometry(0.02, 0.02, 0.033, 20),
           redMat
         )
-        body.position.y = 0.03
+        body.position.y = 0.026
 
         // cúpula
         const dome = new THREE.Mesh(
-          new THREE.SphereGeometry(0.025, 20, 20),
+          new THREE.SphereGeometry(0.02, 20, 20),
           redMat
         )
-        dome.position.y = 0.05
+        dome.position.y = 0.041
 
         // patas
         const anodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12)
         const cathodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12)
 
         const anodeLeg = new THREE.Mesh(anodeGeo, legMat)
-        anodeLeg.position.set(-0.01, -0.018, 0)
+        anodeLeg.position.set(-0.0065, -0.018, 0)
 
         const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
-        cathodeLeg.position.set(0.01, -0.008, 0)
+        cathodeLeg.position.set(0.0065, -0.008, 0)
 
         //Marcadores para el ánodo y cátodo (puntitos)
         const pinMarkerGeo = new THREE.SphereGeometry(0.004, 10, 10)
@@ -51,13 +51,13 @@ export class ComponentFactory {
           pinMarkerGeo,
           new THREE.MeshStandardMaterial({ color: 0x00ff88 })
         )
-        anodeMarker.position.set(-0.01, -0.055, 0)
+        anodeMarker.position.set(-0.0065, -0.055, 0)
 
         const cathodeMarker = new THREE.Mesh(
           pinMarkerGeo,
           new THREE.MeshStandardMaterial({ color: 0x4488ff })
         )
-        cathodeMarker.position.set(0.01, -0.038, 0)
+        cathodeMarker.position.set(0.0065, -0.038, 0)
 
         group.add(body)
         group.add(dome)
