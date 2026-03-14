@@ -664,41 +664,28 @@ export class InteractionSystem {
 
     if (!anodePin || !cathodePin) return false
 
-    // Dirección actual entre pines del LED (en mundo)
-    const currentAnodeWorld = new THREE.Vector3().copy(anodePin.localPos)
-    const currentCathodeWorld = new THREE.Vector3().copy(cathodePin.localPos)
-    object.localToWorld(currentAnodeWorld)
-    object.localToWorld(currentCathodeWorld)
-
-    const currentDir = new THREE.Vector3()
-      .subVectors(currentCathodeWorld, currentAnodeWorld)
-      .setY(0)
-
-    // Dirección objetivo entre holes
+    // Dirección objetivo entre holes, solo en plano horizontal
     const targetDir = new THREE.Vector3()
       .subVectors(cathodeMatch.hole.worldPos, anodeMatch.hole.worldPos)
       .setY(0)
 
-    if (currentDir.lengthSq() < 1e-8 || targetDir.lengthSq() < 1e-8) return false
+    if (targetDir.lengthSq() < 1e-8) return false
 
-    currentDir.normalize()
     targetDir.normalize()
 
-    const currentAngle = Math.atan2(currentDir.x, currentDir.z)
-    const targetAngle = Math.atan2(targetDir.x, targetDir.z)
-    const deltaAngle = targetAngle - currentAngle
-
-    object.rotation.y += deltaAngle
+    // Calcular yaw objetivo y forzar LED completamente derecho
+    const targetYaw = Math.atan2(targetDir.x, targetDir.z)
+    object.rotation.set(0, targetYaw, 0)
     object.updateMatrixWorld(true)
 
-    // Recalcular después de rotar
+    // Recalcular posición del ánodo después de enderezar el LED
     const rotatedAnodeWorld = new THREE.Vector3().copy(anodePin.localPos)
     object.localToWorld(rotatedAnodeWorld)
 
     const delta = new THREE.Vector3().subVectors(anodeMatch.hole.worldPos, rotatedAnodeWorld)
     object.position.add(delta)
 
-    // Profundidad de inserción visual en la protoboard
+    // Profundidad visual de inserción
     object.position.y -= 0.02
 
     object.updateMatrixWorld(true)
