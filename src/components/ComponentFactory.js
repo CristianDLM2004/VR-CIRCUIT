@@ -63,10 +63,27 @@ export class ComponentFactory {
     mesh.userData.componentId = data.id
     mesh.userData.interactable = true
     mesh.userData.isSurface = false
+    mesh.userData.componentType = data.type
 
     // Para componentes tipo simulador eléctrico:
     // por defecto NO auto-acomodarse a una cara “estable”.
     mesh.userData.restSnapMode = "freeze"
+
+    //Agregar los pines al led
+    if (data.type === "led") {
+      mesh.userData.pins = [
+        {
+          id: "anode",
+          label: "Ánodo",
+          localPos: new THREE.Vector3(-0.01, -0.04, 0),
+        },
+        {
+          id: "cathode",
+          label: "Cátodo",
+          localPos: new THREE.Vector3(0.01, -0.04, 0),
+        },
+      ]
+    }
 
     return mesh
   }
