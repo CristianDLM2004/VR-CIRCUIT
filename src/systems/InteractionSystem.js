@@ -673,8 +673,8 @@ export class InteractionSystem {
 
     targetDir.normalize()
 
-    // Calcular yaw objetivo y forzar LED completamente derecho
-    const targetYaw = Math.atan2(targetDir.x, targetDir.z)
+    // Ajuste correcto del yaw para que las patas sigan la dirección real de los holes
+    const targetYaw = Math.atan2(-targetDir.z, targetDir.x)
     object.rotation.set(0, targetYaw, 0)
     object.updateMatrixWorld(true)
 
