@@ -657,6 +657,14 @@ export class InteractionSystem {
     const anodeMatch = validMatches.find((m) => m.pinId === "anode")
     const cathodeMatch = validMatches.find((m) => m.pinId === "cathode")
 
+    // Guardar conexión de holes en el objeto
+    object.userData.pinConnections = {
+      anode: anodeMatch.hole.id,
+      cathode: cathodeMatch.hole.id,
+    }
+
+    console.log("LED conectado en holes:", object.userData.pinConnections)
+
     if (!anodeMatch || !cathodeMatch) return false
 
     const anodePin = object.userData.pins.find((p) => p.id === "anode")
@@ -689,6 +697,22 @@ export class InteractionSystem {
     object.position.y -= 0.02
 
     object.updateMatrixWorld(true)
+
+    const componentId = object.userData?.componentId
+    if (componentId) {
+      this.appState.updateComponent(componentId, {
+        inserted: true,
+        pinConnections: {
+          anode: anodeMatch.hole.id,
+          cathode: cathodeMatch.hole.id,
+        },
+      })
+    }
+
+    if (componentId) {
+      const savedComponent = this.appState.components.find((c) => c.id === componentId)
+      console.log("Estado guardado del componente insertado:", savedComponent)
+    }
 
     this.persistMeshTransform(object)
     return true

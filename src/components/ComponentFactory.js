@@ -87,18 +87,21 @@ export class ComponentFactory {
     // por defecto NO auto-acomodarse a una cara “estable”.
     mesh.userData.restSnapMode = "freeze"
 
+    mesh.userData.inserted = !!data.inserted
+    mesh.userData.pinConnections = data.pinConnections || null
+
     //Agregar los pines al led
     if (data.type === "led") {
       mesh.userData.pins = [
         {
           id: "anode",
           label: "Ánodo",
-          localPos: new THREE.Vector3(-0.01, -0.055, 0),
+          localPos: new THREE.Vector3(-0.0065, -0.055, 0),
         },
         {
           id: "cathode",
           label: "Cátodo",
-          localPos: new THREE.Vector3(0.01, -0.038, 0),
+          localPos: new THREE.Vector3(0.0065, -0.038, 0),
         },
       ]
     }
