@@ -35,18 +35,19 @@ export class ComponentFactory {
         dome.position.y = 0.05
 
         // patas
-        const legGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.06, 12)
+        const anodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12)
+        const cathodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12)
 
-        const leg1 = new THREE.Mesh(legGeo, legMat)
-        leg1.position.set(-0.01, -0.01, 0)
+        const anodeLeg = new THREE.Mesh(anodeGeo, legMat)
+        anodeLeg.position.set(-0.01, -0.018, 0)
 
-        const leg2 = new THREE.Mesh(legGeo, legMat)
-        leg2.position.set(0.01, -0.01, 0)
+        const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
+        cathodeLeg.position.set(0.01, -0.008, 0)
 
         group.add(body)
         group.add(dome)
-        group.add(leg1)
-        group.add(leg2)
+        group.add(anodeLeg)
+        group.add(cathodeLeg)
 
         mesh = group
         break
