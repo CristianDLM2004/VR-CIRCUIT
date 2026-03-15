@@ -218,9 +218,15 @@ export class PhysicsSystem {
     const hit = this.getSurfaceHitBelow(mesh)
     if (!hit) return
 
-    const bbox = new THREE.Box3().setFromObject(mesh)
-    bbox.getSize(this._tmpSize)
-    const halfY = this._tmpSize.y * 0.5
+    const halfY =
+      typeof mesh.userData?.surfaceContactHalfY === "number"
+        ? mesh.userData.surfaceContactHalfY
+        : (() => {
+          const bbox = new THREE.Box3().setFromObject(mesh)
+          bbox.getSize(this._tmpSize)
+          return this._tmpSize.y * 0.5
+        })()
+
     mesh.position.y = hit.point.y + halfY
   }
 
@@ -314,9 +320,14 @@ export class PhysicsSystem {
     let onSurface = false
 
     if (hit) {
-      const bbox = new THREE.Box3().setFromObject(mesh)
-      bbox.getSize(this._tmpSize)
-      const halfY = this._tmpSize.y * 0.5
+      const halfY =
+        typeof mesh.userData?.surfaceContactHalfY === "number"
+          ? mesh.userData.surfaceContactHalfY
+          : (() => {
+            const bbox = new THREE.Box3().setFromObject(mesh)
+            bbox.getSize(this._tmpSize)
+            return this._tmpSize.y * 0.5
+          })()
 
       const targetY = hit.point.y + halfY
       const eps = 0.006
