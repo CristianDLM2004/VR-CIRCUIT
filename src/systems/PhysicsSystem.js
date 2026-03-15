@@ -203,12 +203,21 @@ export class PhysicsSystem {
     this._tmpOrigin.y += 1.5
     this._ray.set(this._tmpOrigin, this._tmpDir)
 
-    const surfaceMeshes = this.interactionSystem.surfaces.map((s) => s.mesh)
+    const disallowedTypes = Array.isArray(mesh.userData?.surfaceDisallowedTypes)
+      ? mesh.userData.surfaceDisallowedTypes
+      : []
+
+    const surfaceEntries = this.interactionSystem.surfaces.filter(
+      (s) => !disallowedTypes.includes(s.type)
+    )
+    if (surfaceEntries.length === 0) return null
+
+    const surfaceMeshes = surfaceEntries.map((s) => s.mesh)
     const hits = this._ray.intersectObjects(surfaceMeshes, true)
     if (!hits || hits.length === 0) return null
 
     if (typeof this.interactionSystem.pickBestSurfaceHit === "function") {
-      return this.interactionSystem.pickBestSurfaceHit(hits)
+      return this.interactionSystem.pickBestSurfaceHit(hits, mesh)
     }
 
     return hits[0]
