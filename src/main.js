@@ -137,6 +137,29 @@ function addLed() {
   stateSyncSystem.addMeshFromComponent(data)
 }
 
+function addResistor() {
+  const id = genId("resistor")
+
+  const p = protoboard.position.clone()
+  p.y += 0.32
+  p.z += 0.12
+
+  const data = {
+    id,
+    type: "resistor",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {
+      resistance: 220,
+      bands: ["red", "red", "brown", "gold"],
+    },
+  }
+
+  console.log("Creando resistor:", data)
+
+  appState.addComponent(data)
+  stateSyncSystem.addMeshFromComponent(data)
+}
+
 function saveState() {
   localStorage.setItem("vr_circuit_state", appState.toJSON())
   console.log("✅ Estado guardado")
@@ -283,6 +306,7 @@ window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase()
   if (k === "c") addCube()
   if (k === "v") addLed()
+  if (k === "b") addResistor()
   if (k === "s") saveState()
   if (k === "l") loadState()
   if (k === "x") clearScene()

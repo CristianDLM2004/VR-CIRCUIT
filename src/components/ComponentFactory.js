@@ -10,9 +10,7 @@ export class ComponentFactory {
           new THREE.BoxGeometry(0.2, 0.2, 0.2),
           new THREE.MeshStandardMaterial()
         )
-        break
-      default:
-        return null
+        break;
 
       case "led": {
         const group = new THREE.Group()
@@ -44,7 +42,7 @@ export class ComponentFactory {
         const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
-        //Marcadores para el ánodo y cátodo (puntitos)
+        // Marcadores para el ánodo y cátodo (puntitos)
         const pinMarkerGeo = new THREE.SphereGeometry(0.004, 10, 10)
 
         const anodeMarker = new THREE.Mesh(
@@ -69,6 +67,61 @@ export class ComponentFactory {
         mesh = group
         break
       }
+
+      case "resistor": {
+        const group = new THREE.Group();
+
+        const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 });
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8c29d });
+
+        // cuerpo central
+        const body = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.007, 0.007, 0.022, 18),
+          bodyMat
+        );
+        body.rotation.z = Math.PI / 2;
+        body.position.y = 0.006;
+
+        // tramos horizontales cortos hasta justo el punto del doblez
+        const leftLead = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12),
+          legMat
+        );
+        leftLead.rotation.z = Math.PI / 2;
+        leftLead.position.set(-0.0105, 0.006, 0);
+
+        const rightLead = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12),
+          legMat
+        );
+        rightLead.rotation.z = Math.PI / 2;
+        rightLead.position.set(0.0105, 0.006, 0);
+
+        // patas verticales hacia abajo, arrancando justo donde termina el horizontal
+        const leftLeg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12),
+          legMat
+        );
+        leftLeg.position.set(-0.015, -0.007, 0);
+
+        const rightLeg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12),
+          legMat
+        );
+        rightLeg.position.set(0.015, -0.007, 0);
+
+        group.add(body);
+        group.add(leftLead);
+        group.add(rightLead);
+        group.add(leftLeg);
+        group.add(rightLeg);
+
+        mesh = group;
+        break;
+      }
+
+      default:
+        return null
     }
 
 
@@ -102,6 +155,22 @@ export class ComponentFactory {
           id: "cathode",
           label: "Cátodo",
           localPos: new THREE.Vector3(0.0065, -0.038, 0),
+        },
+      ]
+    }
+
+    //Agregar los pines a la resistencia
+    if (data.type === "resistor") {
+      mesh.userData.pins = [
+        {
+          id: "left",
+          label: "Pin izquierdo",
+          localPos: new THREE.Vector3(-0.015, -0.022, 0),
+        },
+        {
+          id: "right",
+          label: "Pin derecho",
+          localPos: new THREE.Vector3(0.015, -0.022, 0),
         },
       ]
     }
