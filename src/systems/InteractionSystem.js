@@ -654,43 +654,41 @@ export class InteractionSystem {
     const validMatches = matches.filter((m) => !!m.hole)
     if (validMatches.length !== object.userData.pins.length) return false
 
-    const anodeMatch = validMatches.find((m) => m.pinId === "anode")
-    const cathodeMatch = validMatches.find((m) => m.pinId === "cathode")
+    // Soporte genérico para componentes de 2 pines
+    const pinA = object.userData.pins[0]
+    const pinB = object.userData.pins[1]
 
-    // Guardar conexión de holes en el objeto
+    if (!pinA || !pinB) return false
+
+    const matchA = validMatches.find((m) => m.pinId === pinA.id)
+    const matchB = validMatches.find((m) => m.pinId === pinB.id)
+
+    if (!matchA || !matchB) return false
+
     object.userData.pinConnections = {
-      anode: anodeMatch.hole.id,
-      cathode: cathodeMatch.hole.id,
+      [pinA.id]: matchA.hole.id,
+      [pinB.id]: matchB.hole.id,
     }
-
-    console.log("LED conectado en holes:", object.userData.pinConnections)
-
-    if (!anodeMatch || !cathodeMatch) return false
-
-    const anodePin = object.userData.pins.find((p) => p.id === "anode")
-    const cathodePin = object.userData.pins.find((p) => p.id === "cathode")
-
-    if (!anodePin || !cathodePin) return false
 
     // Dirección objetivo entre holes, solo en plano horizontal
     const targetDir = new THREE.Vector3()
-      .subVectors(cathodeMatch.hole.worldPos, anodeMatch.hole.worldPos)
+      .subVectors(matchB.hole.worldPos, matchA.hole.worldPos)
       .setY(0)
 
     if (targetDir.lengthSq() < 1e-8) return false
 
     targetDir.normalize()
 
-    // Ajuste correcto del yaw para que las patas sigan la dirección real de los holes
+    // Orientación horizontal correcta
     const targetYaw = Math.atan2(-targetDir.z, targetDir.x)
     object.rotation.set(0, targetYaw, 0)
     object.updateMatrixWorld(true)
 
-    // Recalcular posición del ánodo después de enderezar el LED
-    const rotatedAnodeWorld = new THREE.Vector3().copy(anodePin.localPos)
-    object.localToWorld(rotatedAnodeWorld)
+    // Recalcular posición del primer pin después de enderezar el componente
+    const rotatedPinAWorld = new THREE.Vector3().copy(pinA.localPos)
+    object.localToWorld(rotatedPinAWorld)
 
-    const delta = new THREE.Vector3().subVectors(anodeMatch.hole.worldPos, rotatedAnodeWorld)
+    const delta = new THREE.Vector3().subVectors(matchA.hole.worldPos, rotatedPinAWorld)
     object.position.add(delta)
 
     // Profundidad visual de inserción
@@ -703,15 +701,10 @@ export class InteractionSystem {
       this.appState.updateComponent(componentId, {
         inserted: true,
         pinConnections: {
-          anode: anodeMatch.hole.id,
-          cathode: cathodeMatch.hole.id,
+          [pinA.id]: matchA.hole.id,
+          [pinB.id]: matchB.hole.id,
         },
       })
-    }
-
-    if (componentId) {
-      const savedComponent = this.appState.components.find((c) => c.id === componentId)
-      console.log("Estado guardado del componente insertado:", savedComponent)
     }
 
     this.persistMeshTransform(object)

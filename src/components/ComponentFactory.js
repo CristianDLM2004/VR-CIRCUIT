@@ -42,27 +42,10 @@ export class ComponentFactory {
         const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
-        // Marcadores para el ánodo y cátodo (puntitos)
-        const pinMarkerGeo = new THREE.SphereGeometry(0.004, 10, 10)
-
-        const anodeMarker = new THREE.Mesh(
-          pinMarkerGeo,
-          new THREE.MeshStandardMaterial({ color: 0x00ff88 })
-        )
-        anodeMarker.position.set(-0.0065, -0.055, 0)
-
-        const cathodeMarker = new THREE.Mesh(
-          pinMarkerGeo,
-          new THREE.MeshStandardMaterial({ color: 0x4488ff })
-        )
-        cathodeMarker.position.set(0.0065, -0.038, 0)
-
         group.add(body)
         group.add(dome)
         group.add(anodeLeg)
         group.add(cathodeLeg)
-        group.add(anodeMarker)
-        group.add(cathodeMarker)
 
         mesh = group
         break
