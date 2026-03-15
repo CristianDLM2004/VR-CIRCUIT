@@ -5,12 +5,51 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
-      case "cube":
-        mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.2, 0.2),
-          new THREE.MeshStandardMaterial()
+
+      case "battery5v": {
+        const group = new THREE.Group()
+
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a })
+        const topMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f })
+        const plusMat = new THREE.MeshStandardMaterial({ color: 0xd9534f })
+        const minusMat = new THREE.MeshStandardMaterial({ color: 0x5bc0de })
+
+        // cuerpo principal
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.11, 0.05),
+          bodyMat
         )
-        break;
+        body.position.y = 0.055
+
+        // tapa superior
+        const top = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.012, 0.05),
+          topMat
+        )
+        top.position.y = 0.111
+
+        // terminal positivo
+        const plusTerminal = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.006, 0.006, 0.008, 14),
+          plusMat
+        )
+        plusTerminal.position.set(-0.018, 0.121, 0)
+
+        // terminal negativo
+        const minusTerminal = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0045, 0.0045, 0.008, 14),
+          minusMat
+        )
+        minusTerminal.position.set(0.018, 0.121, 0)
+
+        group.add(body)
+        group.add(top)
+        group.add(plusTerminal)
+        group.add(minusTerminal)
+
+        mesh = group
+        break
+      }
 
       case "led": {
         const group = new THREE.Group()
@@ -18,21 +57,18 @@ export class ComponentFactory {
         const redMat = new THREE.MeshStandardMaterial({ color: 0xff3b3b })
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
 
-        // cuerpo principal
         const body = new THREE.Mesh(
           new THREE.CylinderGeometry(0.02, 0.02, 0.033, 20),
           redMat
         )
         body.position.y = 0.026
 
-        // cúpula
         const dome = new THREE.Mesh(
           new THREE.SphereGeometry(0.02, 20, 20),
           redMat
         )
         dome.position.y = 0.041
 
-        // patas
         const anodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12)
         const cathodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12)
 
@@ -52,55 +88,52 @@ export class ComponentFactory {
       }
 
       case "resistor": {
-        const group = new THREE.Group();
+        const group = new THREE.Group()
 
-        const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 });
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8c29d });
+        const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8c29d })
 
-        // cuerpo central
         const body = new THREE.Mesh(
           new THREE.CylinderGeometry(0.007, 0.007, 0.022, 18),
           bodyMat
-        );
-        body.rotation.z = Math.PI / 2;
-        body.position.y = 0.006;
+        )
+        body.rotation.z = Math.PI / 2
+        body.position.y = 0.006
 
-        // tramos horizontales cortos hasta justo el punto del doblez
         const leftLead = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12),
           legMat
-        );
-        leftLead.rotation.z = Math.PI / 2;
-        leftLead.position.set(-0.0105, 0.006, 0);
+        )
+        leftLead.rotation.z = Math.PI / 2
+        leftLead.position.set(-0.0105, 0.006, 0)
 
         const rightLead = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12),
           legMat
-        );
-        rightLead.rotation.z = Math.PI / 2;
-        rightLead.position.set(0.0105, 0.006, 0);
+        )
+        rightLead.rotation.z = Math.PI / 2
+        rightLead.position.set(0.0105, 0.006, 0)
 
-        // patas verticales hacia abajo, arrancando justo donde termina el horizontal
         const leftLeg = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12),
           legMat
-        );
-        leftLeg.position.set(-0.015, -0.007, 0);
+        )
+        leftLeg.position.set(-0.015, -0.007, 0)
 
         const rightLeg = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12),
           legMat
-        );
-        rightLeg.position.set(0.015, -0.007, 0);
+        )
+        rightLeg.position.set(0.015, -0.007, 0)
 
-        group.add(body);
-        group.add(leftLead);
-        group.add(rightLead);
-        group.add(leftLeg);
-        group.add(rightLeg);
+        group.add(body)
+        group.add(leftLead)
+        group.add(rightLead)
+        group.add(leftLeg)
+        group.add(rightLeg)
 
-        mesh = group;
-        break;
+        mesh = group
+        break
       }
 
       default:

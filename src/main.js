@@ -100,8 +100,8 @@ function genId(prefix = "cmp") {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 }
 
-function addCube() {
-  const id = genId("cube")
+function addBattery5V() {
+  const id = genId("battery5v")
 
   const p = protoboard.position.clone()
   p.y += 0.15
@@ -109,8 +109,11 @@ function addCube() {
 
   const data = {
     id,
-    type: "cube",
+    type: "battery5v",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {
+      voltage: 5,
+    },
   }
 
   appState.addComponent(data)
@@ -191,7 +194,7 @@ const panelRotY = -Math.PI / 6
 const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   position: panelWorldPos,
   rotationY: panelRotY,
-  onAdd: addCube,
+  onAdd: addBattery5V,
   onLed: addLed,
   onResistor: addResistor,
   onSave: saveState,
@@ -301,11 +304,11 @@ const clock = new THREE.Clock()
 // ---------------------------
 // UI HTML (PC) opcional
 // ---------------------------
-document.getElementById("btn-add-cube")?.addEventListener("click", addCube)
+document.getElementById("btn-add-cube")?.addEventListener("click", addBattery5V)
 
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase()
-  if (k === "c") addCube()
+  if (k === "c") addBattery5V()
   if (k === "v") addLed()
   if (k === "b") addResistor()
   if (k === "s") saveState()
