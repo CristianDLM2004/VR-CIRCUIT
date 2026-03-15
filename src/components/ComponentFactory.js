@@ -47,6 +47,7 @@ export class ComponentFactory {
         group.add(plusTerminal)
         group.add(minusTerminal)
 
+        group.userData.surfaceContactHalfY = 0.055
         mesh = group
         break
       }
