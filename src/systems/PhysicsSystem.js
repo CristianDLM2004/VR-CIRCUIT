@@ -227,16 +227,17 @@ export class PhysicsSystem {
     const hit = this.getSurfaceHitBelow(mesh)
     if (!hit) return
 
-    const halfY =
-      typeof mesh.userData?.surfaceContactHalfY === "number"
-        ? mesh.userData.surfaceContactHalfY
-        : (() => {
-          const bbox = new THREE.Box3().setFromObject(mesh)
-          bbox.getSize(this._tmpSize)
-          return this._tmpSize.y * 0.5
-        })()
+    const contactObject = mesh.userData?.surfaceContactObject || mesh
+    const bbox = new THREE.Box3().setFromObject(contactObject)
+    const center = new THREE.Vector3()
+    bbox.getSize(this._tmpSize)
+    bbox.getCenter(center)
 
-    mesh.position.y = hit.point.y + halfY
+    const halfY = this._tmpSize.y * 0.5
+    const targetCenterY = hit.point.y + halfY
+    const deltaY = targetCenterY - center.y
+
+    mesh.position.y += deltaY
   }
 
   integrateRotation(mesh, angVel, dt) {
@@ -329,16 +330,15 @@ export class PhysicsSystem {
     let onSurface = false
 
     if (hit) {
-      const halfY =
-        typeof mesh.userData?.surfaceContactHalfY === "number"
-          ? mesh.userData.surfaceContactHalfY
-          : (() => {
-            const bbox = new THREE.Box3().setFromObject(mesh)
-            bbox.getSize(this._tmpSize)
-            return this._tmpSize.y * 0.5
-          })()
+      const contactObject = mesh.userData?.surfaceContactObject || mesh
+      const bbox = new THREE.Box3().setFromObject(contactObject)
+      const center = new THREE.Vector3()
+      bbox.getSize(this._tmpSize)
+      bbox.getCenter(center)
 
-      const targetY = hit.point.y + halfY
+      const halfY = this._tmpSize.y * 0.5
+      const targetCenterY = hit.point.y + halfY
+      const targetY = mesh.position.y + (targetCenterY - center.y)
       const eps = 0.006
 
       if (mesh.position.y <= targetY + eps && body.vel.y <= 0) {

@@ -14,40 +14,43 @@ export class ComponentFactory {
         const plusMat = new THREE.MeshStandardMaterial({ color: 0xd9534f })
         const minusMat = new THREE.MeshStandardMaterial({ color: 0x5bc0de })
 
-        // cuerpo principal
+        // cuerpo principal centrado en el origen
         const body = new THREE.Mesh(
           new THREE.BoxGeometry(0.08, 0.11, 0.05),
           bodyMat
         )
-        body.position.y = 0.055
+        body.position.y = 0
 
         // tapa superior
         const top = new THREE.Mesh(
           new THREE.BoxGeometry(0.08, 0.012, 0.05),
           topMat
         )
-        top.position.y = 0.111
+        top.position.y = 0.061
 
         // terminal positivo
         const plusTerminal = new THREE.Mesh(
           new THREE.CylinderGeometry(0.006, 0.006, 0.008, 14),
           plusMat
         )
-        plusTerminal.position.set(-0.018, 0.121, 0)
+        plusTerminal.position.set(-0.018, 0.071, 0)
 
         // terminal negativo
         const minusTerminal = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0045, 0.0045, 0.008, 14),
           minusMat
         )
-        minusTerminal.position.set(0.018, 0.121, 0)
+        minusTerminal.position.set(0.018, 0.071, 0)
 
         group.add(body)
         group.add(top)
         group.add(plusTerminal)
         group.add(minusTerminal)
 
-        group.userData.surfaceContactHalfY = 0.055
+        // la superficie real de apoyo es solo el cuerpo
+        group.userData.surfaceContactHalfY = body
+        group.userData.surfaceUpright = true
+
         mesh = group
         break
       }
@@ -160,6 +163,21 @@ export class ComponentFactory {
     mesh.userData.inserted = !!data.inserted
     mesh.userData.pinConnections = data.pinConnections || null
 
+    //Agregar las terminales a la batería 5V
+    if (data.type === "battery5v") {
+      mesh.userData.terminals = [
+        {
+          id: "positive",
+          label: "Positivo",
+          localPos: new THREE.Vector3(-0.018, 0.071, 0),
+        },
+        {
+          id: "negative",
+          label: "Negativo",
+          localPos: new THREE.Vector3(0.018, 0.071, 0),
+        },
+      ]
+    }
     //Agregar los pines al led
     if (data.type === "led") {
       mesh.userData.pins = [
