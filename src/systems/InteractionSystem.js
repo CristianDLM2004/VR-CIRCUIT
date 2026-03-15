@@ -611,11 +611,18 @@ export class InteractionSystem {
 
     this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
 
-    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
+    const disallowedTypes = Array.isArray(object.userData?.surfaceDisallowedTypes)
+      ? object.userData.surfaceDisallowedTypes
+      : []
+
+    const surfaceEntries = this.surfaces.filter((s) => !disallowedTypes.includes(s.type))
+    if (surfaceEntries.length === 0) return null
+
+    const surfaceMeshes = surfaceEntries.map((s) => s.mesh)
     const hits = this.downRaycaster.intersectObjects(surfaceMeshes, true)
     if (hits.length === 0) return null
 
-    return this.pickBestSurfaceHit(hits)
+    return this.pickBestSurfaceHit(hits, object)
   }
 
   resolveSurfacePenetration(object) {
@@ -624,15 +631,36 @@ export class InteractionSystem {
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
 
-    this._box.setFromObject(object)
+    const contactObject = object.userData?.surfaceContactObject || object
+    this._box.setFromObject(contactObject)
     this._box.getSize(this._tmpSize)
     const halfY = this._tmpSize.y * 0.5
 
-    const bottomY = object.position.y - halfY
-    const targetY = best.point.y + halfY
+    const center = new THREE.Vector3()
+    this._box.getCenter(center)
+
+    const bottomY = center.y - halfY
+    const targetCenterY = best.point.y + halfY
+    const deltaY = targetCenterY - center.y
 
     if (bottomY < best.point.y) {
-      object.position.y = targetY + 0.001
+      object.position.y += deltaY + 0.001
+
+      if (object.userData?.surfaceUpright) {
+        const forward = new THREE.Vector3(0, 0, 1)
+          .applyQuaternion(object.quaternion)
+          .setY(0)
+
+        let yaw = object.rotation.y
+        if (forward.lengthSq() > 1e-8) {
+          forward.normalize()
+          yaw = Math.atan2(forward.x, forward.z)
+        }
+
+        object.rotation.set(0, yaw, 0)
+        object.updateMatrixWorld(true)
+      }
+
       return true
     }
 
@@ -717,20 +745,45 @@ export class InteractionSystem {
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
 
-    const bbox = new THREE.Box3().setFromObject(object)
-    const size = new THREE.Vector3()
-    bbox.getSize(size)
+    // Si el objeto debe quedar recto sobre superficies, enderezarlo primero
+    if (object.userData?.surfaceUpright) {
+      const forward = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(object.quaternion)
+        .setY(0)
 
-    const halfY = size.y / 2
-    const bottomY = object.position.y - halfY
+      let yaw = object.rotation.y
+      if (forward.lengthSq() > 1e-8) {
+        forward.normalize()
+        yaw = Math.atan2(forward.x, forward.z)
+      }
+
+      object.rotation.set(0, yaw, 0)
+      object.updateMatrixWorld(true)
+    }
+
+    const contactObject = object.userData?.surfaceContactObject || object
+    const bbox = new THREE.Box3().setFromObject(contactObject)
+    const size = new THREE.Vector3()
+    const center = new THREE.Vector3()
+    bbox.getSize(size)
+    bbox.getCenter(center)
+
+    const halfY = size.y * 0.5
+    const bottomY = center.y - halfY
     const drop = bottomY - best.point.y
 
     if (drop < -0.03) return false
     if (drop > this.directPlaceMaxDrop) return false
 
-    object.position.y = best.point.y + halfY
+    const targetCenterY = best.point.y + halfY
+    const deltaY = targetCenterY - center.y
+    object.position.y += deltaY
 
-    if (this.holeSystem) this.holeSystem.trySnapObject(object, 0.03)
+    // Solo componentes con pines pueden snapear a holes, la batería no
+    if (this.holeSystem && Array.isArray(object.userData?.pins)) {
+      this.holeSystem.trySnapObject(object, 0.03)
+    }
+
     this.persistMeshTransform(object)
     return true
   }
@@ -912,7 +965,7 @@ export class InteractionSystem {
     if (this.holeSystem) this.holeSystem.trySnapObject(object, 0.03)
   }
 
-  pickBestSurfaceHit(hits) {
+  pickBestSurfaceHit(hits, object = null) {
     const getSurfaceEntry = (hitObj) => {
       for (const s of this.surfaces) {
         if (hitObj === s.mesh) return s
@@ -926,19 +979,28 @@ export class InteractionSystem {
       return null
     }
 
-    for (const h of hits) {
+    const disallowedTypes = Array.isArray(object?.userData?.surfaceDisallowedTypes)
+      ? object.userData.surfaceDisallowedTypes
+      : []
+
+    const filteredHits = hits.filter((h) => {
+      const surf = getSurfaceEntry(h.object)
+      return surf && !disallowedTypes.includes(surf.type)
+    })
+
+    for (const h of filteredHits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "protoboard") return { ...h, surface: surf }
     }
-    for (const h of hits) {
+    for (const h of filteredHits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "table") return { ...h, surface: surf }
     }
-    for (const h of hits) {
+    for (const h of filteredHits) {
       const surf = getSurfaceEntry(h.object)
       if (surf?.type === "floor") return { ...h, surface: surf }
     }
-    for (const h of hits) {
+    for (const h of filteredHits) {
       const surf = getSurfaceEntry(h.object)
       if (surf) return { ...h, surface: surf }
     }

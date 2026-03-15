@@ -73,6 +73,36 @@ export function createVRPanel({
       const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.007, 0.006), mat)
       const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.028, 0.006), mat)
       iconGroup.add(bar1, bar2)
+
+    } else if (type === "battery") {
+      // cuerpo de la batería
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(0.024, 0.018, 0.006),
+        mat
+      )
+
+      // tapa
+      const cap = new THREE.Mesh(
+        new THREE.BoxGeometry(0.006, 0.010, 0.006),
+        mat
+      )
+      cap.position.x = 0.015
+
+      // símbolo +
+      const plusBar1 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.006, 0.002, 0.006),
+        new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.6 })
+      )
+      plusBar1.position.set(-0.006, 0, 0.001)
+
+      const plusBar2 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.002, 0.006, 0.006),
+        new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.6 })
+      )
+      plusBar2.position.set(-0.006, 0, 0.001)
+
+      iconGroup.add(body, cap, plusBar1, plusBar2)
+
     } else if (type === "save") {
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.026, 0.006), mat)
       const slot = new THREE.Mesh(
@@ -81,6 +111,7 @@ export function createVRPanel({
       )
       slot.position.y = 0.008
       iconGroup.add(body, slot)
+
     } else if (type === "led") {
       const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 12), mat)
       bulb.position.y = 0.006
@@ -92,6 +123,7 @@ export function createVRPanel({
       leg2.position.set(0.004, -0.008, 0)
 
       iconGroup.add(bulb, leg1, leg2)
+
     } else if (type === "resistor") {
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(0.02, 0.01, 0.006),
@@ -107,19 +139,22 @@ export function createVRPanel({
       rightLeg.position.set(0.016, 0, 0)
 
       iconGroup.add(body, leftLeg, rightLeg)
+
     } else if (type === "load") {
       const stem = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.02, 0.006), mat)
       stem.position.y = 0.004
+
       const head = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.014, 10), mat)
       head.rotation.x = Math.PI
       head.position.y = -0.012
+
       iconGroup.add(stem, head)
     }
 
     return iconGroup
   }
 
-  makeButton({ name: "BtnAdd", x: -0.11, y: 0.09, color: 0x2ecc71, action: "add", iconType: "plus" })
+  makeButton({ name: "BtnAdd", x: -0.11, y: 0.09, color: 0x2ecc71, action: "add", iconType: "battery" })
   makeButton({ name: "BtnLed", x: 0.0, y: 0.09, color: 0xe74c3c, action: "led", iconType: "led" })
   makeButton({ name: "BtnResistor", x: 0.11, y: 0.09, color: 0xd8b26e, action: "resistor", iconType: "resistor" })
 
