@@ -44,25 +44,27 @@ export class StateSyncSystem {
 
       if (this.interactionSystem) this.interactionSystem.register(mesh)
 
-      // Recolocar LED insertado usando sus holes guardados
+      // Recolocar componentes insertados de 2 pines usando holes guardados
       if (
-        data.type === "led" &&
         data.inserted &&
         data.pinConnections &&
         this.interactionSystem?.holeSystem &&
-        Array.isArray(mesh.userData?.pins)
+        Array.isArray(mesh.userData?.pins) &&
+        mesh.userData.pins.length === 2
       ) {
-        const anodePin = mesh.userData.pins.find((p) => p.id === "anode")
-        const anodeHole = this.interactionSystem.holeSystem.holes.find(
-          (h) => h.id === data.pinConnections.anode
+        const pinA = mesh.userData.pins[0]
+        const pinB = mesh.userData.pins[1]
+
+        const holeA = this.interactionSystem.holeSystem.holes.find(
+          (h) => h.id === data.pinConnections[pinA.id]
         )
 
-        const cathodeHole = this.interactionSystem.holeSystem.holes.find(
-          (h) => h.id === data.pinConnections.cathode
+        const holeB = this.interactionSystem.holeSystem.holes.find(
+          (h) => h.id === data.pinConnections[pinB.id]
         )
 
-        if (anodePin && anodeHole && cathodeHole) {
-          const targetDir = cathodeHole.worldPos.clone().sub(anodeHole.worldPos).setY(0)
+        if (pinA && pinB && holeA && holeB) {
+          const targetDir = holeB.worldPos.clone().sub(holeA.worldPos).setY(0)
 
           if (targetDir.lengthSq() > 1e-8) {
             targetDir.normalize()
@@ -71,10 +73,10 @@ export class StateSyncSystem {
             mesh.rotation.set(0, targetYaw, 0)
             mesh.updateMatrixWorld(true)
 
-            const rotatedAnodeWorld = anodePin.localPos.clone()
-            mesh.localToWorld(rotatedAnodeWorld)
+            const rotatedPinAWorld = pinA.localPos.clone()
+            mesh.localToWorld(rotatedPinAWorld)
 
-            const delta = anodeHole.worldPos.clone().sub(rotatedAnodeWorld)
+            const delta = holeA.worldPos.clone().sub(rotatedPinAWorld)
             mesh.position.add(delta)
             mesh.position.y -= 0.02
             mesh.updateMatrixWorld(true)
