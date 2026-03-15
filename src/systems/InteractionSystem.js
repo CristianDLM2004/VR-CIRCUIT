@@ -793,6 +793,20 @@ export class InteractionSystem {
     if (!target) return
     if (!this.canHandGrabObject(handEntry, target)) return
 
+    // Si el componente estaba insertado, al volverlo a agarrar se desconecta
+    if (target.userData?.inserted || target.userData?.pinConnections) {
+      target.userData.inserted = false
+      target.userData.pinConnections = null
+
+      const componentId = target.userData?.componentId
+      if (componentId) {
+        this.appState.updateComponent(componentId, {
+          inserted: false,
+          pinConnections: null,
+        })
+      }
+    }
+
     handEntry.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("hand", handEntry.index))
     this.startHoldTracking(handEntry.hold, "hand", handEntry)
@@ -854,6 +868,20 @@ export class InteractionSystem {
 
     if (!target.userData?.componentId) return
     if (!this.isObjectFreeForGrab(target)) return
+
+    // Si el componente estaba insertado, al volverlo a agarrar se desconecta
+    if (target.userData?.inserted || target.userData?.pinConnections) {
+      target.userData.inserted = false
+      target.userData.pinConnections = null
+
+      const componentId = target.userData?.componentId
+      if (componentId) {
+        this.appState.updateComponent(componentId, {
+          inserted: false,
+          pinConnections: null,
+        })
+      }
+    }
 
     controller.userData.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("controller", controller.userData.sourceIndex))
