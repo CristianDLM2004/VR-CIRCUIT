@@ -9,6 +9,7 @@ export function createVRPanel({
   rotationY = 0,
   onAdd = () => { },
   onLed = () => { },
+  onResistor = () => { },
   onSave = () => { },
   onLoad = () => { },
 } = {}) {
@@ -17,7 +18,7 @@ export function createVRPanel({
   group.position.copy(position)
   group.rotation.y = rotationY
 
-  const panelGeo = new THREE.BoxGeometry(0.32, 0.22, 0.015)
+  const panelGeo = new THREE.BoxGeometry(0.40, 0.34, 0.015)
   const panelMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   const panel = new THREE.Mesh(panelGeo, panelMat)
   panel.name = "VRPanelBase"
@@ -49,6 +50,7 @@ export function createVRPanel({
 
       if (action === "add") onAdd()
       if (action === "led") onLed()
+      if (action === "resistor") onResistor()
       if (action === "save") onSave()
       if (action === "load") onLoad()
     }
@@ -90,6 +92,21 @@ export function createVRPanel({
       leg2.position.set(0.004, -0.008, 0)
 
       iconGroup.add(bulb, leg1, leg2)
+    } else if (type === "resistor") {
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(0.02, 0.01, 0.006),
+        mat
+      )
+
+      const legMat = new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.4 })
+
+      const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.0025, 0.0025), legMat)
+      leftLeg.position.set(-0.016, 0, 0)
+
+      const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.0025, 0.0025), legMat)
+      rightLeg.position.set(0.016, 0, 0)
+
+      iconGroup.add(body, leftLeg, rightLeg)
     } else if (type === "load") {
       const stem = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.02, 0.006), mat)
       stem.position.y = 0.004
@@ -102,10 +119,12 @@ export function createVRPanel({
     return iconGroup
   }
 
-  makeButton({ name: "BtnAdd", x: -0.06, y: 0.035, color: 0x2ecc71, action: "add", iconType: "plus" })
-  makeButton({ name: "BtnLed", x: 0.06, y: 0.035, color: 0xe74c3c, action: "led", iconType: "led" })
-  makeButton({ name: "BtnSave", x: -0.06, y: -0.035, color: 0xf1c40f, action: "save", iconType: "save" })
-  makeButton({ name: "BtnLoad", x: 0.06, y: -0.035, color: 0x3498db, action: "load", iconType: "load" })
+  makeButton({ name: "BtnAdd", x: -0.11, y: 0.09, color: 0x2ecc71, action: "add", iconType: "plus" })
+  makeButton({ name: "BtnLed", x: 0.0, y: 0.09, color: 0xe74c3c, action: "led", iconType: "led" })
+  makeButton({ name: "BtnResistor", x: 0.11, y: 0.09, color: 0xd8b26e, action: "resistor", iconType: "resistor" })
+
+  makeButton({ name: "BtnSave", x: -0.11, y: -0.09, color: 0xf1c40f, action: "save", iconType: "save" })
+  makeButton({ name: "BtnLoad", x: 0.0, y: -0.09, color: 0x3498db, action: "load", iconType: "load" })
 
   return { group, buttons }
 }
