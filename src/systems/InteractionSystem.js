@@ -74,10 +74,9 @@ export class InteractionSystem {
     // Draft temporal del cable
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
-    this._wireDraftMesh = null
+    this._wireDraftLine = null
     this._wireDraftStartMarker = null
     this._wireDraftEndMarker = null
-    this.wireDraftRadius = 0.0055
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -526,7 +525,7 @@ export class InteractionSystem {
 
     const marker = new THREE.Mesh(
       new THREE.SphereGeometry(0.0065, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
+      new THREE.MeshBasicMaterial({ color: 0x00ffff })
     )
     marker.name = "WireHoverMarker"
     marker.visible = false
@@ -590,25 +589,21 @@ export class InteractionSystem {
   }
 
   ensureWireDraftVisuals() {
-    if (!this._wireDraftMesh) {
-      this._wireDraftMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 14),
-        new THREE.MeshStandardMaterial({
-          color: 0x050505,
-          roughness: 0.7,
-          metalness: 0.0,
-          emissive: 0x202020,
-        })
-      )
-      this._wireDraftMesh.name = "WireDraftMesh"
-      this._wireDraftMesh.visible = false
-      this.scene.add(this._wireDraftMesh)
+    if (!this._wireDraftLine) {
+      const points = [new THREE.Vector3(), new THREE.Vector3()]
+      const geometry = new THREE.BufferGeometry().setFromPoints(points)
+      const material = new THREE.LineBasicMaterial({ color: 0xffffff })
+      const line = new THREE.Line(geometry, material)
+      line.name = "WireDraftLine"
+      line.visible = false
+      this.scene.add(line)
+      this._wireDraftLine = line
     }
 
     if (!this._wireDraftStartMarker) {
       this._wireDraftStartMarker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.0075, 12, 12),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
+        new THREE.SphereGeometry(0.010, 14, 14),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00 })
       )
       this._wireDraftStartMarker.name = "WireDraftStartMarker"
       this._wireDraftStartMarker.visible = false
@@ -617,8 +612,8 @@ export class InteractionSystem {
 
     if (!this._wireDraftEndMarker) {
       this._wireDraftEndMarker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.006, 12, 12),
-        new THREE.MeshBasicMaterial({ color: 0x111111 })
+        new THREE.SphereGeometry(0.008, 14, 14),
+        new THREE.MeshBasicMaterial({ color: 0xffff00 })
       )
       this._wireDraftEndMarker.name = "WireDraftEndMarker"
       this._wireDraftEndMarker.visible = false
@@ -630,7 +625,7 @@ export class InteractionSystem {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
 
-    if (this._wireDraftMesh) this._wireDraftMesh.visible = false
+    if (this._wireDraftLine) this._wireDraftLine.visible = false
     if (this._wireDraftStartMarker) this._wireDraftStartMarker.visible = false
     if (this._wireDraftEndMarker) this._wireDraftEndMarker.visible = false
   }
@@ -648,8 +643,9 @@ export class InteractionSystem {
 
     this._wireDraftStartMarker.position.copy(this.wireDraftStartAnchor.worldPos)
     this._wireDraftStartMarker.visible = true
-    this._wireDraftMesh.visible = true
+    this._wireDraftEndMarker.position.copy(this.wireDraftStartAnchor.worldPos)
     this._wireDraftEndMarker.visible = true
+    this._wireDraftLine.visible = true
   }
 
   updateWireDraftPreview() {
@@ -659,7 +655,7 @@ export class InteractionSystem {
     }
 
     if (!this.wireDraftStartAnchor) {
-      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
+      if (this._wireDraftLine) this._wireDraftLine.visible = false
       if (this._wireDraftStartMarker) this._wireDraftStartMarker.visible = false
       if (this._wireDraftEndMarker) this._wireDraftEndMarker.visible = false
       return
@@ -667,7 +663,7 @@ export class InteractionSystem {
 
     const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
     if (!handEntry || !this.isHandEntryTracked(handEntry)) {
-      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
+      if (this._wireDraftLine) this._wireDraftLine.visible = false
       if (this._wireDraftEndMarker) this._wireDraftEndMarker.visible = false
       if (this._wireDraftStartMarker) {
         this._wireDraftStartMarker.position.copy(this.wireDraftStartAnchor.worldPos)
@@ -678,29 +674,20 @@ export class InteractionSystem {
 
     this.ensureWireDraftVisuals()
 
-    const start = this.wireDraftStartAnchor.worldPos
+    const start = this.wireDraftStartAnchor.worldPos.clone()
     this.getGrabPointWorld(handEntry, this._tmpA)
     const end = this._tmpA.clone()
 
-    const dir = this._tmpB.copy(end).sub(start)
-    const len = dir.length()
+    const positions = this._wireDraftLine.geometry.attributes.position.array
+    positions[0] = start.x
+    positions[1] = start.y
+    positions[2] = start.z
+    positions[3] = end.x
+    positions[4] = end.y
+    positions[5] = end.z
+    this._wireDraftLine.geometry.attributes.position.needsUpdate = true
 
-    if (len < 0.002) {
-      this._wireDraftMesh.visible = false
-      this._wireDraftStartMarker.position.copy(start)
-      this._wireDraftStartMarker.visible = true
-      this._wireDraftEndMarker.position.copy(end)
-      this._wireDraftEndMarker.visible = true
-      return
-    }
-
-    const mid = this._tmpC.copy(start).add(end).multiplyScalar(0.5)
-
-    this._wireDraftMesh.visible = true
-    this._wireDraftMesh.position.copy(mid)
-    dir.normalize()
-    this._wireDraftMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
-    this._wireDraftMesh.scale.set(1, len, 1)
+    this._wireDraftLine.visible = true
 
     this._wireDraftStartMarker.position.copy(start)
     this._wireDraftStartMarker.visible = true
