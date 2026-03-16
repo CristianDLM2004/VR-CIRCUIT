@@ -64,12 +64,12 @@ export class InteractionSystem {
     this._wireHoverMarker = null
 
     // Mucho más permisivo para seleccionar anchor
-    this.wireHoverMaxDist = 0.040
-    this.wireHoverReleaseDist = 0.065
+    this.wireHoverMaxDist = 0.055
+    this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.095
-    this.wirePinchEndDist = 0.125
+    this.wirePinchStartDist = 0.135
+    this.wirePinchEndDist = 0.165
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -81,7 +81,7 @@ export class InteractionSystem {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
     this._wireDraftMesh = null
-    this.wireDraftRadius = 0.0095
+    this.wireDraftRadius = 0.00475
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -661,7 +661,7 @@ export class InteractionSystem {
 
     const mesh = this.ensureWireDraftMesh()
 
-    if (len < 0.003) {
+    if (len < 0.001) {
       mesh.visible = false
       return
     }
@@ -1405,9 +1405,13 @@ export class InteractionSystem {
 
       // ---------------------------
       // Wire mode: manejo especial
+      // Mucho más permisivo para crear el cable
       // ---------------------------
       if (this.toolMode === "wire") {
-        if (dist <= this.wirePinchStartDist && this.wireHoverAnchor) {
+        const hasHover = !!this.wireHoverAnchor
+        const closeEnoughForWire = dist <= this.wirePinchStartDist
+
+        if (hasHover && closeEnoughForWire) {
           if (!h.isPinching) {
             h.isPinching = true
 
@@ -1467,7 +1471,7 @@ export class InteractionSystem {
       if (!match.hole) continue
 
       const marker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.006, 12, 12),
+        new THREE.SphereGeometry(0.0085, 12, 12),
         new THREE.MeshBasicMaterial({ color: 0xffffff })
       )
 
