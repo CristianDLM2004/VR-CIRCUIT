@@ -80,8 +80,13 @@ export class InteractionSystem {
     // Draft temporal del cable
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
-    this._wireDraftMesh = null
+    this.wireDraftWaypoints = []
+    this._wireDraftMeshes = []
     this.wireDraftRadius = 0.0038
+
+    // Evita duplicar waypoint/cierre por un mismo gesto muy rápido
+    this.wireActionCooldownMs = 180
+    this._lastWireActionMs = 0
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -594,8 +599,8 @@ export class InteractionSystem {
     marker.visible = true
   }
 
-  ensureWireDraftMesh() {
-    if (this._wireDraftMesh) return this._wireDraftMesh
+  ensureWireDraftMesh(index = 0) {
+    if (this._wireDraftMeshes[index]) return this._wireDraftMeshes[index]
 
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 18),
@@ -606,20 +611,22 @@ export class InteractionSystem {
         emissive: 0x181818,
       })
     )
-    mesh.name = "WireDraftMesh"
+
+    mesh.name = `WireDraftMesh_${index}`
     mesh.visible = false
     this.scene.add(mesh)
 
-    this._wireDraftMesh = mesh
+    this._wireDraftMeshes[index] = mesh
     return mesh
   }
 
   clearWireDraft() {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
+    this.wireDraftWaypoints = []
 
-    if (this._wireDraftMesh) {
-      this._wireDraftMesh.visible = false
+    for (const mesh of this._wireDraftMeshes) {
+      if (mesh) mesh.visible = false
     }
   }
 
@@ -630,37 +637,64 @@ export class InteractionSystem {
       ...anchor,
       worldPos: anchor.worldPos.clone(),
     }
-    this.wireDraftHandIndex = handIndex
 
-    const mesh = this.ensureWireDraftMesh()
+    this.wireDraftHandIndex = handIndex
+    this.wireDraftWaypoints = []
+
+    const mesh = this.ensureWireDraftMesh(0)
     mesh.visible = true
   }
 
-  updateWireDraftPreview() {
-    if (this.toolMode !== "wire") {
-      this.clearWireDraft()
-      return
-    }
+  canRunWireAction() {
+    const now = performance.now()
+    if (now - this._lastWireActionMs < this.wireActionCooldownMs) return false
+    this._lastWireActionMs = now
+    return true
+  }
 
-    if (!this.wireDraftStartAnchor) {
-      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
-      return
-    }
+  addWireWaypointFromHand(handEntry) {
+    if (!handEntry) return false
+    if (!this.wireDraftStartAnchor) return false
+    if (this.wireDraftHandIndex !== handEntry.index) return false
+    if (!this.isHandEntryTracked(handEntry)) return false
+    if (!this.canRunWireAction()) return false
 
-    const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
-    if (!handEntry || !this.isHandEntryTracked(handEntry)) {
-      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
-      return
-    }
-
-    const start = this.wireDraftStartAnchor.worldPos
     this.getGrabPointWorld(handEntry, this._tmpA)
-    const end = this._tmpA.clone()
+    const newPoint = this._tmpA.clone()
 
+    const points = [
+      this.wireDraftStartAnchor.worldPos,
+      ...this.wireDraftWaypoints,
+    ]
+
+    const lastPoint = points[points.length - 1]
+    if (lastPoint.distanceTo(newPoint) < 0.015) return false
+
+    this.wireDraftWaypoints.push(newPoint)
+    return true
+  }
+
+  getWireDraftPoints(currentEndPoint = null) {
+    const points = []
+
+    if (!this.wireDraftStartAnchor) return points
+
+    points.push(this.wireDraftStartAnchor.worldPos.clone())
+
+    for (const p of this.wireDraftWaypoints) {
+      points.push(p.clone())
+    }
+
+    if (currentEndPoint) {
+      points.push(currentEndPoint.clone())
+    }
+
+    return points
+  }
+
+  updateWireDraftSegment(mesh, start, end) {
     const dir = this._tmpB.copy(end).sub(start)
     const len = dir.length()
-
-    const mesh = this.ensureWireDraftMesh()
 
     if (len < 0.001) {
       mesh.visible = false
@@ -675,6 +709,52 @@ export class InteractionSystem {
     dir.normalize()
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
     mesh.scale.set(1, len, 1)
+  }
+
+  updateWireDraftPreview() {
+    if (this.toolMode !== "wire") {
+      this.clearWireDraft()
+      return
+    }
+
+    if (!this.wireDraftStartAnchor) {
+      for (const mesh of this._wireDraftMeshes) {
+        if (mesh) mesh.visible = false
+      }
+      return
+    }
+
+    const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
+    if (!handEntry || !this.isHandEntryTracked(handEntry)) {
+      for (const mesh of this._wireDraftMeshes) {
+        if (mesh) mesh.visible = false
+      }
+      return
+    }
+
+    this.getGrabPointWorld(handEntry, this._tmpA)
+    const liveEnd = this._tmpA.clone()
+
+    const points = this.getWireDraftPoints(liveEnd)
+
+    if (points.length < 2) {
+      for (const mesh of this._wireDraftMeshes) {
+        if (mesh) mesh.visible = false
+      }
+      return
+    }
+
+    const neededSegments = points.length - 1
+
+    for (let i = 0; i < neededSegments; i++) {
+      const mesh = this.ensureWireDraftMesh(i)
+      this.updateWireDraftSegment(mesh, points[i], points[i + 1])
+    }
+
+    for (let i = neededSegments; i < this._wireDraftMeshes.length; i++) {
+      const mesh = this._wireDraftMeshes[i]
+      if (mesh) mesh.visible = false
+    }
   }
 
   updateUIPoke() {
@@ -1101,9 +1181,30 @@ export class InteractionSystem {
     handEntry.openPinchMs = 0
 
     if (this.toolMode === "wire") {
-      if (!this.wireDraftStartAnchor && this.wireHoverAnchor) {
-        this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
+      const hoverIsValidAnchor =
+        this.wireHoverAnchor &&
+        this.wireHoverHandIndex === handEntry.index
+
+      // Primer pinch sobre anchor válido = iniciar punto A
+      if (!this.wireDraftStartAnchor && hoverIsValidAnchor) {
+        if (this.canRunWireAction()) {
+          this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
+        }
       }
+      // Si ya existe draft:
+      // - pinch sobre anchor válido = intentar cerrar en punto B
+      // - pinch en aire = agregar waypoint
+      else if (this.wireDraftStartAnchor && this.wireDraftHandIndex === handEntry.index) {
+        if (hoverIsValidAnchor) {
+          console.log("🔌 Intentar cerrar cable en punto B:", this.wireHoverAnchor)
+        } else {
+          const added = this.addWireWaypointFromHand(handEntry)
+          if (added) {
+            console.log("〰️ Waypoint agregado al cable")
+          }
+        }
+      }
+
       return
     }
 
