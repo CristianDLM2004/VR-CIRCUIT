@@ -1559,10 +1559,7 @@ export class InteractionSystem {
         }
 
         if (h.pinchArmed && !h.isPinching && h.wirePinchCloseMs >= 70) {
-          h.isPinching = true
-          h.pinchArmed = false
           h.wirePinchCloseMs = 0
-
           this.onHandPinchStart(h)
         }
 
