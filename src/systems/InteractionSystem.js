@@ -68,8 +68,8 @@ export class InteractionSystem {
     this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.060
-    this.wirePinchEndDist = 0.090
+    this.wirePinchStartDist = 0.045
+    this.wirePinchEndDist = 0.080
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -196,6 +196,7 @@ export class InteractionSystem {
         hold: this.createHoldState("hand", null),
         lostTrackingMs: 0,
         openPinchMs: 0,
+        wirePinchCloseMs: 0,
       })
     }
   }
@@ -1405,7 +1406,8 @@ export class InteractionSystem {
 
       // ---------------------------
       // Wire mode: manejo especial
-      // Solo crear A cuando realmente se cierre el pinch
+      // Solo crear A cuando el pinch esté realmente cerrado
+      // y se mantenga cerrado un instante muy corto
       // ---------------------------
       if (this.toolMode === "wire") {
         const hasHover = !!this.wireHoverAnchor
@@ -1416,6 +1418,13 @@ export class InteractionSystem {
         if (openedEnoughToReset) {
           h.isPinching = false
           h.pinchArmed = true
+          h.wirePinchCloseMs = 0
+        }
+
+        if (hasHover && isSameHandHovering && closeEnoughForWire) {
+          h.wirePinchCloseMs += dtMs
+        } else {
+          h.wirePinchCloseMs = 0
         }
 
         if (
@@ -1423,10 +1432,12 @@ export class InteractionSystem {
           isSameHandHovering &&
           closeEnoughForWire &&
           h.pinchArmed &&
-          !h.isPinching
+          !h.isPinching &&
+          h.wirePinchCloseMs >= 45
         ) {
           h.isPinching = true
           h.pinchArmed = false
+          h.wirePinchCloseMs = 0
 
           if (!this.wireDraftStartAnchor) {
             this.startWireDraftFromAnchor(this.wireHoverAnchor, h.index)
