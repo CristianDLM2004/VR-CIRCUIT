@@ -82,6 +82,7 @@ export class InteractionSystem {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
     this.wireDraftWaypoints = []
+    this.wireDraftColor = 0x111111
     this._wireDraftMeshes = []
     this.wireDraftRadius = 0.0038
 
@@ -606,12 +607,18 @@ export class InteractionSystem {
   }
 
   ensureWireDraftMesh(index = 0) {
-    if (this._wireDraftMeshes[index]) return this._wireDraftMeshes[index]
+    if (this._wireDraftMeshes[index]) {
+      const existing = this._wireDraftMeshes[index]
+      if (existing.material?.color) {
+        existing.material.color.setHex(this.wireDraftColor ?? 0x111111)
+      }
+      return existing
+    }
 
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 18),
       new THREE.MeshStandardMaterial({
-        color: 0x050505,
+        color: this.wireDraftColor ?? 0x111111,
         roughness: 0.65,
         metalness: 0.0,
         emissive: 0x181818,
@@ -630,6 +637,7 @@ export class InteractionSystem {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
     this.wireDraftWaypoints = []
+    this.wireDraftColor = 0x111111
 
     for (const mesh of this._wireDraftMeshes) {
       if (mesh) mesh.visible = false
@@ -646,8 +654,16 @@ export class InteractionSystem {
 
     this.wireDraftHandIndex = handIndex
     this.wireDraftWaypoints = []
+    this.wireDraftColor = this.getWireColorFromStartAnchor(anchor)
 
     const mesh = this.ensureWireDraftMesh(0)
+    if (mesh.material?.color) {
+      mesh.material.color.setHex(this.wireDraftColor)
+    }
+    if (mesh.material?.emissive) {
+      mesh.material.emissive.setHex(0x181818)
+    }
+
     mesh.visible = true
   }
 
@@ -765,15 +781,7 @@ export class InteractionSystem {
     }
 
     if (anchor.componentType === "battery5v" && anchor.id === "negative") {
-      return 0x111111
-    }
-
-    if (anchor.kind === "hole") {
-      return 0x111111
-    }
-
-    if (anchor.kind === "pin") {
-      return 0x111111
+      return 0x5bc0de
     }
 
     return 0x111111
@@ -803,7 +811,7 @@ export class InteractionSystem {
     if (points.length < 2) return false
 
     const id = this.generateComponentId("wire")
-    const wireColor = this.getWireColorFromStartAnchor(startAnchor)
+    const wireColor = this.wireDraftColor ?? this.getWireColorFromStartAnchor(startAnchor)
 
     const data = {
       id,
