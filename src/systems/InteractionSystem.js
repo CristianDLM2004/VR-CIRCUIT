@@ -55,6 +55,22 @@ export class InteractionSystem {
     this.handTrackingReleaseGraceMs = 280
     this.handOpenReleaseGraceMs = 80
 
+    // ---------------------------
+    // Wire mode
+    // ---------------------------
+    this.toolMode = "grab" // "grab" | "wire"
+    this.wireHoverAnchor = null
+    this.wireHoverHandIndex = null
+    this._wireHoverMarker = null
+
+    this.wireHoverMaxDist = 0.028
+    this.wireHoverReleaseDist = 0.040
+    this.wireAnchorPriority = {
+      terminal: 0,
+      pin: 1,
+      hole: 2,
+    }
+
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
     this._tmpC = new THREE.Vector3()
@@ -74,6 +90,17 @@ export class InteractionSystem {
 
   setHoleSystem(holeSystem) {
     this.holeSystem = holeSystem
+  }
+
+  setToolMode(mode = "grab") {
+    const nextMode = mode === "wire" ? "wire" : "grab"
+    if (this.toolMode === nextMode) return
+
+    this.toolMode = nextMode
+
+    if (this.toolMode !== "wire") {
+      this.clearWireHoverAnchor()
+    }
   }
 
   register(mesh) {
@@ -401,6 +428,156 @@ export class InteractionSystem {
 
     handEntry.pinchPoint.getWorldPosition(out)
     return out
+  }
+
+  // ---------------------------
+  // Wire mode helpers
+  // ---------------------------
+  getAllConnectionAnchors() {
+    const anchors = []
+
+    if (this.holeSystem) {
+      this.holeSystem.updateWorldPositions()
+
+      for (const hole of this.holeSystem.holes) {
+        anchors.push({
+          kind: "hole",
+          id: hole.id,
+          label: hole.id,
+          worldPos: hole.worldPos.clone(),
+          holeId: hole.id,
+          groupKey: hole.groupKey,
+        })
+      }
+    }
+
+    for (const obj of this.interactables) {
+      if (!obj?.userData?.componentId) continue
+      if (typeof obj.userData?.getConnectionAnchors !== "function") continue
+
+      const componentAnchors = obj.userData.getConnectionAnchors()
+      for (const anchor of componentAnchors) {
+        anchors.push({
+          kind: anchor.kind,
+          id: anchor.id,
+          label: anchor.label,
+          worldPos: anchor.worldPos.clone(),
+          componentId: obj.userData.componentId,
+          componentType: obj.userData.componentType,
+        })
+      }
+    }
+
+    return anchors
+  }
+
+  findBestWireAnchorForHand(handEntry, maxDist = this.wireHoverMaxDist) {
+    if (!handEntry || !this.isHandEntryTracked(handEntry)) return null
+    if (handEntry.heldObject) return null
+
+    this.getGrabPointWorld(handEntry, this._tmpC)
+
+    const anchors = this.getAllConnectionAnchors()
+    let best = null
+    let bestDist = maxDist
+
+    for (const anchor of anchors) {
+      const d = anchor.worldPos.distanceTo(this._tmpC)
+      if (d > bestDist) continue
+
+      if (!best) {
+        best = anchor
+        bestDist = d
+        continue
+      }
+
+      const bestPriority = this.wireAnchorPriority[best.kind] ?? 999
+      const candidatePriority = this.wireAnchorPriority[anchor.kind] ?? 999
+
+      if (d < bestDist - 0.001) {
+        best = anchor
+        bestDist = d
+      } else if (Math.abs(d - bestDist) <= 0.001 && candidatePriority < bestPriority) {
+        best = anchor
+        bestDist = d
+      }
+    }
+
+    if (!best) return null
+
+    return {
+      ...best,
+      distance: bestDist,
+      handIndex: handEntry.index,
+    }
+  }
+
+  ensureWireHoverMarker() {
+    if (this._wireHoverMarker) return this._wireHoverMarker
+
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0065, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    )
+    marker.name = "WireHoverMarker"
+    marker.visible = false
+    this.scene.add(marker)
+
+    this._wireHoverMarker = marker
+    return marker
+  }
+
+  clearWireHoverAnchor() {
+    this.wireHoverAnchor = null
+    this.wireHoverHandIndex = null
+
+    if (this._wireHoverMarker) {
+      this._wireHoverMarker.visible = false
+    }
+  }
+
+  updateWireHover() {
+    if (this.toolMode !== "wire") {
+      this.clearWireHoverAnchor()
+      return
+    }
+
+    let best = null
+    for (const handEntry of this.hands) {
+      const candidate = this.findBestWireAnchorForHand(handEntry)
+      if (!candidate) continue
+
+      if (!best || candidate.distance < best.distance) {
+        best = candidate
+      }
+    }
+
+    if (!best) {
+      if (this.wireHoverAnchor) {
+        const trackedHand = this.hands.find((h) => h.index === this.wireHoverHandIndex)
+        if (trackedHand && this.isHandEntryTracked(trackedHand)) {
+          this.getGrabPointWorld(trackedHand, this._tmpD)
+          const keepDist = this.wireHoverAnchor.worldPos.distanceTo(this._tmpD)
+
+          if (keepDist <= this.wireHoverReleaseDist) {
+            const marker = this.ensureWireHoverMarker()
+            marker.position.copy(this.wireHoverAnchor.worldPos)
+            marker.visible = true
+            return
+          }
+        }
+      }
+
+      this.clearWireHoverAnchor()
+      return
+    }
+
+    this.wireHoverAnchor = best
+    this.wireHoverHandIndex = best.handIndex
+
+    const marker = this.ensureWireHoverMarker()
+    marker.position.copy(best.worldPos)
+    marker.visible = true
   }
 
   updateUIPoke() {
@@ -829,12 +1006,19 @@ export class InteractionSystem {
     if (handEntry.heldObject) return
     if (!handEntry.pinchArmed) return
 
-    const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
-
     handEntry.isPinching = true
     handEntry.pinchArmed = false
     handEntry.lostTrackingMs = 0
     handEntry.openPinchMs = 0
+
+    if (this.toolMode === "wire") {
+      if (this.wireHoverAnchor) {
+        console.log("Wire anchor seleccionado:", this.wireHoverAnchor)
+      }
+      return
+    }
+
+    const target = this.findNearestComponentToHand(handEntry, this.nearRadius)
 
     if (!target) return
     if (!this.canHandGrabObject(handEntry, target)) return
@@ -869,6 +1053,8 @@ export class InteractionSystem {
     handEntry.openPinchMs = 0
     handEntry.lostTrackingMs = 0
 
+    if (this.toolMode === "wire") return
+
     if (!handEntry.heldObject) return
 
     const object = handEntry.heldObject
@@ -890,6 +1076,11 @@ export class InteractionSystem {
     handEntry.openPinchMs = 0
     handEntry.lostTrackingMs = 0
 
+    if (this.toolMode === "wire") {
+      this.stopHoldTracking(handEntry.hold)
+      return
+    }
+
     if (!handEntry.heldObject) {
       this.stopHoldTracking(handEntry.hold)
       return
@@ -902,6 +1093,7 @@ export class InteractionSystem {
     const controller = event.target
     if (!controller) return
     if (controller.userData?.heldObject) return
+    if (this.toolMode === "wire") return
 
     const target = this.computeControllerHoverFor(controller)
     if (!target) return
@@ -1181,6 +1373,7 @@ export class InteractionSystem {
       this._activePinHoleMarkers.push(marker)
     }
   }
+
   update() {
     if (!this.renderer.xr.isPresenting) return
 
@@ -1195,7 +1388,10 @@ export class InteractionSystem {
     if (handsActive) {
       this.updateUIPoke()
       this.updateHandPinchState(dtMs)
+      this.updateWireHover()
     } else {
+      this.clearWireHoverAnchor()
+
       for (const handEntry of this.hands) {
         this.forceReleaseHand(handEntry, true)
         handEntry.pinchArmed = true
@@ -1204,6 +1400,11 @@ export class InteractionSystem {
 
     this.cleanupDetachedHolds()
     this.updateHeldObjects()
+
+    if (this.toolMode === "wire") {
+      this.setHover(null)
+      return
+    }
 
     const anyHeld =
       this.hands.some((h) => !!h.heldObject) ||
