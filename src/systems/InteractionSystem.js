@@ -1182,26 +1182,32 @@ export class InteractionSystem {
 
     if (this.toolMode === "wire") {
       const hoverIsValidAnchor =
-        this.wireHoverAnchor &&
+        !!this.wireHoverAnchor &&
         this.wireHoverHandIndex === handEntry.index
 
-      // Primer pinch sobre anchor válido = iniciar punto A
-      if (!this.wireDraftStartAnchor && hoverIsValidAnchor) {
-        if (this.canRunWireAction()) {
+      // 1) Primer pinch sobre anchor válido => iniciar punto A
+      if (!this.wireDraftStartAnchor) {
+        if (hoverIsValidAnchor && this.canRunWireAction()) {
           this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
+          console.log("🟢 Punto A del cable iniciado:", this.wireHoverAnchor)
         }
+        return
       }
-      // Si ya existe draft:
-      // - pinch sobre anchor válido = intentar cerrar en punto B
-      // - pinch en aire = agregar waypoint
-      else if (this.wireDraftStartAnchor && this.wireDraftHandIndex === handEntry.index) {
-        if (hoverIsValidAnchor) {
-          console.log("🔌 Intentar cerrar cable en punto B:", this.wireHoverAnchor)
-        } else {
-          const added = this.addWireWaypointFromHand(handEntry)
-          if (added) {
-            console.log("〰️ Waypoint agregado al cable")
-          }
+
+      // Si el draft pertenece a otra mano, ignorar
+      if (this.wireDraftHandIndex !== handEntry.index) return
+
+      // 2) Si ya hay draft:
+      // - hover válido => cerrar provisionalmente en B
+      // - sin hover => agregar waypoint
+      if (hoverIsValidAnchor) {
+        if (!this.canRunWireAction()) return
+
+        console.log("🔌 Punto B detectado para cerrar cable:", this.wireHoverAnchor)
+      } else {
+        const added = this.addWireWaypointFromHand(handEntry)
+        if (added) {
+          console.log("〰️ Waypoint agregado al cable")
         }
       }
 
@@ -1507,12 +1513,16 @@ export class InteractionSystem {
 
       // ---------------------------
       // Wire mode: manejo especial
-      // Para cables usamos SOLO thumb-tip vs index-tip
-      // para evitar activaciones falsas con las falanges
+      // Permite:
+      // - iniciar en anchor válido
+      // - agregar waypoint en el aire
+      // - cerrar en anchor válido
       // ---------------------------
       if (this.toolMode === "wire") {
         const hasHover = !!this.wireHoverAnchor
         const isSameHandHovering = this.wireHoverHandIndex === h.index
+        const hasDraftForThisHand =
+          !!this.wireDraftStartAnchor && this.wireDraftHandIndex === h.index
 
         const thumbTip = this.getJointWorld(h.hand, "thumb-tip", this._tmpE)
         const indexTip = this.getJointWorld(h.hand, "index-finger-tip", this._tmpF)
@@ -1531,27 +1541,29 @@ export class InteractionSystem {
           h.wirePinchCloseMs = 0
         }
 
-        if (hasHover && isSameHandHovering && closeEnoughForWire) {
+        // Si no hay hover pero ya existe un draft en esta mano,
+        // también queremos permitir el gesto para agregar waypoint en el aire.
+        const canAccumulateGesture =
+          closeEnoughForWire &&
+          h.pinchArmed &&
+          !h.isPinching &&
+          (
+            (hasHover && isSameHandHovering) ||
+            hasDraftForThisHand
+          )
+
+        if (canAccumulateGesture) {
           h.wirePinchCloseMs += dtMs
         } else {
           h.wirePinchCloseMs = 0
         }
 
-        if (
-          hasHover &&
-          isSameHandHovering &&
-          closeEnoughForWire &&
-          h.pinchArmed &&
-          !h.isPinching &&
-          h.wirePinchCloseMs >= 70
-        ) {
+        if (h.pinchArmed && !h.isPinching && h.wirePinchCloseMs >= 70) {
           h.isPinching = true
           h.pinchArmed = false
           h.wirePinchCloseMs = 0
 
-          if (!this.wireDraftStartAnchor) {
-            this.startWireDraftFromAnchor(this.wireHoverAnchor, h.index)
-          }
+          this.onHandPinchStart(h)
         }
 
         continue
