@@ -861,6 +861,77 @@ export class InteractionSystem {
     return true
   }
 
+  findComponentMeshById(componentId) {
+    if (!componentId) return null
+    if (!this.stateSyncSystem) return null
+    return this.stateSyncSystem.getMeshById(componentId)
+  }
+
+  resolveAnchorWorldPosition(anchor) {
+    if (!anchor) return null
+
+    if (anchor.kind === "hole") {
+      if (!this.holeSystem) return null
+      this.holeSystem.updateWorldPositions()
+
+      const hole = this.holeSystem.holes.find((h) => h.id === anchor.holeId || h.id === anchor.id)
+      return hole ? hole.worldPos.clone() : null
+    }
+
+    if (anchor.componentId) {
+      const mesh = this.findComponentMeshById(anchor.componentId)
+      if (!mesh) return null
+
+      if (anchor.kind === "terminal" && typeof mesh.userData?.getTerminalWorldPositions === "function") {
+        const terminals = mesh.userData.getTerminalWorldPositions()
+        const found = terminals.find((t) => t.id === anchor.id)
+        return found ? found.worldPos.clone() : null
+      }
+
+      if (anchor.kind === "pin" && typeof mesh.userData?.getPinWorldPositions === "function") {
+        const pins = mesh.userData.getPinWorldPositions()
+        const found = pins.find((p) => p.id === anchor.id)
+        return found ? found.worldPos.clone() : null
+      }
+    }
+
+    if (anchor.worldPos) {
+      return new THREE.Vector3(anchor.worldPos.x, anchor.worldPos.y, anchor.worldPos.z)
+    }
+
+    return null
+  }
+
+  updateDynamicWires() {
+    if (!this.stateSyncSystem) return
+
+    for (const mesh of this.stateSyncSystem.meshById.values()) {
+      if (!mesh?.userData?.isWire) continue
+      if (typeof mesh.userData?.rebuildWireGeometry !== "function") continue
+
+      const startAnchor = mesh.userData.startAnchor
+      const endAnchor = mesh.userData.endAnchor
+      const fixedPoints = Array.isArray(mesh.userData.fixedPoints)
+        ? mesh.userData.fixedPoints.map((p) => p.clone())
+        : []
+
+      if (fixedPoints.length < 2) continue
+
+      const startWorld = this.resolveAnchorWorldPosition(startAnchor)
+      const endWorld = this.resolveAnchorWorldPosition(endAnchor)
+
+      if (startWorld) {
+        fixedPoints[0] = startWorld
+      }
+
+      if (endWorld) {
+        fixedPoints[fixedPoints.length - 1] = endWorld
+      }
+
+      mesh.userData.rebuildWireGeometry(fixedPoints)
+    }
+  }
+
   updateWireDraftPreview() {
     if (this.toolMode !== "wire") {
       this.clearWireDraft()
@@ -1806,6 +1877,7 @@ export class InteractionSystem {
 
     this.cleanupDetachedHolds()
     this.updateHeldObjects()
+    this.updateDynamicWires()
 
     if (this.toolMode === "wire") {
       this.setHover(null)
