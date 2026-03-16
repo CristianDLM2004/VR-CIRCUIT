@@ -603,7 +603,7 @@ export class InteractionSystem {
     if (!this._wireDraftStartMarker) {
       this._wireDraftStartMarker = new THREE.Mesh(
         new THREE.SphereGeometry(0.010, 14, 14),
-        new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+        new THREE.MeshBasicMaterial({ color: 0xff00ff })
       )
       this._wireDraftStartMarker.name = "WireDraftStartMarker"
       this._wireDraftStartMarker.visible = false
@@ -613,7 +613,7 @@ export class InteractionSystem {
     if (!this._wireDraftEndMarker) {
       this._wireDraftEndMarker = new THREE.Mesh(
         new THREE.SphereGeometry(0.008, 14, 14),
-        new THREE.MeshBasicMaterial({ color: 0xffff00 })
+        new THREE.MeshBasicMaterial({ color: 0xffaa00 })
       )
       this._wireDraftEndMarker.name = "WireDraftEndMarker"
       this._wireDraftEndMarker.visible = false
@@ -642,9 +642,13 @@ export class InteractionSystem {
     this.wireDraftHandIndex = handIndex
 
     this._wireDraftStartMarker.position.copy(this.wireDraftStartAnchor.worldPos)
+    this._wireDraftStartMarker.scale.setScalar(1.8)
     this._wireDraftStartMarker.visible = true
+
     this._wireDraftEndMarker.position.copy(this.wireDraftStartAnchor.worldPos)
+    this._wireDraftEndMarker.scale.setScalar(1.8)
     this._wireDraftEndMarker.visible = true
+
     this._wireDraftLine.visible = true
   }
 
@@ -686,6 +690,7 @@ export class InteractionSystem {
     positions[4] = end.y
     positions[5] = end.z
     this._wireDraftLine.geometry.attributes.position.needsUpdate = true
+    this._wireDraftLine.geometry.computeBoundingSphere()
 
     this._wireDraftLine.visible = true
 
@@ -1421,6 +1426,26 @@ export class InteractionSystem {
 
       if (dist >= this.pinchReleaseResetDist) {
         h.pinchArmed = true
+      }
+
+      // ---------------------------
+      // Wire mode: manejo especial
+      // ---------------------------
+      if (this.toolMode === "wire") {
+        if (dist <= this.pinchStartDist && this.wireHoverAnchor) {
+          if (!h.isPinching) {
+            h.isPinching = true
+
+            if (!this.wireDraftStartAnchor) {
+              this.startWireDraftFromAnchor(this.wireHoverAnchor, h.index)
+            }
+          }
+        } else if (dist > this.pinchEndDist) {
+          h.isPinching = false
+          h.pinchArmed = true
+        }
+
+        continue
       }
 
       if (h.heldObject) {
