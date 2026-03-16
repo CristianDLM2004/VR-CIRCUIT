@@ -61,6 +61,7 @@ export class InteractionSystem {
     // ---------------------------
     this.toolMode = "grab" // "grab" | "wire"
     this.wireHoverAnchor = null
+    this.wireHoverEndpoint = null
     this.wireHoverHandIndex = null
     this._wireHoverMarker = null
 
@@ -555,6 +556,7 @@ export class InteractionSystem {
 
   clearWireHoverAnchor() {
     this.wireHoverAnchor = null
+    this.wireHoverEndpoint = null
     this.wireHoverHandIndex = null
 
     if (this._wireHoverMarker) {
@@ -569,27 +571,43 @@ export class InteractionSystem {
     }
 
     let best = null
-    for (const handEntry of this.hands) {
-      const candidate = this.findBestWireAnchorForHand(handEntry)
-      if (!candidate) continue
+    let bestType = null
 
-      if (!best || candidate.distance < best.distance) {
-        best = candidate
+    for (const handEntry of this.hands) {
+      const anchorCandidate = this.findBestWireAnchorForHand(handEntry)
+      const endpointCandidate = this.findBestWireEndpointForHand(handEntry)
+
+      if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
+        best = anchorCandidate
+        bestType = "anchor"
+      }
+
+      if (endpointCandidate && (!best || endpointCandidate.distance < best.distance)) {
+        best = endpointCandidate
+        bestType = "endpoint"
       }
     }
 
     if (!best) {
-      if (this.wireHoverAnchor) {
+      if (this.wireHoverAnchor || this.wireHoverEndpoint) {
         const trackedHand = this.hands.find((h) => h.index === this.wireHoverHandIndex)
         if (trackedHand && this.isHandEntryTracked(trackedHand)) {
           this.getGrabPointWorld(trackedHand, this._tmpD)
-          const keepDist = this.wireHoverAnchor.worldPos.distanceTo(this._tmpD)
 
-          if (keepDist <= this.wireHoverReleaseDist) {
-            const marker = this.ensureWireHoverMarker()
-            marker.position.copy(this.wireHoverAnchor.worldPos)
-            marker.visible = true
-            return
+          const targetPos =
+            this.wireHoverAnchor?.worldPos ||
+            this.wireHoverEndpoint?.worldPos ||
+            null
+
+          if (targetPos) {
+            const keepDist = targetPos.distanceTo(this._tmpD)
+
+            if (keepDist <= this.wireHoverReleaseDist) {
+              const marker = this.ensureWireHoverMarker()
+              marker.position.copy(targetPos)
+              marker.visible = true
+              return
+            }
           }
         }
       }
@@ -598,8 +616,15 @@ export class InteractionSystem {
       return
     }
 
-    this.wireHoverAnchor = best
     this.wireHoverHandIndex = best.handIndex
+
+    if (bestType === "anchor") {
+      this.wireHoverAnchor = best
+      this.wireHoverEndpoint = null
+    } else {
+      this.wireHoverAnchor = null
+      this.wireHoverEndpoint = best
+    }
 
     const marker = this.ensureWireHoverMarker()
     marker.position.copy(best.worldPos)
@@ -900,6 +925,141 @@ export class InteractionSystem {
     }
 
     return null
+  }
+
+  getWireEndpointWorldPosition(wireMesh, endpointType) {
+    if (!wireMesh?.userData?.isWire) return null
+
+    const anchor =
+      endpointType === "start"
+        ? wireMesh.userData.startAnchor
+        : wireMesh.userData.endAnchor
+
+    const resolved = this.resolveAnchorWorldPosition(anchor)
+    if (resolved) return resolved
+
+    const fixedPoints = Array.isArray(wireMesh.userData.fixedPoints)
+      ? wireMesh.userData.fixedPoints
+      : null
+
+    if (!fixedPoints || fixedPoints.length < 2) return null
+
+    if (endpointType === "start") return fixedPoints[0].clone()
+    return fixedPoints[fixedPoints.length - 1].clone()
+  }
+
+  getAllWireEndpoints() {
+    const endpoints = []
+    if (!this.stateSyncSystem) return endpoints
+
+    for (const mesh of this.stateSyncSystem.meshById.values()) {
+      if (!mesh?.userData?.isWire) continue
+
+      const startWorld = this.getWireEndpointWorldPosition(mesh, "start")
+      const endWorld = this.getWireEndpointWorldPosition(mesh, "end")
+
+      if (startWorld) {
+        endpoints.push({
+          kind: "wire-endpoint",
+          endpointType: "start",
+          wireId: mesh.userData.componentId,
+          worldPos: startWorld,
+        })
+      }
+
+      if (endWorld) {
+        endpoints.push({
+          kind: "wire-endpoint",
+          endpointType: "end",
+          wireId: mesh.userData.componentId,
+          worldPos: endWorld,
+        })
+      }
+    }
+
+    return endpoints
+  }
+
+  findBestWireEndpointForHand(handEntry, maxDist = this.wireHoverMaxDist) {
+    if (!handEntry || !this.isHandEntryTracked(handEntry)) return null
+    if (handEntry.heldObject) return null
+    if (!this.stateSyncSystem) return null
+    if (this.wireDraftStartAnchor) return null
+
+    this.getGrabPointWorld(handEntry, this._tmpC)
+
+    const endpoints = this.getAllWireEndpoints()
+    let best = null
+    let bestDist = maxDist
+
+    for (const endpoint of endpoints) {
+      const d = endpoint.worldPos.distanceTo(this._tmpC)
+      if (d > bestDist) continue
+
+      best = endpoint
+      bestDist = d
+    }
+
+    if (!best) return null
+
+    return {
+      ...best,
+      distance: bestDist,
+      handIndex: handEntry.index,
+    }
+  }
+
+  deleteWireById(wireId) {
+    if (!wireId || !this.stateSyncSystem) return false
+
+    this.appState.removeComponent(wireId)
+    this.stateSyncSystem.removeMeshById(wireId)
+    return true
+  }
+
+  reopenWireFromEndEndpoint(endpoint, handEntry) {
+    if (!endpoint || endpoint.endpointType !== "end") return false
+    if (!handEntry) return false
+    if (!this.stateSyncSystem) return false
+
+    const wireMesh = this.stateSyncSystem.getMeshById(endpoint.wireId)
+    if (!wireMesh?.userData?.isWire) return false
+
+    const startAnchor = wireMesh.userData.startAnchor
+    const fixedPoints = Array.isArray(wireMesh.userData.fixedPoints)
+      ? wireMesh.userData.fixedPoints.map((p) => p.clone())
+      : []
+
+    if (!startAnchor || fixedPoints.length < 2) return false
+
+    const waypoints = fixedPoints.slice(1, -1)
+
+    this.deleteWireById(endpoint.wireId)
+
+    this.wireDraftStartAnchor = {
+      ...startAnchor,
+      worldPos:
+        this.resolveAnchorWorldPosition(startAnchor) ||
+        fixedPoints[0].clone(),
+    }
+
+    this.wireDraftHandIndex = handEntry.index
+    this.wireDraftWaypoints = waypoints
+    this.wireDraftColor = wireMesh.userData.wireColor ?? 0x111111
+
+    const mesh = this.ensureWireDraftMesh(0)
+    if (mesh.material?.color) {
+      mesh.material.color.setHex(this.wireDraftColor)
+    }
+    mesh.visible = true
+
+    this.clearWireHoverAnchor()
+
+    handEntry.isPinching = true
+    handEntry.pinchArmed = false
+    handEntry.wirePinchCloseMs = 0
+
+    return true
   }
 
   updateDynamicWires() {
@@ -1406,8 +1566,39 @@ export class InteractionSystem {
         !!this.wireHoverAnchor &&
         this.wireHoverHandIndex === handEntry.index
 
-      // 1) Primer pinch sobre anchor válido => iniciar punto A
+      const hoverIsWireEndpoint =
+        !!this.wireHoverEndpoint &&
+        this.wireHoverHandIndex === handEntry.index
+
+      // Si no hay draft activo:
+      // - endpoint start => borrar cable
+      // - endpoint end => reabrir para recolocar B
+      // - anchor normal => iniciar punto A
       if (!this.wireDraftStartAnchor) {
+        if (hoverIsWireEndpoint) {
+          if (!this.canRunWireAction()) return
+
+          if (this.wireHoverEndpoint.endpointType === "start") {
+            const deleted = this.deleteWireById(this.wireHoverEndpoint.wireId)
+            if (deleted) {
+              console.log("🗑️ Cable eliminado desde el punto A")
+              handEntry.isPinching = true
+              handEntry.pinchArmed = false
+              handEntry.wirePinchCloseMs = 0
+              this.clearWireHoverAnchor()
+            }
+            return
+          }
+
+          if (this.wireHoverEndpoint.endpointType === "end") {
+            const reopened = this.reopenWireFromEndEndpoint(this.wireHoverEndpoint, handEntry)
+            if (reopened) {
+              console.log("↩️ Cable reabierto desde el punto B para recolocarlo")
+            }
+            return
+          }
+        }
+
         if (hoverIsValidAnchor && this.canRunWireAction()) {
           this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
           console.log("🟢 Punto A del cable iniciado:", this.wireHoverAnchor)
@@ -1418,8 +1609,8 @@ export class InteractionSystem {
       // Si el draft pertenece a otra mano, ignorar
       if (this.wireDraftHandIndex !== handEntry.index) return
 
-      // 2) Si ya hay draft:
-      // - hover válido => cerrar provisionalmente en B
+      // Si ya hay draft:
+      // - hover válido => cerrar en B
       // - sin hover => agregar waypoint
       if (hoverIsValidAnchor) {
         const closed = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, handEntry)
