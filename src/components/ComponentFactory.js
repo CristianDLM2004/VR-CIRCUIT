@@ -139,6 +139,68 @@ export class ComponentFactory {
         break
       }
 
+      case "wire": {
+        const group = new THREE.Group()
+
+        const rawPoints = Array.isArray(data.meta?.points) ? data.meta.points : []
+        const points = rawPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z))
+
+        if (points.length < 2) return null
+
+        const wireMat = new THREE.MeshStandardMaterial({
+          color: 0x111111,
+          roughness: 0.65,
+          metalness: 0.0,
+          emissive: 0x181818,
+        })
+
+        const jointMat = new THREE.MeshStandardMaterial({
+          color: 0x1b1b1b,
+          roughness: 0.7,
+          metalness: 0.0,
+        })
+
+        const radius = 0.0038
+
+        for (let i = 0; i < points.length; i++) {
+          const joint = new THREE.Mesh(
+            new THREE.SphereGeometry(radius * 1.15, 10, 10),
+            jointMat
+          )
+          joint.position.copy(points[i])
+          group.add(joint)
+        }
+
+        for (let i = 0; i < points.length - 1; i++) {
+          const start = points[i]
+          const end = points[i + 1]
+
+          const dir = end.clone().sub(start)
+          const len = dir.length()
+          if (len < 0.0001) continue
+
+          const mid = start.clone().add(end).multiplyScalar(0.5)
+
+          const segment = new THREE.Mesh(
+            new THREE.CylinderGeometry(radius, radius, 1, 12),
+            wireMat
+          )
+
+          segment.position.copy(mid)
+          dir.normalize()
+          segment.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+          segment.scale.set(1, len, 1)
+
+          group.add(segment)
+        }
+
+        group.userData.interactable = false
+        group.userData.isWire = true
+
+        mesh = group
+        break
+      }
+
       default:
         return null
     }
@@ -150,7 +212,7 @@ export class ComponentFactory {
 
     // Metadata
     mesh.userData.componentId = data.id
-    mesh.userData.interactable = true
+    mesh.userData.interactable = data.type === "wire" ? false : true
     mesh.userData.isSurface = false
     mesh.userData.componentType = data.type
 

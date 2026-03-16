@@ -20,6 +20,7 @@ new VRManager(renderer)
 const appState = new AppState()
 const interactionSystem = new InteractionSystem(sceneManager, appState)
 const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem)
+interactionSystem.setStateSyncSystem(stateSyncSystem)
 
 // ---------------------------
 // Luces

@@ -10,6 +10,7 @@ export class InteractionSystem {
     this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
     this.camera = sceneManager.camera
+    this.stateSyncSystem = null
 
     this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
@@ -109,6 +110,10 @@ export class InteractionSystem {
     this.holeSystem = holeSystem
   }
 
+  setStateSyncSystem(stateSyncSystem) {
+    this.stateSyncSystem = stateSyncSystem
+  }
+
   setToolMode(mode = "grab") {
     const nextMode = mode === "wire" ? "wire" : "grab"
     if (this.toolMode === nextMode) return
@@ -124,6 +129,7 @@ export class InteractionSystem {
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
+    if (mesh.userData?.interactable === false) return
 
     mesh.userData.interactable = true
     if (!("heldBy" in mesh.userData)) mesh.userData.heldBy = null
@@ -711,6 +717,108 @@ export class InteractionSystem {
     mesh.scale.set(1, len, 1)
   }
 
+  generateComponentId(prefix = "cmp") {
+    if (globalThis.crypto?.randomUUID) {
+      return `${prefix}_${globalThis.crypto.randomUUID()}`
+    }
+    return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+  }
+
+  serializeWireAnchor(anchor) {
+    if (!anchor) return null
+
+    return {
+      kind: anchor.kind ?? null,
+      id: anchor.id ?? null,
+      label: anchor.label ?? null,
+      componentId: anchor.componentId ?? null,
+      componentType: anchor.componentType ?? null,
+      holeId: anchor.holeId ?? null,
+      groupKey: anchor.groupKey ?? null,
+      worldPos: anchor.worldPos
+        ? {
+          x: anchor.worldPos.x,
+          y: anchor.worldPos.y,
+          z: anchor.worldPos.z,
+        }
+        : null,
+    }
+  }
+
+  isSameWireAnchor(a, b) {
+    if (!a || !b) return false
+
+    if (a.kind !== b.kind) return false
+
+    if (a.kind === "hole") {
+      return a.holeId === b.holeId
+    }
+
+    return a.componentId === b.componentId && a.id === b.id
+  }
+
+  finalizeWireDraftToAnchor(endAnchor, handEntry) {
+    if (!endAnchor) return false
+    if (!handEntry) return false
+    if (!this.wireDraftStartAnchor) return false
+    if (this.wireDraftHandIndex !== handEntry.index) return false
+    if (!this.stateSyncSystem) return false
+    if (!this.canRunWireAction()) return false
+
+    const startAnchor = this.wireDraftStartAnchor
+
+    if (this.isSameWireAnchor(startAnchor, endAnchor)) {
+      console.log("⚠️ Punto B inválido: no puede ser el mismo anchor que A")
+      return false
+    }
+
+    const points = [
+      startAnchor.worldPos.clone(),
+      ...this.wireDraftWaypoints.map((p) => p.clone()),
+      endAnchor.worldPos.clone(),
+    ]
+
+    if (points.length < 2) return false
+
+    const id = this.generateComponentId("wire")
+
+    const data = {
+      id,
+      type: "wire",
+      transform: {
+        x: 0,
+        y: 0,
+        z: 0,
+        qx: 0,
+        qy: 0,
+        qz: 0,
+        qw: 1,
+      },
+      meta: {
+        points: points.map((p) => ({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+        })),
+        startAnchor: this.serializeWireAnchor(startAnchor),
+        endAnchor: this.serializeWireAnchor(endAnchor),
+      },
+    }
+
+    this.appState.addComponent(data)
+    this.stateSyncSystem.addMeshFromComponent(data)
+
+    this.clearWireDraft()
+    this.clearWireHoverAnchor()
+
+    handEntry.isPinching = true
+    handEntry.pinchArmed = false
+    handEntry.wirePinchCloseMs = 0
+
+    console.log("✅ Cable cerrado entre A y B")
+    return true
+  }
+
   updateWireDraftPreview() {
     if (this.toolMode !== "wire") {
       this.clearWireDraft()
@@ -1201,9 +1309,10 @@ export class InteractionSystem {
       // - hover válido => cerrar provisionalmente en B
       // - sin hover => agregar waypoint
       if (hoverIsValidAnchor) {
-        if (!this.canRunWireAction()) return
-
-        console.log("🔌 Punto B detectado para cerrar cable:", this.wireHoverAnchor)
+        const closed = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, handEntry)
+        if (closed) {
+          console.log("🔌 Punto B conectado:", this.wireHoverAnchor)
+        }
       } else {
         const added = this.addWireWaypointFromHand(handEntry)
         if (added) {
@@ -1556,6 +1665,13 @@ export class InteractionSystem {
           h.wirePinchCloseMs += dtMs
         } else {
           h.wirePinchCloseMs = 0
+        }
+
+        // Disparo inmediato al detectar el cierre del pinch,
+        // sin exigir mantenerlo tantos ms.
+        if (h.pinchArmed && !h.isPinching && canAccumulateGesture) {
+          h.wirePinchCloseMs = 0
+          this.onHandPinchStart(h)
         }
 
         if (h.pinchArmed && !h.isPinching && h.wirePinchCloseMs >= 70) {
