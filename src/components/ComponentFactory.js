@@ -5,7 +5,6 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
-
       case "battery5v": {
         const group = new THREE.Group()
 
@@ -47,8 +46,9 @@ export class ComponentFactory {
         group.add(plusTerminal)
         group.add(minusTerminal)
 
-        // la superficie real de apoyo es solo el cuerpo
-        group.userData.surfaceContactHalfY = body
+        // La superficie real de apoyo es solo el cuerpo principal.
+        // InteractionSystem y PhysicsSystem esperan surfaceContactObject.
+        group.userData.surfaceContactObject = body
         group.userData.surfaceUpright = true
 
         mesh = group
@@ -144,7 +144,6 @@ export class ComponentFactory {
         return null
     }
 
-
     // Transform
     const t = data.transform || { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
     mesh.position.set(t.x, t.y, t.z)
@@ -163,7 +162,7 @@ export class ComponentFactory {
     mesh.userData.inserted = !!data.inserted
     mesh.userData.pinConnections = data.pinConnections || null
 
-    //Agregar las terminales a la batería 5V
+    // Agregar las terminales a la batería 5V
     if (data.type === "battery5v") {
       mesh.userData.terminals = [
         {
@@ -178,7 +177,8 @@ export class ComponentFactory {
         },
       ]
     }
-    //Agregar los pines al led
+
+    // Agregar los pines al led
     if (data.type === "led") {
       mesh.userData.pins = [
         {
@@ -194,7 +194,7 @@ export class ComponentFactory {
       ]
     }
 
-    //Agregar los pines a la resistencia
+    // Agregar los pines a la resistencia
     if (data.type === "resistor") {
       mesh.userData.pins = [
         {
