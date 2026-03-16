@@ -68,8 +68,8 @@ export class InteractionSystem {
     this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.135
-    this.wirePinchEndDist = 0.165
+    this.wirePinchStartDist = 0.060
+    this.wirePinchEndDist = 0.090
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -81,7 +81,7 @@ export class InteractionSystem {
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex = null
     this._wireDraftMesh = null
-    this.wireDraftRadius = 0.00475
+    this.wireDraftRadius = 0.0038
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -1405,23 +1405,32 @@ export class InteractionSystem {
 
       // ---------------------------
       // Wire mode: manejo especial
-      // Mucho más permisivo para crear el cable
+      // Solo crear A cuando realmente se cierre el pinch
       // ---------------------------
       if (this.toolMode === "wire") {
         const hasHover = !!this.wireHoverAnchor
+        const isSameHandHovering = this.wireHoverHandIndex === h.index
         const closeEnoughForWire = dist <= this.wirePinchStartDist
+        const openedEnoughToReset = dist >= this.wirePinchEndDist
 
-        if (hasHover && closeEnoughForWire) {
-          if (!h.isPinching) {
-            h.isPinching = true
-
-            if (!this.wireDraftStartAnchor) {
-              this.startWireDraftFromAnchor(this.wireHoverAnchor, h.index)
-            }
-          }
-        } else if (dist > this.wirePinchEndDist) {
+        if (openedEnoughToReset) {
           h.isPinching = false
           h.pinchArmed = true
+        }
+
+        if (
+          hasHover &&
+          isSameHandHovering &&
+          closeEnoughForWire &&
+          h.pinchArmed &&
+          !h.isPinching
+        ) {
+          h.isPinching = true
+          h.pinchArmed = false
+
+          if (!this.wireDraftStartAnchor) {
+            this.startWireDraftFromAnchor(this.wireHoverAnchor, h.index)
+          }
         }
 
         continue
@@ -1471,7 +1480,7 @@ export class InteractionSystem {
       if (!match.hole) continue
 
       const marker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.0085, 12, 12),
+        new THREE.SphereGeometry(0.0075, 12, 12),
         new THREE.MeshBasicMaterial({ color: 0xffffff })
       )
 
