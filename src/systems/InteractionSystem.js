@@ -68,8 +68,8 @@ export class InteractionSystem {
     this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.020
-    this.wirePinchEndDist = 0.040
+    this.wirePinchStartDist = 0.012
+    this.wirePinchEndDist = 0.028
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -1442,7 +1442,7 @@ export class InteractionSystem {
           closeEnoughForWire &&
           h.pinchArmed &&
           !h.isPinching &&
-          h.wirePinchCloseMs >= 45
+          h.wirePinchCloseMs >= 70
         ) {
           h.isPinching = true
           h.pinchArmed = false
