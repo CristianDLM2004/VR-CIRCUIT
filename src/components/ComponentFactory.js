@@ -147,15 +147,17 @@ export class ComponentFactory {
 
         if (points.length < 2) return null
 
+        const wireColor = data.meta?.color ?? 0x111111
+
         const wireMat = new THREE.MeshStandardMaterial({
-          color: 0x111111,
+          color: wireColor,
           roughness: 0.65,
           metalness: 0.0,
           emissive: 0x181818,
         })
 
         const jointMat = new THREE.MeshStandardMaterial({
-          color: 0x1b1b1b,
+          color: wireColor,
           roughness: 0.7,
           metalness: 0.0,
         })

@@ -757,6 +757,28 @@ export class InteractionSystem {
     return a.componentId === b.componentId && a.id === b.id
   }
 
+  getWireColorFromStartAnchor(anchor) {
+    if (!anchor) return 0x111111
+
+    if (anchor.componentType === "battery5v" && anchor.id === "positive") {
+      return 0xff2a2a
+    }
+
+    if (anchor.componentType === "battery5v" && anchor.id === "negative") {
+      return 0x111111
+    }
+
+    if (anchor.kind === "hole") {
+      return 0x111111
+    }
+
+    if (anchor.kind === "pin") {
+      return 0x111111
+    }
+
+    return 0x111111
+  }
+
   finalizeWireDraftToAnchor(endAnchor, handEntry) {
     if (!endAnchor) return false
     if (!handEntry) return false
@@ -781,6 +803,7 @@ export class InteractionSystem {
     if (points.length < 2) return false
 
     const id = this.generateComponentId("wire")
+    const wireColor = this.getWireColorFromStartAnchor(startAnchor)
 
     const data = {
       id,
@@ -795,6 +818,7 @@ export class InteractionSystem {
         qw: 1,
       },
       meta: {
+        color: wireColor,
         points: points.map((p) => ({
           x: p.x,
           y: p.y,
