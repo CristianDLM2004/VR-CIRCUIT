@@ -577,14 +577,32 @@ export class InteractionSystem {
       const anchorCandidate = this.findBestWireAnchorForHand(handEntry)
       const endpointCandidate = this.findBestWireEndpointForHand(handEntry)
 
-      if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
-        best = anchorCandidate
-        bestType = "anchor"
-      }
+      // Si no hay draft activo, dar prioridad a endpoints de wires
+      // para permitir borrar/reabrir sin que gane el anchor de abajo.
+      if (!this.wireDraftStartAnchor) {
+        if (endpointCandidate && (!best || endpointCandidate.distance < best.distance + 0.02)) {
+          best = endpointCandidate
+          bestType = "endpoint"
+        }
 
-      if (endpointCandidate && (!best || endpointCandidate.distance < best.distance)) {
-        best = endpointCandidate
-        bestType = "endpoint"
+        if (!best && anchorCandidate) {
+          best = anchorCandidate
+          bestType = "anchor"
+        } else if (
+          anchorCandidate &&
+          bestType !== "endpoint" &&
+          anchorCandidate.distance < best.distance
+        ) {
+          best = anchorCandidate
+          bestType = "anchor"
+        }
+      } else {
+        // Si ya hay draft, ya no queremos endpoints de wires:
+        // solo anchors normales para cerrar o seguir agregando waypoints.
+        if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
+          best = anchorCandidate
+          bestType = "anchor"
+        }
       }
     }
 
