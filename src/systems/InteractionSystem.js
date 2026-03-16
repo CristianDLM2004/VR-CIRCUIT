@@ -65,9 +65,12 @@ export class InteractionSystem {
     this.wireHoverHandIndex = null
     this._wireHoverMarker = null
 
-    // Mucho más permisivo para seleccionar anchor
+    // Hover de anchors normales
     this.wireHoverMaxDist = 0.055
     this.wireHoverReleaseDist = 0.085
+
+    // Hover de endpoints de cables: más corto para no estorbar
+    this.wireEndpointHoverMaxDist = 0.020
 
     // Pinch específico para cable: mucho más fácil que el grab normal
     this.wirePinchStartDist = 0.016
@@ -577,33 +580,35 @@ export class InteractionSystem {
       const anchorCandidate = this.findBestWireAnchorForHand(handEntry)
       const endpointCandidate = this.findBestWireEndpointForHand(handEntry)
 
-      // Si no hay draft activo, dar prioridad a endpoints de wires
-      // para permitir borrar/reabrir sin que gane el anchor de abajo.
       if (!this.wireDraftStartAnchor) {
-        if (endpointCandidate && (!best || endpointCandidate.distance < best.distance + 0.02)) {
+        // Sin draft:
+        // - endpoints con rango corto
+        // - anchors normales con rango normal
+        // - si ambos existen, gana el más cercano de verdad
+        if (anchorCandidate && endpointCandidate) {
+          if (endpointCandidate.distance <= anchorCandidate.distance) {
+            best = endpointCandidate
+            bestType = "endpoint"
+          } else {
+            best = anchorCandidate
+            bestType = "anchor"
+          }
+        } else if (endpointCandidate) {
           best = endpointCandidate
           bestType = "endpoint"
-        }
-
-        if (!best && anchorCandidate) {
-          best = anchorCandidate
-          bestType = "anchor"
-        } else if (
-          anchorCandidate &&
-          bestType !== "endpoint" &&
-          anchorCandidate.distance < best.distance
-        ) {
+        } else if (anchorCandidate) {
           best = anchorCandidate
           bestType = "anchor"
         }
       } else {
-        // Si ya hay draft, ya no queremos endpoints de wires:
-        // solo anchors normales para cerrar o seguir agregando waypoints.
+        // Con draft activo, ignorar endpoints de wires
         if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
           best = anchorCandidate
           bestType = "anchor"
         }
       }
+
+      if (best) break
     }
 
     if (!best) {
@@ -998,7 +1003,7 @@ export class InteractionSystem {
     return endpoints
   }
 
-  findBestWireEndpointForHand(handEntry, maxDist = this.wireHoverMaxDist) {
+  findBestWireEndpointForHand(handEntry, maxDist = this.wireEndpointHoverMaxDist) {
     if (!handEntry || !this.isHandEntryTracked(handEntry)) return null
     if (handEntry.heldObject) return null
     if (!this.stateSyncSystem) return null
@@ -1947,11 +1952,15 @@ export class InteractionSystem {
       // Permite:
       // - iniciar en anchor válido
       // - agregar waypoint en el aire
-      // - cerrar en anchor válido
+      // - borrar desde endpoint A
+      // - reabrir desde endpoint B
       // ---------------------------
       if (this.toolMode === "wire") {
-        const hasHover = !!this.wireHoverAnchor
+        const hasAnchorHover = !!this.wireHoverAnchor
+        const hasEndpointHover = !!this.wireHoverEndpoint
+        const hasAnyWireHover = hasAnchorHover || hasEndpointHover
         const isSameHandHovering = this.wireHoverHandIndex === h.index
+
         const hasDraftForThisHand =
           !!this.wireDraftStartAnchor && this.wireDraftHandIndex === h.index
 
@@ -1972,14 +1981,12 @@ export class InteractionSystem {
           h.wirePinchCloseMs = 0
         }
 
-        // Si no hay hover pero ya existe un draft en esta mano,
-        // también queremos permitir el gesto para agregar waypoint en el aire.
         const canAccumulateGesture =
           closeEnoughForWire &&
           h.pinchArmed &&
           !h.isPinching &&
           (
-            (hasHover && isSameHandHovering) ||
+            (hasAnyWireHover && isSameHandHovering) ||
             hasDraftForThisHand
           )
 
@@ -1989,14 +1996,7 @@ export class InteractionSystem {
           h.wirePinchCloseMs = 0
         }
 
-        // Disparo inmediato al detectar el cierre del pinch,
-        // sin exigir mantenerlo tantos ms.
         if (h.pinchArmed && !h.isPinching && canAccumulateGesture) {
-          h.wirePinchCloseMs = 0
-          this.onHandPinchStart(h)
-        }
-
-        if (h.pinchArmed && !h.isPinching && h.wirePinchCloseMs >= 70) {
           h.wirePinchCloseMs = 0
           this.onHandPinchStart(h)
         }
