@@ -47,7 +47,6 @@ export class ComponentFactory {
         group.add(minusTerminal)
 
         // La superficie real de apoyo es solo el cuerpo principal.
-        // InteractionSystem y PhysicsSystem esperan surfaceContactObject.
         group.userData.surfaceContactObject = body
         group.userData.surfaceUpright = true
 
@@ -225,6 +224,54 @@ export class ComponentFactory {
           label: pin.label,
           worldPos: worldPos.clone(),
         })
+      }
+
+      return results
+    }
+
+    mesh.userData.getTerminalWorldPositions = function () {
+      const results = []
+      const worldPos = new THREE.Vector3()
+
+      if (!this.terminals || !Array.isArray(this.terminals)) return results
+
+      for (const terminal of this.terminals) {
+        worldPos.copy(terminal.localPos)
+        mesh.localToWorld(worldPos)
+
+        results.push({
+          id: terminal.id,
+          label: terminal.label,
+          worldPos: worldPos.clone(),
+        })
+      }
+
+      return results
+    }
+
+    mesh.userData.getConnectionAnchors = function () {
+      const results = []
+
+      if (Array.isArray(this.terminals)) {
+        for (const terminal of this.getTerminalWorldPositions()) {
+          results.push({
+            id: terminal.id,
+            label: terminal.label,
+            kind: "terminal",
+            worldPos: terminal.worldPos.clone(),
+          })
+        }
+      }
+
+      if (Array.isArray(this.pins)) {
+        for (const pin of this.getPinWorldPositions()) {
+          results.push({
+            id: pin.id,
+            label: pin.label,
+            kind: "pin",
+            worldPos: pin.worldPos.clone(),
+          })
+        }
       }
 
       return results
