@@ -68,8 +68,8 @@ export class InteractionSystem {
     this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.045
-    this.wirePinchEndDist = 0.080
+    this.wirePinchStartDist = 0.020
+    this.wirePinchEndDist = 0.040
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -1406,14 +1406,23 @@ export class InteractionSystem {
 
       // ---------------------------
       // Wire mode: manejo especial
-      // Solo crear A cuando el pinch esté realmente cerrado
-      // y se mantenga cerrado un instante muy corto
+      // Para cables usamos SOLO thumb-tip vs index-tip
+      // para evitar activaciones falsas con las falanges
       // ---------------------------
       if (this.toolMode === "wire") {
         const hasHover = !!this.wireHoverAnchor
         const isSameHandHovering = this.wireHoverHandIndex === h.index
-        const closeEnoughForWire = dist <= this.wirePinchStartDist
-        const openedEnoughToReset = dist >= this.wirePinchEndDist
+
+        const thumbTip = this.getJointWorld(h.hand, "thumb-tip", this._tmpE)
+        const indexTip = this.getJointWorld(h.hand, "index-finger-tip", this._tmpF)
+
+        let wireDist = Infinity
+        if (thumbTip && indexTip) {
+          wireDist = thumbTip.distanceTo(indexTip)
+        }
+
+        const closeEnoughForWire = wireDist <= this.wirePinchStartDist
+        const openedEnoughToReset = wireDist >= this.wirePinchEndDist
 
         if (openedEnoughToReset) {
           h.isPinching = false
