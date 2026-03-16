@@ -71,6 +71,12 @@ export class InteractionSystem {
       hole: 2,
     }
 
+    // Draft temporal del cable
+    this.wireDraftStartAnchor = null
+    this.wireDraftHandIndex = null
+    this._wireDraftMesh = null
+    this.wireDraftRadius = 0.0032
+
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
     this._tmpC = new THREE.Vector3()
@@ -100,6 +106,7 @@ export class InteractionSystem {
 
     if (this.toolMode !== "wire") {
       this.clearWireHoverAnchor()
+      this.clearWireDraft()
     }
   }
 
@@ -580,6 +587,88 @@ export class InteractionSystem {
     marker.visible = true
   }
 
+  ensureWireDraftMesh() {
+    if (this._wireDraftMesh) return this._wireDraftMesh
+
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 10),
+      new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.85,
+        metalness: 0.05,
+      })
+    )
+    mesh.name = "WireDraftMesh"
+    mesh.visible = false
+    this.scene.add(mesh)
+
+    this._wireDraftMesh = mesh
+    return mesh
+  }
+
+  clearWireDraft() {
+    this.wireDraftStartAnchor = null
+    this.wireDraftHandIndex = null
+
+    if (this._wireDraftMesh) {
+      this._wireDraftMesh.visible = false
+    }
+  }
+
+  startWireDraftFromAnchor(anchor, handIndex) {
+    if (!anchor) return
+
+    this.wireDraftStartAnchor = {
+      ...anchor,
+      worldPos: anchor.worldPos.clone(),
+    }
+    this.wireDraftHandIndex = handIndex
+
+    const mesh = this.ensureWireDraftMesh()
+    mesh.visible = true
+  }
+
+  updateWireDraftPreview() {
+    if (this.toolMode !== "wire") {
+      this.clearWireDraft()
+      return
+    }
+
+    if (!this.wireDraftStartAnchor) {
+      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
+      return
+    }
+
+    const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
+    if (!handEntry || !this.isHandEntryTracked(handEntry)) {
+      if (this._wireDraftMesh) this._wireDraftMesh.visible = false
+      return
+    }
+
+    this.getGrabPointWorld(handEntry, this._tmpA)
+
+    const start = this.wireDraftStartAnchor.worldPos
+    const end = this._tmpA
+    const dir = this._tmpB.copy(end).sub(start)
+    const len = dir.length()
+
+    const mesh = this.ensureWireDraftMesh()
+
+    if (len < 0.002) {
+      mesh.visible = false
+      return
+    }
+
+    mesh.visible = true
+
+    const mid = this._tmpC.copy(start).add(end).multiplyScalar(0.5)
+    mesh.position.copy(mid)
+
+    dir.normalize()
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+    mesh.scale.set(1, len, 1)
+  }
+
   updateUIPoke() {
     if (this.hands.some((h) => h.heldObject)) return
 
@@ -844,7 +933,6 @@ export class InteractionSystem {
     return false
   }
 
-  //Verificar holes válidos y todo lo relacionado
   trySnapComponentPinsToHoles(object, maxDist = 0.05) {
     if (!object) return false
     if (!this.holeSystem) return false
@@ -859,7 +947,6 @@ export class InteractionSystem {
     const validMatches = matches.filter((m) => !!m.hole)
     if (validMatches.length !== object.userData.pins.length) return false
 
-    // Soporte genérico para componentes de 2 pines
     const pinA = object.userData.pins[0]
     const pinB = object.userData.pins[1]
 
@@ -875,7 +962,6 @@ export class InteractionSystem {
       [pinB.id]: matchB.hole.id,
     }
 
-    // Dirección objetivo entre holes, solo en plano horizontal
     const targetDir = new THREE.Vector3()
       .subVectors(matchB.hole.worldPos, matchA.hole.worldPos)
       .setY(0)
@@ -884,19 +970,16 @@ export class InteractionSystem {
 
     targetDir.normalize()
 
-    // Orientación horizontal correcta
     const targetYaw = Math.atan2(-targetDir.z, targetDir.x)
     object.rotation.set(0, targetYaw, 0)
     object.updateMatrixWorld(true)
 
-    // Recalcular posición del primer pin después de enderezar el componente
     const rotatedPinAWorld = new THREE.Vector3().copy(pinA.localPos)
     object.localToWorld(rotatedPinAWorld)
 
     const delta = new THREE.Vector3().subVectors(matchA.hole.worldPos, rotatedPinAWorld)
     object.position.add(delta)
 
-    // Profundidad visual de inserción
     object.position.y -= 0.02
 
     object.updateMatrixWorld(true)
@@ -922,7 +1005,6 @@ export class InteractionSystem {
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
 
-    // Si el objeto debe quedar recto sobre superficies, enderezarlo primero
     if (object.userData?.surfaceUpright) {
       const forward = new THREE.Vector3(0, 0, 1)
         .applyQuaternion(object.quaternion)
@@ -956,7 +1038,6 @@ export class InteractionSystem {
     const deltaY = targetCenterY - center.y
     object.position.y += deltaY
 
-    // Solo componentes con pines pueden snapear a holes, la batería no
     if (this.holeSystem && Array.isArray(object.userData?.pins)) {
       this.holeSystem.trySnapObject(object, 0.03)
     }
@@ -1012,8 +1093,9 @@ export class InteractionSystem {
     handEntry.openPinchMs = 0
 
     if (this.toolMode === "wire") {
-      if (this.wireHoverAnchor) {
-        console.log("Wire anchor seleccionado:", this.wireHoverAnchor)
+      if (!this.wireDraftStartAnchor && this.wireHoverAnchor) {
+        this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
+        console.log("🧵 Extremo A fijado:", this.wireHoverAnchor)
       }
       return
     }
@@ -1023,7 +1105,6 @@ export class InteractionSystem {
     if (!target) return
     if (!this.canHandGrabObject(handEntry, target)) return
 
-    // Si el componente estaba insertado, al volverlo a agarrar se desconecta
     if (target.userData?.inserted || target.userData?.pinConnections) {
       target.userData.inserted = false
       target.userData.pinConnections = null
@@ -1054,7 +1135,6 @@ export class InteractionSystem {
     handEntry.lostTrackingMs = 0
 
     if (this.toolMode === "wire") return
-
     if (!handEntry.heldObject) return
 
     const object = handEntry.heldObject
@@ -1107,7 +1187,6 @@ export class InteractionSystem {
     if (!target.userData?.componentId) return
     if (!this.isObjectFreeForGrab(target)) return
 
-    // Si el componente estaba insertado, al volverlo a agarrar se desconecta
     if (target.userData?.inserted || target.userData?.pinConnections) {
       target.userData.inserted = false
       target.userData.pinConnections = null
@@ -1341,7 +1420,6 @@ export class InteractionSystem {
     }
   }
 
-  //Borra los puntos blancos viejos para que no se queden flotando.
   clearActivePinHoleMarkers() {
     for (const marker of this._activePinHoleMarkers) {
       if (marker?.parent) marker.parent.remove(marker)
@@ -1349,7 +1427,6 @@ export class InteractionSystem {
     this._activePinHoleMarkers.length = 0
   }
 
-  //Dibuja bolas blancas y encuentra holes cercanos mientras se sostiene el objeto
   updatePinHoleMarkersForHeldObject(object) {
     this.clearActivePinHoleMarkers()
 
@@ -1389,8 +1466,10 @@ export class InteractionSystem {
       this.updateUIPoke()
       this.updateHandPinchState(dtMs)
       this.updateWireHover()
+      this.updateWireDraftPreview()
     } else {
       this.clearWireHoverAnchor()
+      this.clearWireDraft()
 
       for (const handEntry of this.hands) {
         this.forceReleaseHand(handEntry, true)
