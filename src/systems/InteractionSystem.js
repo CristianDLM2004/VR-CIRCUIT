@@ -68,8 +68,8 @@ export class InteractionSystem {
     this.wireHoverReleaseDist = 0.085
 
     // Pinch específico para cable: mucho más fácil que el grab normal
-    this.wirePinchStartDist = 0.012
-    this.wirePinchEndDist = 0.028
+    this.wirePinchStartDist = 0.016
+    this.wirePinchEndDist = 0.030
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -85,7 +85,7 @@ export class InteractionSystem {
     this.wireDraftRadius = 0.0038
 
     // Evita duplicar waypoint/cierre por un mismo gesto muy rápido
-    this.wireActionCooldownMs = 180
+    this.wireActionCooldownMs = 90
     this._lastWireActionMs = 0
 
     this._tmpA = new THREE.Vector3()
