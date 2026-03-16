@@ -654,7 +654,7 @@ export class InteractionSystem {
 
     this.wireDraftHandIndex = handIndex
     this.wireDraftWaypoints = []
-    this.wireDraftColor = this.getWireColorFromStartAnchor(anchor)
+    this.wireDraftColor = this.getWireColorFromAnchors(anchor, null)
 
     const mesh = this.ensureWireDraftMesh(0)
     if (mesh.material?.color) {
@@ -773,16 +773,26 @@ export class InteractionSystem {
     return a.componentId === b.componentId && a.id === b.id
   }
 
-  getWireColorFromStartAnchor(anchor) {
-    if (!anchor) return 0x111111
+  getWireColorFromAnchors(startAnchor, endAnchor = null) {
+    const pickBatteryColor = (anchor) => {
+      if (!anchor) return null
 
-    if (anchor.componentType === "battery5v" && anchor.id === "positive") {
-      return 0xff2a2a
+      if (anchor.componentType === "battery5v" && anchor.id === "positive") {
+        return 0xff2a2a
+      }
+
+      if (anchor.componentType === "battery5v" && anchor.id === "negative") {
+        return 0x5bc0de
+      }
+
+      return null
     }
 
-    if (anchor.componentType === "battery5v" && anchor.id === "negative") {
-      return 0x5bc0de
-    }
+    const startColor = pickBatteryColor(startAnchor)
+    if (startColor != null) return startColor
+
+    const endColor = pickBatteryColor(endAnchor)
+    if (endColor != null) return endColor
 
     return 0x111111
   }
@@ -811,7 +821,7 @@ export class InteractionSystem {
     if (points.length < 2) return false
 
     const id = this.generateComponentId("wire")
-    const wireColor = this.wireDraftColor ?? this.getWireColorFromStartAnchor(startAnchor)
+    const wireColor = this.getWireColorFromAnchors(startAnchor, endAnchor)
 
     const data = {
       id,
