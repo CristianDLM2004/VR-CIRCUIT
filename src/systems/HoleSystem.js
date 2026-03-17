@@ -26,6 +26,10 @@ export class HoleSystem {
 
     const xForCol = (colIndex) => startX + colIndex * L.centerPitchX
 
+    // Recortes visuales para que no llegue todo hasta el borde
+    const centerTrimPerSide = 1
+    const railTrimPerSide = 2
+
     // ---------------------------
     // Centro tipo protoboard real:
     // 5 filas arriba + canal + 5 filas abajo
@@ -54,7 +58,7 @@ export class HoleSystem {
       -(halfGap + pitchZ * 4),
     ]
 
-    for (let c = 0; c < L.columns; c++) {
+    for (let c = centerTrimPerSide; c < L.columns - centerTrimPerSide; c++) {
       const x = xForCol(c)
 
       // Mitad superior
@@ -107,7 +111,7 @@ export class HoleSystem {
     ]
 
     for (const rail of railDefs) {
-      for (let c = 0; c < L.columns; c++) {
+      for (let c = railTrimPerSide; c < L.columns - railTrimPerSide; c++) {
         const x = xForCol(c)
         const id = `${rail.idPrefix}-${c + 1}`
         const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, rail.z)
