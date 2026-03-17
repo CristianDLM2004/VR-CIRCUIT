@@ -63,6 +63,14 @@ export function createProtoboard(options = {}) {
   const bottomOuterZ = -halfD + layout.railInsetZ
   const bottomInnerZ = bottomOuterZ + layout.railPitchZ
 
+  // Líneas visuales colocadas en los espacios vacíos:
+  // - una entre el borde y el 1er bus
+  // - otra entre el 2do bus y la zona central
+  const topRedLineZ = topOuterZ + layout.railPitchZ * 0.5
+  const topBlueLineZ = topInnerZ - layout.railPitchZ * 0.5
+  const bottomRedLineZ = bottomInnerZ + layout.railPitchZ * 0.5
+  const bottomBlueLineZ = bottomOuterZ - layout.railPitchZ * 0.5
+
   const lineY = topYLocal + 0.0012
   const symbolY = topYLocal + 0.0014
 
@@ -113,30 +121,30 @@ export function createProtoboard(options = {}) {
     group.add(h, v)
   }
 
-  // Líneas como en una protoboard real:
+  // Líneas como en una protoboard real, pero en los espacios vacíos al lado de los buses
   // Arriba: rojo más al borde, azul hacia adentro
-  addBusLine(topOuterZ, redMat)
-  addBusLine(topInnerZ, blueMat)
+  addBusLine(topRedLineZ, redMat)
+  addBusLine(topBlueLineZ, blueMat)
 
   // Abajo: rojo hacia adentro, azul más al borde
-  addBusLine(bottomInnerZ, redMat)
-  addBusLine(bottomOuterZ, blueMat)
+  addBusLine(bottomRedLineZ, redMat)
+  addBusLine(bottomBlueLineZ, blueMat)
 
   // Símbolos a ambos extremos de cada línea
   const leftSymbolX = -halfW + 0.018
   const rightSymbolX = halfW - 0.018
 
   // Arriba
-  addPlusSymbol(leftSymbolX, topOuterZ, redMat)
-  addPlusSymbol(rightSymbolX, topOuterZ, redMat)
-  addMinusSymbol(leftSymbolX, topInnerZ, blueMat)
-  addMinusSymbol(rightSymbolX, topInnerZ, blueMat)
+  addPlusSymbol(leftSymbolX, topRedLineZ, redMat)
+  addPlusSymbol(rightSymbolX, topRedLineZ, redMat)
+  addMinusSymbol(leftSymbolX, topBlueLineZ, blueMat)
+  addMinusSymbol(rightSymbolX, topBlueLineZ, blueMat)
 
   // Abajo
-  addPlusSymbol(leftSymbolX, bottomInnerZ, redMat)
-  addPlusSymbol(rightSymbolX, bottomInnerZ, redMat)
-  addMinusSymbol(leftSymbolX, bottomOuterZ, blueMat)
-  addMinusSymbol(rightSymbolX, bottomOuterZ, blueMat)
+  addPlusSymbol(leftSymbolX, bottomRedLineZ, redMat)
+  addPlusSymbol(rightSymbolX, bottomRedLineZ, redMat)
+  addMinusSymbol(leftSymbolX, bottomBlueLineZ, blueMat)
+  addMinusSymbol(rightSymbolX, bottomBlueLineZ, blueMat)
 
   // El mesh “surface” para snap será el base
   const surfaceMesh = base
