@@ -43,7 +43,7 @@ export function createProtoboard(options = {}) {
     // Centro
     columns: 30,
     centerRowsPerHalf: 5,
-    centerPitchX: 0.0265,
+    centerPitchX: 0.015,
     centerPitchZ: 0.015,
     centerGapZ: 0.042,
 
