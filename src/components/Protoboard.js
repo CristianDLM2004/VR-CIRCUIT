@@ -41,7 +41,7 @@ export function createProtoboard(options = {}) {
     topYLocal,
 
     // Centro
-    columns: 30,
+    columns: 60,
     centerRowsPerHalf: 5,
     centerPitchX: 0.015,
     centerPitchZ: 0.015,
