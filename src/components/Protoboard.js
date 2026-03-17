@@ -29,36 +29,34 @@ export function createProtoboard(options = {}) {
   // Top surface Y (en local)
   const topYLocal = height / 2
 
-  // Layout simple de holes (placeholder):
-  // Dos bloques centrales (izq/der) con canal al centro + dos rails arriba/abajo.
-  // No es 100% realista aún; lo suficiente para snap + nodos después.
+  // Layout más cercano a una protoboard real:
+  // - 30 columnas a lo largo
+  // - bloque central dividido en dos mitades horizontales (5 filas arriba y 5 abajo)
+  // - canal central horizontal
+  // - 2 rails arriba y 2 abajo
   const layout = {
     width,
     depth,
     height,
     topYLocal,
 
-    // márgenes internos
-    marginX: 0.06,
-    marginZ: 0.03,
+    // Centro
+    columns: 30,
+    centerRowsPerHalf: 5,
+    centerPitchX: 0.0265,
+    centerPitchZ: 0.015,
+    centerGapZ: 0.042,
 
-    // canal central (sin holes)
-    centerGap: 0.04,
+    // Rails
+    railRowsPerSide: 2,
+    railPitchZ: 0.015,
+    railInsetZ: 0.026,
 
-    // separaciones
-    pitchX: 0.015, // distancia entre columnas
-    pitchZ: 0.015, // distancia entre filas
-
-    // dimensiones de bloques
-    colsPerSide: 15, // 15 columnas por lado (placeholder)
-    rowsCenter: 10,  // 10 filas en el bloque central (placeholder)
-
-    // rails
-    railsRows: 2,    // 2 filas de rail arriba, 2 abajo (en total 4)
-    railOffsetZ: 0.11, // qué tan lejos del centro
+    // Margen lateral para dejar "marco" visual
+    sideMarginX: 0.06,
   }
 
-  // El mesh “surface” para snap (Layer 2) será el base.
+  // El mesh “surface” para snap será el base
   const surfaceMesh = base
 
   return { group, surfaceMesh, layout }

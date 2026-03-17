@@ -16,77 +16,66 @@ export class HoleSystem {
     this.holes.length = 0
 
     const L = this.layout
-    const halfW = L.width / 2
     const halfD = L.depth / 2
 
-    const usableLeftX = -halfW + L.marginX
-    const usableRightX = halfW - L.marginX
+    // ---------------------------
+    // Eje X: 30 columnas a lo largo de toda la protoboard
+    // ---------------------------
+    const totalCenterSpanX = (L.columns - 1) * L.centerPitchX
+    const startX = -totalCenterSpanX / 2
 
-    // Centro (canal)
-    const gapHalf = L.centerGap / 2
+    const xForCol = (colIndex) => startX + colIndex * L.centerPitchX
 
-    // Definimos dos rangos: lado izquierdo y lado derecho (evitando el gap central)
-    const leftMaxX = -gapHalf
-    const rightMinX = gapHalf
+    // ---------------------------
+    // Centro tipo protoboard real:
+    // 5 filas arriba + canal + 5 filas abajo
+    // Conexión eléctrica por columna de 5 holes
+    // ---------------------------
+    const halfGap = L.centerGapZ / 2
+    const pitchZ = L.centerPitchZ
 
-    // Z: bloque central alrededor de 0
-    const centerMinZ = -(L.rowsCenter - 1) / 2 * L.pitchZ
-    const centerMaxZ = +(L.rowsCenter - 1) / 2 * L.pitchZ
-
-    // --- Bloques centrales (izq y der) ---
-    const makeCenterBlock = (sideName, xStart, xDir) => {
-      for (let c = 0; c < L.colsPerSide; c++) {
-        const x = xStart + xDir * c * L.pitchX
-
-        // hard clamp a área usable
-        if (x < usableLeftX || x > usableRightX) continue
-        if (sideName === "L" && x > leftMaxX) continue
-        if (sideName === "R" && x < rightMinX) continue
-
-        for (let r = 0; r < L.rowsCenter; r++) {
-          const z = centerMinZ + r * L.pitchZ
-          if (z < -halfD + L.marginZ || z > halfD - L.marginZ) continue
-
-          const id = `${sideName}${r + 1}-${c + 1}`
-          const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, z)
-
-          // groupKey placeholder para nodos eléctricos después
-          // (ej. tiras de 5 por fila). Por ahora agrupamos por r y lado.
-          const groupKey = `CENTER_${sideName}_ROW_${r + 1}`
-
-          this.holes.push({
-            id,
-            localPos,
-            worldPos: localPos.clone(),
-            groupKey,
-          })
-        }
-      }
-    }
-
-    // Lado izquierdo: de cerca del gap hacia la izquierda
-    makeCenterBlock("L", -gapHalf - L.pitchX, -1)
-    // Lado derecho: de cerca del gap hacia la derecha
-    makeCenterBlock("R", gapHalf + L.pitchX, +1)
-
-    // --- Rails (arriba y abajo) ---
-    // Dos filas arriba y dos abajo (placeholder)
-    const railZs = [
-      +L.railOffsetZ,
-      +L.railOffsetZ + L.pitchZ,
-      -L.railOffsetZ,
-      -L.railOffsetZ - L.pitchZ,
+    // Parte superior del bloque central (f..j)
+    const topRowLabels = ["f", "g", "h", "i", "j"]
+    const topRowZs = [
+      halfGap + pitchZ * 0,
+      halfGap + pitchZ * 1,
+      halfGap + pitchZ * 2,
+      halfGap + pitchZ * 3,
+      halfGap + pitchZ * 4,
     ]
 
-    const railCols = Math.floor((L.width - 2 * L.marginX) / L.pitchX)
+    // Parte inferior del bloque central (a..e)
+    const bottomRowLabels = ["e", "d", "c", "b", "a"]
+    const bottomRowZs = [
+      -(halfGap + pitchZ * 0),
+      -(halfGap + pitchZ * 1),
+      -(halfGap + pitchZ * 2),
+      -(halfGap + pitchZ * 3),
+      -(halfGap + pitchZ * 4),
+    ]
 
-    for (let railRow = 0; railRow < railZs.length; railRow++) {
-      const z = railZs[railRow]
-      for (let c = 0; c < railCols; c++) {
-        const x = usableLeftX + c * L.pitchX
-        const id = `RAIL${railRow + 1}-${c + 1}`
-        const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, z)
-        const groupKey = `RAIL_${railRow + 1}`
+    for (let c = 0; c < L.columns; c++) {
+      const x = xForCol(c)
+
+      // Mitad superior
+      for (let r = 0; r < topRowLabels.length; r++) {
+        const id = `${topRowLabels[r]}${c + 1}`
+        const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, topRowZs[r])
+        const groupKey = `CENTER_TOP_COL_${c + 1}`
+
+        this.holes.push({
+          id,
+          localPos,
+          worldPos: localPos.clone(),
+          groupKey,
+        })
+      }
+
+      // Mitad inferior
+      for (let r = 0; r < bottomRowLabels.length; r++) {
+        const id = `${bottomRowLabels[r]}${c + 1}`
+        const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, bottomRowZs[r])
+        const groupKey = `CENTER_BOTTOM_COL_${c + 1}`
 
         this.holes.push({
           id,
@@ -96,10 +85,44 @@ export class HoleSystem {
         })
       }
     }
+
+    // ---------------------------
+    // Rails: 2 arriba y 2 abajo
+    // Conexión eléctrica por fila completa
+    // Distribución visual tipo protoboard real:
+    // arriba: (-) y (+)
+    // abajo: (-) y (+)
+    // ---------------------------
+    const topOuterZ = halfD - L.railInsetZ
+    const topInnerZ = topOuterZ - L.railPitchZ
+
+    const bottomOuterZ = -halfD + L.railInsetZ
+    const bottomInnerZ = bottomOuterZ + L.railPitchZ
+
+    const railDefs = [
+      { idPrefix: "TNEG", z: topOuterZ, groupKey: "RAIL_TOP_NEG" },
+      { idPrefix: "TPOS", z: topInnerZ, groupKey: "RAIL_TOP_POS" },
+      { idPrefix: "BNEG", z: bottomInnerZ, groupKey: "RAIL_BOTTOM_NEG" },
+      { idPrefix: "BPOS", z: bottomOuterZ, groupKey: "RAIL_BOTTOM_POS" },
+    ]
+
+    for (const rail of railDefs) {
+      for (let c = 0; c < L.columns; c++) {
+        const x = xForCol(c)
+        const id = `${rail.idPrefix}-${c + 1}`
+        const localPos = new THREE.Vector3(x, L.topYLocal + 0.001, rail.z)
+
+        this.holes.push({
+          id,
+          localPos,
+          worldPos: localPos.clone(),
+          groupKey: rail.groupKey,
+        })
+      }
+    }
   }
 
   updateWorldPositions() {
-    // Asegura matrices
     this.protoboardGroup.updateMatrixWorld(true)
 
     for (const h of this.holes) {
@@ -111,7 +134,7 @@ export class HoleSystem {
   /**
    * Encuentra el hole más cercano a una posición mundo.
    * @param {THREE.Vector3} worldPos
-   * @param {number} maxDist (metros)
+   * @param {number} maxDist
    */
   getNearestHole(worldPos, maxDist = 0.03) {
     let best = null
@@ -124,57 +147,55 @@ export class HoleSystem {
         best = h
       }
     }
+
     return best
   }
 
-  //Detectar holes cercanos (creo xd)
   getNearestHolesForPins(pinWorldPositions, maxDist = 0.03) {
-  if (!Array.isArray(pinWorldPositions) || pinWorldPositions.length === 0) return []
+    if (!Array.isArray(pinWorldPositions) || pinWorldPositions.length === 0) return []
 
-  // refresca world positions por si el protoboard se moviera
-  this.updateWorldPositions()
+    this.updateWorldPositions()
 
-  const results = []
-  const usedHoleIds = new Set()
+    const results = []
+    const usedHoleIds = new Set()
 
-  for (const pin of pinWorldPositions) {
-    let best = null
-    let bestD2 = maxDist * maxDist
+    for (const pin of pinWorldPositions) {
+      let best = null
+      let bestD2 = maxDist * maxDist
 
-    for (const hole of this.holes) {
-      if (usedHoleIds.has(hole.id)) continue
+      for (const hole of this.holes) {
+        if (usedHoleIds.has(hole.id)) continue
 
-      const d2 = hole.worldPos.distanceToSquared(pin.worldPos)
-      if (d2 < bestD2) {
-        bestD2 = d2
-        best = hole
+        const d2 = hole.worldPos.distanceToSquared(pin.worldPos)
+        if (d2 < bestD2) {
+          bestD2 = d2
+          best = hole
+        }
+      }
+
+      if (best) {
+        usedHoleIds.add(best.id)
+
+        results.push({
+          pinId: pin.id,
+          pinLabel: pin.label,
+          pinWorldPos: pin.worldPos.clone(),
+          hole: best,
+          distance: Math.sqrt(bestD2),
+        })
+      } else {
+        results.push({
+          pinId: pin.id,
+          pinLabel: pin.label,
+          pinWorldPos: pin.worldPos.clone(),
+          hole: null,
+          distance: null,
+        })
       }
     }
 
-    if (best) {
-      usedHoleIds.add(best.id)
-
-      results.push({
-        pinId: pin.id,
-        pinLabel: pin.label,
-        pinWorldPos: pin.worldPos.clone(),
-        hole: best,
-        distance: Math.sqrt(bestD2),
-      })
-    } else {
-      results.push({
-        pinId: pin.id,
-        pinLabel: pin.label,
-        pinWorldPos: pin.worldPos.clone(),
-        hole: null,
-        distance: null,
-      })
-    }
+    return results
   }
-
-  return results
-}
-  
 
   /**
    * Intenta snapear un objeto a un hole cercano (solo XZ).
@@ -183,7 +204,6 @@ export class HoleSystem {
   trySnapObject(object, maxDist = 0.03) {
     if (!object) return false
 
-    // refresca world positions por si el protoboard se moviera
     this.updateWorldPositions()
 
     const pos = object.position
