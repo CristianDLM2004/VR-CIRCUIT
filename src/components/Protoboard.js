@@ -66,10 +66,10 @@ export function createProtoboard(options = {}) {
   // Líneas visuales colocadas en los espacios vacíos:
   // - una entre el borde y el 1er bus
   // - otra entre el 2do bus y la zona central
-  const topRedLineZ = topOuterZ + layout.railPitchZ * 0.5
-  const topBlueLineZ = topInnerZ - layout.railPitchZ * 0.5
-  const bottomRedLineZ = bottomInnerZ + layout.railPitchZ * 0.5
-  const bottomBlueLineZ = bottomOuterZ - layout.railPitchZ * 0.5
+  const topRedLineZ = topOuterZ + layout.railPitchZ * 1.5
+  const topBlueLineZ = topInnerZ - layout.railPitchZ * 1.5
+  const bottomRedLineZ = bottomInnerZ + layout.railPitchZ * 1.5
+  const bottomBlueLineZ = bottomOuterZ - layout.railPitchZ * 1.5
 
   const lineY = topYLocal + 0.0012
   const symbolY = topYLocal + 0.0014
