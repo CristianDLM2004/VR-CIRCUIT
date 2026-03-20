@@ -31,8 +31,6 @@ export class InteractionSystem {
     this.nearRadius = 0.145
 
     // Pulido final de agarre por manos:
-    // - tolerancia real para esquinas/caras
-    // - sin volver a capturar desde muy lejos
     this.handGrabSurfaceMaxDist = 0.050
     this.handGrabSurfaceSlack = 0.030
     this.handHoverSurfaceMaxDist = 0.065
@@ -69,12 +67,16 @@ export class InteractionSystem {
     this.wireHoverMaxDist = 0.055
     this.wireHoverReleaseDist = 0.085
 
-    // Hover de endpoints de cables: más corto para no estorbar
+    // Hover de endpoints de cables
     this.wireEndpointHoverMaxDist = 0.020
 
-    // Pinch específico para cable: mucho más fácil que el grab normal
+    // Pinch específico para cable (manos)
     this.wirePinchStartDist = 0.016
     this.wirePinchEndDist = 0.030
+
+    // Radio de hover para wire mode con controles
+    // (distancia al punto de impacto del ray)
+    this.wireControllerAnchorRadius = 0.060
 
     this.wireAnchorPriority = {
       terminal: 0,
@@ -84,11 +86,15 @@ export class InteractionSystem {
 
     // Draft temporal del cable
     this.wireDraftStartAnchor = null
-    this.wireDraftHandIndex = null
+    this.wireDraftHandIndex = null   // para manos: 0 o 1; para controles: "ctrl_0" o "ctrl_1"
     this.wireDraftWaypoints = []
     this.wireDraftColor = 0x111111
     this._wireDraftMeshes = []
     this.wireDraftRadius = 0.0038
+
+    // Estado de hover de wire para controles
+    // { anchor, endpoint, controllerIndex }
+    this._controllerWireHover = null
 
     // Evita duplicar waypoint/cierre por un mismo gesto muy rápido
     this.wireActionCooldownMs = 90
@@ -128,6 +134,7 @@ export class InteractionSystem {
     if (this.toolMode !== "wire") {
       this.clearWireHoverAnchor()
       this.clearWireDraft()
+      this._controllerWireHover = null
     }
   }
 
@@ -542,6 +549,171 @@ export class InteractionSystem {
     }
   }
 
+  // ---------------------------
+  // Wire hover para controles
+  // Usa el ray del controlador para obtener el hit point
+  // y busca el anchor más cercano dentro de wireControllerAnchorRadius
+  // ---------------------------
+  getControllerRayHitPoint(controller, out) {
+    this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
+    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
+
+    // Intersectar con todos los interactables y superficies para obtener punto de impacto
+    const allMeshes = [
+      ...this.interactables,
+      ...this.surfaces.map((s) => s.mesh),
+    ]
+
+    const hits = this.raycaster.intersectObjects(allMeshes, true)
+
+    if (hits.length > 0) {
+      out.copy(hits[0].point)
+      return true
+    }
+
+    // Si no hay impacto, usar punto a 0.5m en la dirección del ray
+    out.copy(this.raycaster.ray.direction).multiplyScalar(0.5).add(this.raycaster.ray.origin)
+    return false
+  }
+
+  findBestWireAnchorForController(controller, maxDist = this.wireControllerAnchorRadius) {
+    if (!controller) return null
+    if (controller.userData?.heldObject) return null
+
+    const hitPoint = this._tmpC.clone()
+    this.getControllerRayHitPoint(controller, hitPoint)
+
+    const anchors = this.getAllConnectionAnchors()
+    let best = null
+    let bestDist = maxDist
+
+    for (const anchor of anchors) {
+      const d = anchor.worldPos.distanceTo(hitPoint)
+      if (d > bestDist) continue
+
+      if (!best) {
+        best = anchor
+        bestDist = d
+        continue
+      }
+
+      const bestPriority = this.wireAnchorPriority[best.kind] ?? 999
+      const candidatePriority = this.wireAnchorPriority[anchor.kind] ?? 999
+
+      if (d < bestDist - 0.001) {
+        best = anchor
+        bestDist = d
+      } else if (Math.abs(d - bestDist) <= 0.001 && candidatePriority < bestPriority) {
+        best = anchor
+        bestDist = d
+      }
+    }
+
+    if (!best) return null
+
+    return {
+      ...best,
+      distance: bestDist,
+      controllerIndex: controller.userData.sourceIndex,
+    }
+  }
+
+  findBestWireEndpointForController(controller, maxDist = this.wireEndpointHoverMaxDist) {
+    if (!controller) return null
+    if (!this.stateSyncSystem) return null
+    if (this.wireDraftStartAnchor) return null
+
+    const hitPoint = this._tmpC.clone()
+    this.getControllerRayHitPoint(controller, hitPoint)
+
+    // Para endpoints usamos un radio algo mayor que para manos
+    // ya que el control del ray es menos preciso que el dedo
+    const controllerEndpointRadius = Math.max(maxDist, 0.045)
+
+    const endpoints = this.getAllWireEndpoints()
+    let best = null
+    let bestDist = controllerEndpointRadius
+
+    for (const endpoint of endpoints) {
+      const d = endpoint.worldPos.distanceTo(hitPoint)
+      if (d > bestDist) continue
+      best = endpoint
+      bestDist = d
+    }
+
+    if (!best) return null
+
+    return {
+      ...best,
+      distance: bestDist,
+      controllerIndex: controller.userData.sourceIndex,
+    }
+  }
+
+  // Actualiza el hover de wire para controles y mueve el marker
+  updateControllerWireHover() {
+    if (this.toolMode !== "wire") {
+      this._controllerWireHover = null
+      return
+    }
+
+    let bestAnchor = null
+    let bestEndpoint = null
+    let bestControllerIndex = -1
+
+    for (const controller of this.controllers) {
+      const anchorCandidate = this.findBestWireAnchorForController(controller)
+      const endpointCandidate = this.findBestWireEndpointForController(controller)
+
+      if (!this.wireDraftStartAnchor) {
+        if (anchorCandidate && endpointCandidate) {
+          if (endpointCandidate.distance <= anchorCandidate.distance) {
+            bestEndpoint = endpointCandidate
+            bestControllerIndex = controller.userData.sourceIndex
+          } else {
+            bestAnchor = anchorCandidate
+            bestControllerIndex = controller.userData.sourceIndex
+          }
+        } else if (endpointCandidate) {
+          bestEndpoint = endpointCandidate
+          bestControllerIndex = controller.userData.sourceIndex
+        } else if (anchorCandidate) {
+          bestAnchor = anchorCandidate
+          bestControllerIndex = controller.userData.sourceIndex
+        }
+      } else {
+        // Con draft activo solo anchors normales
+        if (anchorCandidate && (!bestAnchor || anchorCandidate.distance < bestAnchor.distance)) {
+          bestAnchor = anchorCandidate
+          bestControllerIndex = controller.userData.sourceIndex
+        }
+      }
+
+      if (bestAnchor || bestEndpoint) break
+    }
+
+    if (!bestAnchor && !bestEndpoint) {
+      this._controllerWireHover = null
+      // No ocultar el marker aquí — lo maneja updateWireHover general
+      return
+    }
+
+    this._controllerWireHover = {
+      anchor: bestAnchor || null,
+      endpoint: bestEndpoint || null,
+      controllerIndex: bestControllerIndex,
+    }
+
+    // Mover el marker al anchor/endpoint encontrado
+    const targetPos = bestAnchor?.worldPos || bestEndpoint?.worldPos
+    if (targetPos) {
+      const marker = this.ensureWireHoverMarker()
+      marker.position.copy(targetPos)
+      marker.visible = true
+    }
+  }
+
   ensureWireHoverMarker() {
     if (this._wireHoverMarker) return this._wireHoverMarker
 
@@ -581,10 +753,6 @@ export class InteractionSystem {
       const endpointCandidate = this.findBestWireEndpointForHand(handEntry)
 
       if (!this.wireDraftStartAnchor) {
-        // Sin draft:
-        // - endpoints con rango corto
-        // - anchors normales con rango normal
-        // - si ambos existen, gana el más cercano de verdad
         if (anchorCandidate && endpointCandidate) {
           if (endpointCandidate.distance <= anchorCandidate.distance) {
             best = endpointCandidate
@@ -601,7 +769,6 @@ export class InteractionSystem {
           bestType = "anchor"
         }
       } else {
-        // Con draft activo, ignorar endpoints de wires
         if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
           best = anchorCandidate
           bestType = "anchor"
@@ -692,7 +859,7 @@ export class InteractionSystem {
     }
   }
 
-  startWireDraftFromAnchor(anchor, handIndex) {
+  startWireDraftFromAnchor(anchor, draftOwner) {
     if (!anchor) return
 
     this.wireDraftStartAnchor = {
@@ -700,7 +867,8 @@ export class InteractionSystem {
       worldPos: anchor.worldPos.clone(),
     }
 
-    this.wireDraftHandIndex = handIndex
+    // draftOwner puede ser número (handIndex) o string ("ctrl_0", "ctrl_1")
+    this.wireDraftHandIndex = draftOwner
     this.wireDraftWaypoints = []
     this.wireDraftColor = this.getWireColorFromAnchors(anchor, null)
 
@@ -741,6 +909,30 @@ export class InteractionSystem {
     if (lastPoint.distanceTo(newPoint) < 0.015) return false
 
     this.wireDraftWaypoints.push(newPoint)
+    return true
+  }
+
+  // Agregar waypoint desde un controlador (usa hit point del ray)
+  addWireWaypointFromController(controller) {
+    if (!controller) return false
+    if (!this.wireDraftStartAnchor) return false
+
+    const ownerKey = `ctrl_${controller.userData.sourceIndex}`
+    if (this.wireDraftHandIndex !== ownerKey) return false
+    if (!this.canRunWireAction()) return false
+
+    const hitPoint = new THREE.Vector3()
+    this.getControllerRayHitPoint(controller, hitPoint)
+
+    const points = [
+      this.wireDraftStartAnchor.worldPos,
+      ...this.wireDraftWaypoints,
+    ]
+
+    const lastPoint = points[points.length - 1]
+    if (lastPoint.distanceTo(hitPoint) < 0.015) return false
+
+    this.wireDraftWaypoints.push(hitPoint)
     return true
   }
 
@@ -845,11 +1037,10 @@ export class InteractionSystem {
     return 0x111111
   }
 
-  finalizeWireDraftToAnchor(endAnchor, handEntry) {
+  finalizeWireDraftToAnchor(endAnchor, draftOwner) {
     if (!endAnchor) return false
-    if (!handEntry) return false
     if (!this.wireDraftStartAnchor) return false
-    if (this.wireDraftHandIndex !== handEntry.index) return false
+    if (this.wireDraftHandIndex !== draftOwner) return false
     if (!this.stateSyncSystem) return false
     if (!this.canRunWireAction()) return false
 
@@ -900,10 +1091,7 @@ export class InteractionSystem {
 
     this.clearWireDraft()
     this.clearWireHoverAnchor()
-
-    handEntry.isPinching = true
-    handEntry.pinchArmed = false
-    handEntry.wirePinchCloseMs = 0
+    this._controllerWireHover = null
 
     console.log("✅ Cable cerrado entre A y B")
     return true
@@ -1040,9 +1228,8 @@ export class InteractionSystem {
     return true
   }
 
-  reopenWireFromEndEndpoint(endpoint, handEntry) {
+  reopenWireFromEndEndpoint(endpoint, draftOwner) {
     if (!endpoint || endpoint.endpointType !== "end") return false
-    if (!handEntry) return false
     if (!this.stateSyncSystem) return false
 
     const wireMesh = this.stateSyncSystem.getMeshById(endpoint.wireId)
@@ -1066,7 +1253,7 @@ export class InteractionSystem {
         fixedPoints[0].clone(),
     }
 
-    this.wireDraftHandIndex = handEntry.index
+    this.wireDraftHandIndex = draftOwner
     this.wireDraftWaypoints = waypoints
     this.wireDraftColor = wireMesh.userData.wireColor ?? 0x111111
 
@@ -1077,10 +1264,7 @@ export class InteractionSystem {
     mesh.visible = true
 
     this.clearWireHoverAnchor()
-
-    handEntry.isPinching = true
-    handEntry.pinchArmed = false
-    handEntry.wirePinchCloseMs = 0
+    this._controllerWireHover = null
 
     return true
   }
@@ -1128,16 +1312,40 @@ export class InteractionSystem {
       return
     }
 
-    const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
-    if (!handEntry || !this.isHandEntryTracked(handEntry)) {
+    // Determinar si el draft es de mano o de controlador
+    const isControllerDraft =
+      typeof this.wireDraftHandIndex === "string" &&
+      this.wireDraftHandIndex.startsWith("ctrl_")
+
+    let liveEnd = null
+
+    if (isControllerDraft) {
+      const ctrlIndex = parseInt(this.wireDraftHandIndex.replace("ctrl_", ""), 10)
+      const controller = this.controllers[ctrlIndex]
+      if (controller) {
+        const hitPoint = new THREE.Vector3()
+        this.getControllerRayHitPoint(controller, hitPoint)
+        liveEnd = hitPoint
+      }
+    } else {
+      const handEntry = this.hands.find((h) => h.index === this.wireDraftHandIndex)
+      if (!handEntry || !this.isHandEntryTracked(handEntry)) {
+        for (const mesh of this._wireDraftMeshes) {
+          if (mesh) mesh.visible = false
+        }
+        return
+      }
+
+      this.getGrabPointWorld(handEntry, this._tmpA)
+      liveEnd = this._tmpA.clone()
+    }
+
+    if (!liveEnd) {
       for (const mesh of this._wireDraftMeshes) {
         if (mesh) mesh.visible = false
       }
       return
     }
-
-    this.getGrabPointWorld(handEntry, this._tmpA)
-    const liveEnd = this._tmpA.clone()
 
     const points = this.getWireDraftPoints(liveEnd)
 
@@ -1593,10 +1801,6 @@ export class InteractionSystem {
         !!this.wireHoverEndpoint &&
         this.wireHoverHandIndex === handEntry.index
 
-      // Si no hay draft activo:
-      // - endpoint start => borrar cable
-      // - endpoint end => reabrir para recolocar B
-      // - anchor normal => iniciar punto A
       if (!this.wireDraftStartAnchor) {
         if (hoverIsWireEndpoint) {
           if (!this.canRunWireAction()) return
@@ -1614,7 +1818,10 @@ export class InteractionSystem {
           }
 
           if (this.wireHoverEndpoint.endpointType === "end") {
-            const reopened = this.reopenWireFromEndEndpoint(this.wireHoverEndpoint, handEntry)
+            const reopened = this.reopenWireFromEndEndpoint(
+              this.wireHoverEndpoint,
+              handEntry.index
+            )
             if (reopened) {
               console.log("↩️ Cable reabierto desde el punto B para recolocarlo")
             }
@@ -1624,26 +1831,22 @@ export class InteractionSystem {
 
         if (hoverIsValidAnchor && this.canRunWireAction()) {
           this.startWireDraftFromAnchor(this.wireHoverAnchor, handEntry.index)
-          console.log("🟢 Punto A del cable iniciado:", this.wireHoverAnchor)
+          console.log("🟢 Punto A del cable iniciado (mano):", this.wireHoverAnchor)
         }
         return
       }
 
-      // Si el draft pertenece a otra mano, ignorar
       if (this.wireDraftHandIndex !== handEntry.index) return
 
-      // Si ya hay draft:
-      // - hover válido => cerrar en B
-      // - sin hover => agregar waypoint
       if (hoverIsValidAnchor) {
-        const closed = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, handEntry)
+        const closed = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, handEntry.index)
         if (closed) {
-          console.log("🔌 Punto B conectado:", this.wireHoverAnchor)
+          console.log("🔌 Punto B conectado (mano):", this.wireHoverAnchor)
         }
       } else {
         const added = this.addWireWaypointFromHand(handEntry)
         if (added) {
-          console.log("〰️ Waypoint agregado al cable")
+          console.log("〰️ Waypoint agregado al cable (mano)")
         }
       }
 
@@ -1719,11 +1922,81 @@ export class InteractionSystem {
     this.onHandPinchEnd(handEntry, { forceZeroVelocity })
   }
 
+  // ---------------------------
+  // onControllerSelectStart: ahora soporta wire mode
+  // ---------------------------
   onControllerSelectStart(event) {
     const controller = event.target
     if (!controller) return
+
+    // ── WIRE MODE ──────────────────────────────────────────────
+    if (this.toolMode === "wire") {
+      if (!this.canRunWireAction()) return
+
+      const ctrlIndex = controller.userData.sourceIndex
+      const ownerKey = `ctrl_${ctrlIndex}`
+      const hover = this._controllerWireHover
+
+      // Solo actuar si el hover pertenece a este controlador
+      const hoverIsForThisCtrl = hover?.controllerIndex === ctrlIndex
+
+      if (!this.wireDraftStartAnchor) {
+        // Sin draft activo
+        if (hoverIsForThisCtrl && hover.endpoint) {
+          // Endpoint hover → borrar o reabrir
+          if (hover.endpoint.endpointType === "start") {
+            const deleted = this.deleteWireById(hover.endpoint.wireId)
+            if (deleted) {
+              console.log("🗑️ Cable eliminado desde el punto A (control)")
+              this._controllerWireHover = null
+            }
+            return
+          }
+
+          if (hover.endpoint.endpointType === "end") {
+            const reopened = this.reopenWireFromEndEndpoint(hover.endpoint, ownerKey)
+            if (reopened) {
+              console.log("↩️ Cable reabierto desde el punto B (control)")
+            }
+            return
+          }
+        }
+
+        if (hoverIsForThisCtrl && hover.anchor) {
+          // Anchor hover → iniciar punto A
+          this.startWireDraftFromAnchor(hover.anchor, ownerKey)
+          this._controllerWireHover = null
+          console.log("🟢 Punto A del cable iniciado (control):", hover.anchor)
+          return
+        }
+
+        // Sin hover → no hacer nada (no se agregan waypoints sin anchor en modo inicio)
+        return
+      }
+
+      // Con draft activo
+      if (this.wireDraftHandIndex !== ownerKey) return
+
+      if (hoverIsForThisCtrl && hover?.anchor) {
+        // Anchor hover → cerrar en punto B
+        const closed = this.finalizeWireDraftToAnchor(hover.anchor, ownerKey)
+        if (closed) {
+          console.log("🔌 Punto B conectado (control):", hover.anchor)
+          this._controllerWireHover = null
+        }
+      } else {
+        // Sin hover → agregar waypoint en el hit point del ray
+        const added = this.addWireWaypointFromController(controller)
+        if (added) {
+          console.log("〰️ Waypoint agregado al cable (control)")
+        }
+      }
+
+      return
+    }
+
+    // ── GRAB MODE ──────────────────────────────────────────────
     if (controller.userData?.heldObject) return
-    if (this.toolMode === "wire") return
 
     const target = this.computeControllerHoverFor(controller)
     if (!target) return
@@ -1758,7 +2031,12 @@ export class InteractionSystem {
 
   onControllerSelectEnd(event) {
     const controller = event?.target
-    if (!controller?.userData?.heldObject) return
+    if (!controller) return
+
+    // En wire mode no hay objeto agarrado que soltar
+    if (this.toolMode === "wire") return
+
+    if (!controller.userData?.heldObject) return
 
     const object = controller.userData.heldObject
 
@@ -1947,14 +2225,6 @@ export class InteractionSystem {
         h.pinchArmed = true
       }
 
-      // ---------------------------
-      // Wire mode: manejo especial
-      // Permite:
-      // - iniciar en anchor válido
-      // - agregar waypoint en el aire
-      // - borrar desde endpoint A
-      // - reabrir desde endpoint B
-      // ---------------------------
       if (this.toolMode === "wire") {
         const hasAnchorHover = !!this.wireHoverAnchor
         const hasEndpointHover = !!this.wireHoverEndpoint
@@ -2070,17 +2340,39 @@ export class InteractionSystem {
     this.updateControllerRays(!handsActive)
 
     if (handsActive) {
+      // Manos activas: usar lógica de hand tracking
       this.updateUIPoke()
       this.updateHandPinchState(dtMs)
       this.updateWireHover()
       this.updateWireDraftPreview()
+      // Limpiar hover de controles cuando hay manos
+      this._controllerWireHover = null
     } else {
+      // Controles activos: mantener wire draft si está en progreso
+      // Solo limpiar hover de manos
       this.clearWireHoverAnchor()
-      this.clearWireDraft()
+
+      // Si hay un draft de mano activo y cambiamos a controles, limpiarlo
+      // Solo limpiar si el draft era de mano (número entero como índice)
+      if (
+        this.wireDraftStartAnchor &&
+        typeof this.wireDraftHandIndex === "number"
+      ) {
+        this.clearWireDraft()
+      }
 
       for (const handEntry of this.hands) {
         this.forceReleaseHand(handEntry, true)
         handEntry.pinchArmed = true
+      }
+
+      // Actualizar hover de wire para controles
+      if (this.toolMode === "wire") {
+        this.updateControllerWireHover()
+        this.updateWireDraftPreview()
+      } else {
+        this._controllerWireHover = null
+        if (this._wireHoverMarker) this._wireHoverMarker.visible = false
       }
     }
 
