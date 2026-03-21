@@ -67,10 +67,9 @@ export class InteractionSystem {
     this.wirePinchStartDist = 0.016
     this.wirePinchEndDist = 0.030
 
-    // Radio 3D para terminales y pines de componentes con controlador
+    // Radio 3D para terminales y pines
     this.wireControllerAnchorRadius = 0.055
-    // Radio XZ para holes de protoboard con controlador
-    // (mayor porque el ray llega en ángulo y el hit point puede estar lejos en Y)
+    // Radio XZ para holes (ignora diferencia de altura por ángulo del ray)
     this.wireControllerHoleRadiusXZ = 0.025
 
     this.wireAnchorPriority = {
@@ -80,7 +79,6 @@ export class InteractionSystem {
     }
 
     this.wireDraftStartAnchor = null
-    // wireDraftOwner: número (hand index) o string "ctrl_0"/"ctrl_1"
     this.wireDraftOwner = null
     this.wireDraftWaypoints = []
     this.wireDraftColor = 0x111111
@@ -378,7 +376,6 @@ export class InteractionSystem {
     return null
   }
 
-  // Rays: siempre visibles con controles, ocultos con manos
   updateControllerRays(handsActive) {
     for (const r of this.controllerRays) {
       if (handsActive) {
@@ -454,7 +451,6 @@ export class InteractionSystem {
     return out
   }
 
-  // Hit point del ray sobre cualquier superficie o componente
   getControllerRayHitPoint(controller, out) {
     this.tempMatrix.identity().extractRotation(controller.matrixWorld)
     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
@@ -476,9 +472,6 @@ export class InteractionSystem {
     return false
   }
 
-  // ---------------------------
-  // Wire mode helpers
-  // ---------------------------
   getAllConnectionAnchors() {
     const anchors = []
 
@@ -517,8 +510,6 @@ export class InteractionSystem {
     return anchors
   }
 
-  // Busca el mejor anchor cerca de un punto mundo en 3D
-  // Para holes usa distancia XZ (ignora Y) porque el ray llega en ángulo
   findBestAnchorNearPoint(point, maxDist3D, maxDistXZForHoles = this.wireControllerHoleRadiusXZ) {
     const anchors = this.getAllConnectionAnchors()
     let best = null
@@ -528,19 +519,16 @@ export class InteractionSystem {
       let dist
 
       if (anchor.kind === "hole") {
-        // Distancia solo en XZ para holes — ignora diferencia de altura
         const dx = anchor.worldPos.x - point.x
         const dz = anchor.worldPos.z - point.z
         dist = Math.sqrt(dx * dx + dz * dz)
         if (dist > maxDistXZForHoles) continue
       } else {
-        // Distancia 3D para terminales y pines
         dist = anchor.worldPos.distanceTo(point)
         if (dist > maxDist3D) continue
       }
 
       const priority = this.wireAnchorPriority[anchor.kind] ?? 999
-      // Score: prioridad tiene más peso que distancia
       const score = priority * 1000 + dist
 
       if (score < bestScore) {
@@ -552,7 +540,6 @@ export class InteractionSystem {
     return best || null
   }
 
-  // Busca el mejor endpoint de cable cerca de un punto mundo
   findBestEndpointNearPoint(point, maxDist) {
     if (!this.stateSyncSystem) return null
     if (this.wireDraftOwner !== null) return null
@@ -576,7 +563,6 @@ export class InteractionSystem {
     if (handEntry.heldObject) return null
 
     this.getGrabPointWorld(handEntry, this._tmpC)
-    // Para manos usar distancia 3D normal en todos los tipos
     const anchors = this.getAllConnectionAnchors()
     let best = null
     let bestDist = maxDist
@@ -610,9 +596,6 @@ export class InteractionSystem {
     return { ...result, handIndex: handEntry.index }
   }
 
-  // ---------------------------
-  // Wire hover para controles — actualizado cada frame
-  // ---------------------------
   updateControllerWireHover() {
     if (this.toolMode !== "wire") {
       this._controllerWireHover = null
@@ -631,7 +614,6 @@ export class InteractionSystem {
         ? this.findBestEndpointNearPoint(hitPoint, Math.max(this.wireEndpointHoverMaxDist, 0.045))
         : null
 
-      // Para hover usar mismos radios que para el press
       const anchorResult = this.findBestAnchorNearPoint(
         hitPoint,
         this.wireControllerAnchorRadius,
@@ -642,11 +624,8 @@ export class InteractionSystem {
       let chosenType = null
 
       if (endpointResult && anchorResult) {
-        if (endpointResult.distance <= anchorResult.distance) {
-          chosen = endpointResult; chosenType = "endpoint"
-        } else {
-          chosen = anchorResult; chosenType = "anchor"
-        }
+        if (endpointResult.distance <= anchorResult.distance) { chosen = endpointResult; chosenType = "endpoint" }
+        else { chosen = anchorResult; chosenType = "anchor" }
       } else if (endpointResult) {
         chosen = endpointResult; chosenType = "endpoint"
       } else if (anchorResult) {
@@ -715,16 +694,10 @@ export class InteractionSystem {
 
       if (!this.wireDraftOwner) {
         if (anchorCandidate && endpointCandidate) {
-          if (endpointCandidate.distance <= anchorCandidate.distance) {
-            best = endpointCandidate; bestType = "endpoint"
-          } else {
-            best = anchorCandidate; bestType = "anchor"
-          }
-        } else if (endpointCandidate) {
-          best = endpointCandidate; bestType = "endpoint"
-        } else if (anchorCandidate) {
-          best = anchorCandidate; bestType = "anchor"
-        }
+          if (endpointCandidate.distance <= anchorCandidate.distance) { best = endpointCandidate; bestType = "endpoint" }
+          else { best = anchorCandidate; bestType = "anchor" }
+        } else if (endpointCandidate) { best = endpointCandidate; bestType = "endpoint" }
+        else if (anchorCandidate) { best = anchorCandidate; bestType = "anchor" }
       } else {
         if (anchorCandidate && (!best || anchorCandidate.distance < best.distance)) {
           best = anchorCandidate; bestType = "anchor"
@@ -739,9 +712,7 @@ export class InteractionSystem {
         const trackedHand = this.hands.find((h) => h.index === this.wireHoverHandIndex)
         if (trackedHand && this.isHandEntryTracked(trackedHand)) {
           this.getGrabPointWorld(trackedHand, this._tmpD)
-
           const targetPos = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos || null
-
           if (targetPos) {
             const keepDist = targetPos.distanceTo(this._tmpD)
             if (keepDist <= this.wireHoverReleaseDist) {
@@ -753,20 +724,14 @@ export class InteractionSystem {
           }
         }
       }
-
       this.clearWireHoverAnchor()
       return
     }
 
     this.wireHoverHandIndex = best.handIndex
 
-    if (bestType === "anchor") {
-      this.wireHoverAnchor = best
-      this.wireHoverEndpoint = null
-    } else {
-      this.wireHoverAnchor = null
-      this.wireHoverEndpoint = best
-    }
+    if (bestType === "anchor") { this.wireHoverAnchor = best; this.wireHoverEndpoint = null }
+    else { this.wireHoverAnchor = null; this.wireHoverEndpoint = best }
 
     const marker = this.ensureWireHoverMarker()
     marker.position.copy(best.worldPos)
@@ -1165,7 +1130,6 @@ export class InteractionSystem {
       return
     }
 
-    // Snap visual al anchor hover si existe
     const snapTarget =
       this._controllerWireHover?.anchor?.worldPos ||
       this.wireHoverAnchor?.worldPos ||
@@ -1661,16 +1625,13 @@ export class InteractionSystem {
     handEntry.lostTrackingMs = 0
 
     if (this.toolMode === "wire") { this.stopHoldTracking(handEntry.hold); return }
-
     if (!handEntry.heldObject) { this.stopHoldTracking(handEntry.hold); return }
 
     this.onHandPinchEnd(handEntry, { forceZeroVelocity })
   }
 
   // ---------------------------
-  // onControllerSelectStart
-  // Calcula anchor/endpoint en el momento exacto del press
-  // Para holes: usa distancia XZ ignorando Y
+  // onControllerSelectStart — con logs de diagnóstico
   // ---------------------------
   onControllerSelectStart(event) {
     const controller = event.target
@@ -1682,8 +1643,12 @@ export class InteractionSystem {
       const ctrlIndex = controller.userData.sourceIndex
       const ownerKey = `ctrl_${ctrlIndex}`
 
+      // ── DIAGNÓSTICO ─────────────────────────────────────────
       const hitPoint = new THREE.Vector3()
-      this.getControllerRayHitPoint(controller, hitPoint)
+      const didHit = this.getControllerRayHitPoint(controller, hitPoint)
+
+      console.log("🎯 PRESS hitPoint:", didHit, hitPoint.toArray().map((v) => v.toFixed(3)))
+      console.log("🎯 wireDraftOwner:", this.wireDraftOwner, "| ownerKey:", ownerKey)
 
       const endpointResult = this.wireDraftOwner === null
         ? this.findBestEndpointNearPoint(hitPoint, Math.max(this.wireEndpointHoverMaxDist, 0.045))
@@ -1694,6 +1659,40 @@ export class InteractionSystem {
         this.wireControllerAnchorRadius,
         this.wireControllerHoleRadiusXZ
       )
+
+      console.log(
+        "🎯 anchorResult:",
+        anchorResult
+          ? `kind=${anchorResult.kind} id=${anchorResult.id} distXZ=${anchorResult.distance.toFixed(4)}`
+          : "null"
+      )
+      console.log(
+        "🎯 endpointResult:",
+        endpointResult
+          ? `type=${endpointResult.endpointType} dist=${endpointResult.distance.toFixed(4)}`
+          : "null"
+      )
+
+      // Si hay holes en el sistema, mostrar el más cercano para comparar
+      if (this.holeSystem) {
+        this.holeSystem.updateWorldPositions()
+        let closestHole = null
+        let closestDist = Infinity
+        for (const hole of this.holeSystem.holes) {
+          const dx = hole.worldPos.x - hitPoint.x
+          const dz = hole.worldPos.z - hitPoint.z
+          const d = Math.sqrt(dx * dx + dz * dz)
+          if (d < closestDist) { closestDist = d; closestHole = hole }
+        }
+        console.log(
+          "🎯 hole más cercano:",
+          closestHole
+            ? `id=${closestHole.id} distXZ=${closestDist.toFixed(4)} worldPos=[${closestHole.worldPos.toArray().map((v) => v.toFixed(3))}]`
+            : "ninguno"
+        )
+        console.log("🎯 wireControllerHoleRadiusXZ:", this.wireControllerHoleRadiusXZ)
+      }
+      // ── FIN DIAGNÓSTICO ─────────────────────────────────────
 
       let chosenAnchor = null
       let chosenEndpoint = null
@@ -1734,10 +1733,14 @@ export class InteractionSystem {
           return
         }
 
+        console.log("⚠️ Press sin anchor ni endpoint válido cerca")
         return
       }
 
-      if (this.wireDraftOwner !== ownerKey) return
+      if (this.wireDraftOwner !== ownerKey) {
+        console.log("⚠️ Press ignorado: draft pertenece a", this.wireDraftOwner, "no a", ownerKey)
+        return
+      }
 
       if (chosenAnchor) {
         const closed = this.finalizeWireDraftToAnchor(chosenAnchor, ownerKey)
@@ -1745,10 +1748,14 @@ export class InteractionSystem {
           console.log("🔌 Punto B conectado (control):", chosenAnchor.kind, chosenAnchor.id)
           this._controllerWireHover = null
           if (this._wireHoverMarker) this._wireHoverMarker.visible = false
+        } else {
+          console.log("⚠️ finalizeWireDraftToAnchor devolvió false")
         }
       } else {
+        console.log("〰️ Sin anchor cerca — agregando waypoint")
         const added = this.addWireWaypointFromController(controller)
         if (added) console.log("〰️ Waypoint agregado (control)")
+        else console.log("⚠️ Waypoint no agregado (muy cerca del anterior o cooldown)")
       }
 
       return
@@ -2069,7 +2076,6 @@ export class InteractionSystem {
     } else {
       this.clearWireHoverAnchor()
 
-      // Si había draft de mano, limpiarlo
       if (this.wireDraftStartAnchor && typeof this.wireDraftOwner === "number") {
         this.clearWireDraft()
       }
