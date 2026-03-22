@@ -42,14 +42,12 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
-// Mesa cómoda en VR
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
 )
 table.position.set(0, 0.75, -0.8)
 scene.add(table)
-
 table.updateMatrixWorld(true)
 
 interactionSystem.registerSurface(floor, { type: "floor" })
@@ -80,14 +78,10 @@ interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
-// Ver los holes de la proto de manera visual
+// Visualización de holes
 const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-
 for (const hole of holeSystem.holes) {
-  const dot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.0025, 6, 6),
-    holeMat
-  )
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 6, 6), holeMat)
   dot.position.copy(hole.worldPos)
   scene.add(dot)
 }
@@ -107,7 +101,6 @@ function genId(prefix = "cmp") {
 
 function addBattery5V() {
   const id = genId("battery5v")
-
   const p = protoboard.position.clone()
   p.y += 0.15
   p.z += 0.12
@@ -116,18 +109,14 @@ function addBattery5V() {
     id,
     type: "battery5v",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-    meta: {
-      voltage: 5,
-    },
+    meta: { voltage: 5 },
   }
-
   appState.addComponent(data)
   stateSyncSystem.addMeshFromComponent(data)
 }
 
 function addLed() {
   const id = genId("led")
-
   const p = protoboard.position.clone()
   p.y += 0.25
   p.z += 0.12
@@ -136,18 +125,14 @@ function addLed() {
     id,
     type: "led",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-    meta: {
-      color: "red",
-    },
+    meta: { color: "red" },
   }
-
   appState.addComponent(data)
   stateSyncSystem.addMeshFromComponent(data)
 }
 
 function addResistor() {
   const id = genId("resistor")
-
   const p = protoboard.position.clone()
   p.y += 0.32
   p.z += 0.12
@@ -156,16 +141,50 @@ function addResistor() {
     id,
     type: "resistor",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-    meta: {
-      resistance: 220,
-      bands: ["red", "red", "brown", "gold"],
-    },
+    meta: { resistance: 220, bands: ["red", "red", "brown", "gold"] },
   }
-
-  console.log("Creando resistor:", data)
-
   appState.addComponent(data)
   stateSyncSystem.addMeshFromComponent(data)
+}
+
+function addButton() {
+  const id = genId("button")
+  const p = protoboard.position.clone()
+  p.y += 0.25
+  p.z += 0.20
+
+  const data = {
+    id,
+    type: "button",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {},
+  }
+  appState.addComponent(data)
+
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+
+  // Dar acceso al appState para que el switch pueda persistir su estado
+  if (mesh) mesh.userData._appStateRef = appState
+}
+
+function addSwitch() {
+  const id = genId("switch")
+  const p = protoboard.position.clone()
+  p.y += 0.25
+  p.z += 0.28
+
+  const data = {
+    id,
+    type: "switch",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: { switchState: false },
+  }
+  appState.addComponent(data)
+
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+
+  // Dar acceso al appState para persistir cambios de estado
+  if (mesh) mesh.userData._appStateRef = appState
 }
 
 function saveState() {
@@ -179,6 +198,14 @@ function loadState() {
   appState.loadFromObject(JSON.parse(raw))
   physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
+
+  // Restaurar referencia a appState en switches y botones reconstruidos
+  for (const mesh of stateSyncSystem.meshById.values()) {
+    if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent) {
+      mesh.userData._appStateRef = appState
+    }
+  }
+
   console.log("✅ Estado cargado y reconstruido")
 }
 
@@ -197,13 +224,11 @@ let wireModeActive = false
 
 function toggleWireMode() {
   wireModeActive = !wireModeActive
-
   if (typeof interactionSystem.setToolMode === "function") {
     interactionSystem.setToolMode(wireModeActive ? "wire" : "grab")
   } else {
     interactionSystem.toolMode = wireModeActive ? "wire" : "grab"
   }
-
   console.log(wireModeActive ? "🧵 Modo cable activado" : "✋ Modo cable desactivado")
 }
 
@@ -219,6 +244,8 @@ const { group: vrPanel, buttons: panelButtons } = createVRPanel({
   onAdd: addBattery5V,
   onLed: addLed,
   onResistor: addResistor,
+  onButton: addButton,
+  onSwitch: addSwitch,
   onWire: toggleWireMode,
   onSave: saveState,
   onLoad: loadState,
@@ -274,7 +301,6 @@ function createClearSceneButton({
   group.add(button)
 
   const iconMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
-
   const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
   const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
   bar1.rotation.z = Math.PI / 4
@@ -334,6 +360,8 @@ window.addEventListener("keydown", (e) => {
   if (k === "c") addBattery5V()
   if (k === "v") addLed()
   if (k === "b") addResistor()
+  if (k === "n") addButton()
+  if (k === "m") addSwitch()
   if (k === "w") toggleWireMode()
   if (k === "s") saveState()
   if (k === "l") loadState()
