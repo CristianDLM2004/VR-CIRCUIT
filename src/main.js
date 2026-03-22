@@ -11,6 +11,7 @@ import { createVRPanel } from "./components/VRPanel.js"
 
 import { TrashSystem } from "./systems/TrashSystem.js"
 import { PhysicsSystem } from "./systems/PhysicsSystem.js"
+import { ElectricalSystem } from "./systems/ElectricalSystem.js"
 
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
@@ -41,7 +42,6 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = 0
 scene.add(floor)
 
-// Mesa cómoda en VR
 const table = new THREE.Mesh(
   new THREE.BoxGeometry(2.0, 0.1, 1.2),
   new THREE.MeshStandardMaterial({ color: 0x444444 })
@@ -79,7 +79,7 @@ interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
-// Ver los holes de la proto de manera visual
+// Visualización de holes
 const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
 
 for (const hole of holeSystem.holes) {
@@ -87,7 +87,6 @@ for (const hole of holeSystem.holes) {
     new THREE.SphereGeometry(0.0025, 6, 6),
     holeMat
   )
-
   dot.position.copy(hole.worldPos)
   scene.add(dot)
 }
@@ -157,8 +156,6 @@ function addResistor() {
     },
   }
 
-  console.log("Creando resistor:", data)
-
   appState.addComponent(data)
   stateSyncSystem.addMeshFromComponent(data)
 }
@@ -173,6 +170,7 @@ function loadState() {
   if (!raw) return console.log("⚠️ No hay estado guardado")
   appState.loadFromObject(JSON.parse(raw))
   physicsSystem.clearAllBodies()
+  electricalSystem.resetAllLedStates()
   stateSyncSystem.rebuildFromState()
   console.log("✅ Estado cargado y reconstruido")
 }
@@ -181,6 +179,7 @@ function clearScene() {
   appState.components = []
   appState.connections = []
   physicsSystem.clearAllBodies()
+  electricalSystem.resetAllLedStates()
   stateSyncSystem.rebuildFromState()
   console.log("🧹 Escena limpiada")
 }
@@ -317,7 +316,11 @@ trashBin.traverse((o) => {
 // Physics
 // ---------------------------
 const physicsSystem = new PhysicsSystem(scene, camera, appState, stateSyncSystem, interactionSystem)
-const clock = new THREE.Clock()
+
+// ---------------------------
+// Electrical System
+// ---------------------------
+const electricalSystem = new ElectricalSystem(scene, appState, stateSyncSystem, holeSystem)
 
 // ---------------------------
 // UI HTML (PC) opcional
@@ -341,6 +344,11 @@ window.addEventListener("keydown", (e) => {
 stateSyncSystem.rebuildFromState()
 
 // ---------------------------
+// Clock
+// ---------------------------
+const clock = new THREE.Clock()
+
+// ---------------------------
 // Loop
 // ---------------------------
 renderer.setAnimationLoop(() => {
@@ -349,5 +357,6 @@ renderer.setAnimationLoop(() => {
   interactionSystem.update()
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
+  electricalSystem.update(dt)
   sceneManager.render()
 })

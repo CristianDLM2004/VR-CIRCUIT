@@ -46,7 +46,7 @@ export class ComponentFactory {
         group.add(plusTerminal)
         group.add(minusTerminal)
 
-        // La superficie real de apoyo es solo el cuerpo principal.
+        // La superficie real de apoyo es solo el cuerpo principal
         group.userData.surfaceContactObject = body
         group.userData.surfaceUpright = true
 
@@ -57,28 +57,39 @@ export class ComponentFactory {
       case "led": {
         const group = new THREE.Group()
 
-        const redMat = new THREE.MeshStandardMaterial({ color: 0xff3b3b })
+        // Materiales del LED — se clonarán individualmente por ElectricalSystem
+        // para no compartir estado entre instancias
+        const redMat = new THREE.MeshStandardMaterial({
+          color: 0xff3b3b,
+          roughness: 0.3,
+          metalness: 0.0,
+          // emissive se asigna dinámicamente por ElectricalSystem
+        })
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
 
         const body = new THREE.Mesh(
           new THREE.CylinderGeometry(0.02, 0.02, 0.033, 20),
           redMat
         )
+        body.name = "LEDBody"
         body.position.y = 0.026
 
         const dome = new THREE.Mesh(
           new THREE.SphereGeometry(0.02, 20, 20),
-          redMat
+          redMat.clone() // clonar para que dome y body sean independientes
         )
+        dome.name = "LEDDome"
         dome.position.y = 0.041
 
         const anodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12)
         const cathodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12)
 
         const anodeLeg = new THREE.Mesh(anodeGeo, legMat)
+        anodeLeg.name = "LEDAnode"
         anodeLeg.position.set(-0.0065, -0.018, 0)
 
         const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
+        cathodeLeg.name = "LEDCathode"
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
         group.add(body)
@@ -226,25 +237,30 @@ export class ComponentFactory {
         return null
     }
 
+    // ---------------------------
     // Transform
+    // ---------------------------
     const t = data.transform || { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
     mesh.position.set(t.x, t.y, t.z)
     mesh.quaternion.set(t.qx ?? 0, t.qy ?? 0, t.qz ?? 0, t.qw ?? 1)
 
-    // Metadata
+    // ---------------------------
+    // Metadata base
+    // ---------------------------
     mesh.userData.componentId = data.id
     mesh.userData.interactable = data.type === "wire" ? false : true
     mesh.userData.isSurface = false
     mesh.userData.componentType = data.type
-
-    // Para componentes tipo simulador eléctrico:
-    // por defecto NO auto-acomodarse a una cara “estable”.
     mesh.userData.restSnapMode = "freeze"
-
     mesh.userData.inserted = !!data.inserted
     mesh.userData.pinConnections = data.pinConnections || null
 
-    // Agregar las terminales a la batería 5V
+    // Guardar meta del componente para el sistema eléctrico
+    mesh.userData.meta = data.meta || {}
+
+    // ---------------------------
+    // Terminales: battery5v
+    // ---------------------------
     if (data.type === "battery5v") {
       mesh.userData.terminals = [
         {
@@ -260,7 +276,9 @@ export class ComponentFactory {
       ]
     }
 
-    // Agregar los pines al led
+    // ---------------------------
+    // Pines: led
+    // ---------------------------
     if (data.type === "led") {
       mesh.userData.pins = [
         {
@@ -274,9 +292,14 @@ export class ComponentFactory {
           localPos: new THREE.Vector3(0.0065, -0.038, 0),
         },
       ]
+
+      // Estado eléctrico inicial — será controlado por ElectricalSystem
+      mesh.userData.electricalState = "off"
     }
 
-    // Agregar los pines a la resistencia
+    // ---------------------------
+    // Pines: resistor
+    // ---------------------------
     if (data.type === "resistor") {
       mesh.userData.pins = [
         {
@@ -292,6 +315,9 @@ export class ComponentFactory {
       ]
     }
 
+    // ---------------------------
+    // Helpers de posición mundial
+    // ---------------------------
     mesh.userData.getPinWorldPositions = function () {
       const results = []
       const worldPos = new THREE.Vector3()
