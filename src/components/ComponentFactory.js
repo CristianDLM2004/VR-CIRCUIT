@@ -11,32 +11,23 @@ export class ComponentFactory {
       // ---------------------------
       case "battery5v": {
         const group = new THREE.Group()
-
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a })
-        const topMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f })
-        const plusMat = new THREE.MeshStandardMaterial({ color: 0xd9534f })
+        const bodyMat  = new THREE.MeshStandardMaterial({ color: 0x3a3a3a })
+        const topMat   = new THREE.MeshStandardMaterial({ color: 0x1f1f1f })
+        const plusMat  = new THREE.MeshStandardMaterial({ color: 0xd9534f })
         const minusMat = new THREE.MeshStandardMaterial({ color: 0x5bc0de })
 
         const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.11, 0.05), bodyMat)
         body.position.y = 0
-
         const top = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.012, 0.05), topMat)
         top.position.y = 0.061
-
-        const plusTerminal = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.006, 0.006, 0.008, 14), plusMat
-        )
+        const plusTerminal = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 14), plusMat)
         plusTerminal.position.set(-0.018, 0.071, 0)
-
-        const minusTerminal = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0045, 0.0045, 0.008, 14), minusMat
-        )
+        const minusTerminal = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.008, 14), minusMat)
         minusTerminal.position.set(0.018, 0.071, 0)
 
         group.add(body, top, plusTerminal, minusTerminal)
         group.userData.surfaceContactObject = body
         group.userData.surfaceUpright = true
-
         mesh = group
         break
       }
@@ -46,43 +37,26 @@ export class ComponentFactory {
       // ---------------------------
       case "led": {
         const group = new THREE.Group()
-
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
-
         const bodyMat = new THREE.MeshStandardMaterial({
-          color: 0xff3b3b,
-          emissive: new THREE.Color(0x000000),
-          emissiveIntensity: 0,
-          roughness: 0.35,
-          metalness: 0.0,
+          color: 0xff3b3b, emissive: new THREE.Color(0x000000),
+          emissiveIntensity: 0, roughness: 0.35, metalness: 0.0,
         })
-
         const domeMat = new THREE.MeshStandardMaterial({
-          color: 0xff3b3b,
-          emissive: new THREE.Color(0x000000),
-          emissiveIntensity: 0,
-          roughness: 0.25,
-          metalness: 0.0,
-          transparent: true,
-          opacity: 0.88,
+          color: 0xff3b3b, emissive: new THREE.Color(0x000000),
+          emissiveIntensity: 0, roughness: 0.25, metalness: 0.0,
+          transparent: true, opacity: 0.88,
         })
 
         const body = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.033, 20), bodyMat)
         body.name = "LEDBody"
         body.position.y = 0.026
-
         const dome = new THREE.Mesh(new THREE.SphereGeometry(0.02, 20, 20), domeMat)
         dome.name = "LEDDome"
         dome.position.y = 0.041
-
-        const anodeLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12), legMat
-        )
+        const anodeLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.075, 12), legMat)
         anodeLeg.position.set(-0.0065, -0.018, 0)
-
-        const cathodeLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12), legMat
-        )
+        const cathodeLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12), legMat)
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
         group.add(body, dome, anodeLeg, cathodeLeg)
@@ -95,34 +69,21 @@ export class ComponentFactory {
       // ---------------------------
       case "resistor": {
         const group = new THREE.Group()
-
-        const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
+        const legMat  = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8c29d })
 
         const body = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.022, 18), bodyMat)
         body.rotation.z = Math.PI / 2
         body.position.y = 0.006
-
-        const leftLead = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12), legMat
-        )
+        const leftLead = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12), legMat)
         leftLead.rotation.z = Math.PI / 2
         leftLead.position.set(-0.0105, 0.006, 0)
-
-        const rightLead = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12), legMat
-        )
+        const rightLead = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12), legMat)
         rightLead.rotation.z = Math.PI / 2
         rightLead.position.set(0.0105, 0.006, 0)
-
-        const leftLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12), legMat
-        )
+        const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12), legMat)
         leftLeg.position.set(-0.015, -0.007, 0)
-
-        const rightLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12), legMat
-        )
+        const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 12), legMat)
         rightLeg.position.set(0.015, -0.007, 0)
 
         group.add(body, leftLead, rightLead, leftLeg, rightLeg)
@@ -132,70 +93,69 @@ export class ComponentFactory {
 
       // ---------------------------
       // BOTÓN MOMENTÁNEO
-      // Tamaño: ocupa 3 holes (~0.045m entre pines)
-      // Pines separados 0.045m
-      // Caperuza circular roja que se hunde al presionar
       // ---------------------------
       case "button": {
         const group = new THREE.Group()
+        const baseMat       = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 })
+        const rimMat        = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7 })
+        const capNormalMat  = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.45, metalness: 0.05 })
+        const capPressedMat = new THREE.MeshStandardMaterial({ color: 0x7b241c, roughness: 0.45 })
+        const dotMat        = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+        const legMat        = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, metalness: 0.6, roughness: 0.3 })
 
-        const baseMat  = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 })
-        const rimMat   = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7 })
-        const capMat   = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.45, metalness: 0.05 })
-        const capPressedMat = new THREE.MeshStandardMaterial({ color: 0x922b21, roughness: 0.45 })
-        const legMat   = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, metalness: 0.6, roughness: 0.3 })
-
-        // Base cuadrada más grande
         const base = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.012, 0.034), baseMat)
         base.name = "ButtonBase"
         base.position.y = 0.006
 
-        // Aro del cuerpo
         const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.010, 20), rimMat)
         rim.position.y = 0.017
 
-        // Caperuza más grande y visible
-        const capGeo = new THREE.CylinderGeometry(0.011, 0.011, 0.010, 20)
-        const cap = new THREE.Mesh(capGeo, capMat.clone())
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.010, 20), capNormalMat.clone())
         cap.name = "ButtonCap"
         cap.position.y = 0.027
 
-        // Detalle: pequeño círculo blanco en la caperuza
-        const dotMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
         const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.001, 12), dotMat)
         dot.position.y = 0.006
         cap.add(dot)
 
-        // Patas metálicas (más largas para 3 holes de profundidad)
-        const leftLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat
-        )
+        const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat)
         leftLeg.position.set(-0.0225, -0.009, 0)
-
-        const rightLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat
-        )
+        const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat)
         rightLeg.position.set(0.0225, -0.009, 0)
 
         group.add(base, rim, cap, leftLeg, rightLeg)
 
-        // ---------------------------
-        // Estado lógico
-        // ---------------------------
         const CAP_BASE_Y    = 0.027
         const CAP_PRESSED_Y = 0.021
+        const SCALE_NORMAL  = new THREE.Vector3(1, 1, 1)
+        const SCALE_PRESSED = new THREE.Vector3(0.92, 0.92, 0.92)
 
-        group.userData.buttonState       = false
-        group.userData.buttonCap         = cap
+        group.userData.buttonState         = false
+        group.userData.buttonCap           = cap
         group.userData.buttonCapNormalMat  = cap.material
         group.userData.buttonCapPressedMat = capPressedMat
         group.userData.isButtonComponent   = true
+        group.userData._lastPressMs        = 0
+        group.userData._cooldownMs         = 120
+
+        // ✅ onPress: igual que botones UI — compatible con poke y controlador
+        group.userData.isUI    = false   // no es panel UI
+        group.userData.onPress = function () {
+          const now = performance.now()
+          if (now - group.userData._lastPressMs < group.userData._cooldownMs) return
+          group.userData._lastPressMs = now
+
+          if (!group.userData.buttonState) {
+            group.userData.pressButton()
+          }
+        }
 
         group.userData.pressButton = function () {
           if (group.userData.buttonState) return
           group.userData.buttonState = true
           cap.position.y = CAP_PRESSED_Y
           cap.material   = capPressedMat
+          group.scale.copy(SCALE_PRESSED)
         }
 
         group.userData.releaseButton = function () {
@@ -203,6 +163,7 @@ export class ComponentFactory {
           group.userData.buttonState = false
           cap.position.y = CAP_BASE_Y
           cap.material   = group.userData.buttonCapNormalMat
+          group.scale.copy(SCALE_NORMAL)
         }
 
         mesh = group
@@ -210,85 +171,73 @@ export class ComponentFactory {
       }
 
       // ---------------------------
-      // SWITCH DE TECLA (rocker)
-      // Inspirado en switch KCD1 real
-      // Tamaño: ocupa 3 holes (~0.045m entre pines)
-      // Tecla bascula: lado I = ON (verde), lado O = OFF (gris)
+      // SWITCH ROCKER (tipo tecla KCD1)
       // ---------------------------
       case "switch": {
         const group = new THREE.Group()
-
-        const housingMat  = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.85 })
+        const housingMat    = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.85 })
         const frameInnerMat = new THREE.MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.9 })
-        const rockerOffMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.7 })
-        const rockerOnMat  = new THREE.MeshStandardMaterial({ color: 0x1a472a, roughness: 0.6 })
-        const symbolMat   = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.3 })
-        const legMat      = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, metalness: 0.6, roughness: 0.3 })
+        const rockerOffMat  = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.7 })
+        const rockerOnMat   = new THREE.MeshStandardMaterial({ color: 0x1a5c2a, roughness: 0.6 })
+        const symbolMat     = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.3 })
+        const legMat        = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, metalness: 0.6, roughness: 0.3 })
 
-        // Carcasa exterior
         const housing = new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.018, 0.030), housingMat)
         housing.name = "SwitchHousing"
         housing.position.y = 0.009
 
-        // Marco interior (hueco visual)
         const frameInner = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.004, 0.022), frameInnerMat)
         frameInner.position.y = 0.020
 
-        // Tecla rocker — una sola pieza que rota sobre su centro
-        const rockerGeo = new THREE.BoxGeometry(0.030, 0.010, 0.020)
-        const rocker = new THREE.Mesh(rockerGeo, rockerOffMat.clone())
+        const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.010, 0.020), rockerOffMat.clone())
         rocker.name = "SwitchRocker"
         rocker.position.y = 0.022
-        // Inclinada hacia O (derecha) = OFF
-        rocker.rotation.z = -Math.PI / 10
+        rocker.rotation.z = -Math.PI / 10   // OFF: lado O abajo
 
-        // Símbolo "I" (ON) en el lado izquierdo de la tecla
-        const symbolI = new THREE.Mesh(
-          new THREE.BoxGeometry(0.002, 0.007, 0.002), symbolMat
-        )
+        // Símbolo I (ON) — lado izquierdo
+        const symbolI = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.007, 0.002), symbolMat)
         symbolI.position.set(-0.008, 0.002, 0.011)
         rocker.add(symbolI)
 
-        // Símbolo "O" (OFF) en el lado derecho — círculo simulado con torus
-        const symbolO = new THREE.Mesh(
-          new THREE.TorusGeometry(0.003, 0.001, 8, 16), symbolMat
-        )
+        // Símbolo O (OFF) — lado derecho
+        const symbolO = new THREE.Mesh(new THREE.TorusGeometry(0.003, 0.001, 8, 16), symbolMat)
         symbolO.position.set(0.008, 0.002, 0.011)
         symbolO.rotation.x = Math.PI / 2
         rocker.add(symbolO)
 
-        // Patas metálicas
-        const leftLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat
-        )
+        const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat)
         leftLeg.position.set(-0.0225, -0.009, 0)
-
-        const rightLeg = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat
-        )
+        const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.030, 12), legMat)
         rightLeg.position.set(0.0225, -0.009, 0)
 
         group.add(housing, frameInner, rocker, leftLeg, rightLeg)
 
-        // ---------------------------
-        // Estado lógico
-        // ---------------------------
+        const ROCKER_OFF_Z  = -Math.PI / 10
+        const ROCKER_ON_Z   =  Math.PI / 10
+        const SCALE_NORMAL  = new THREE.Vector3(1, 1, 1)
+        const SCALE_PRESSED = new THREE.Vector3(0.93, 0.93, 0.93)
+
         const initialState = data.meta?.switchState ?? false
-
-        // Ángulos de la tecla
-        const ROCKER_OFF_Z =  -Math.PI / 10   // lado O abajo = OFF
-        const ROCKER_ON_Z  =   Math.PI / 10   // lado I abajo = ON
-
-        group.userData.switchState      = initialState
-        group.userData.switchRocker     = rocker
-        group.userData.switchRockerOnMat  = rockerOnMat
+        group.userData.switchState       = initialState
+        group.userData.switchRocker      = rocker
+        group.userData.switchRockerOnMat = rockerOnMat
         group.userData.switchRockerOffMat = rocker.material
         group.userData.isSwitchComponent  = true
+        group.userData._lastPressMs       = 0
+        group.userData._cooldownMs        = 300   // evita doble toggle por el mismo gesto
 
-        // Aplicar estado inicial (para save/load)
+        // Aplicar estado inicial
         if (initialState) {
           rocker.rotation.z = ROCKER_ON_Z
           rocker.material   = rockerOnMat.clone()
+        }
+
+        // ✅ onPress: toggle al presionar — compatible con poke y controlador
+        group.userData.onPress = function () {
+          const now = performance.now()
+          if (now - group.userData._lastPressMs < group.userData._cooldownMs) return
+          group.userData._lastPressMs = now
+          group.userData.toggleSwitch()
         }
 
         group.userData.toggleSwitch = function () {
@@ -299,6 +248,10 @@ export class ComponentFactory {
           rocker.material   = isOn
             ? group.userData.switchRockerOnMat.clone()
             : group.userData.switchRockerOffMat.clone()
+
+          // Animación de escala (feedback visual)
+          group.scale.copy(SCALE_PRESSED)
+          setTimeout(() => { group.scale.copy(SCALE_NORMAL) }, 80)
 
           // Persistir en appState
           const id = group.userData.componentId
@@ -319,22 +272,20 @@ export class ComponentFactory {
       // ---------------------------
       case "wire": {
         const group = new THREE.Group()
-
         const rawPoints = Array.isArray(data.meta?.points) ? data.meta.points : []
         const points    = rawPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z))
-
         if (points.length < 2) return null
 
         const wireColor = data.meta?.color ?? 0x111111
         const radius    = 0.0038
 
-        group.userData.interactable  = false
-        group.userData.isWire        = true
-        group.userData.wireColor     = wireColor
-        group.userData.wireRadius    = radius
-        group.userData.startAnchor   = data.meta?.startAnchor ?? null
-        group.userData.endAnchor     = data.meta?.endAnchor   ?? null
-        group.userData.fixedPoints   = points.map((p) => p.clone())
+        group.userData.interactable = false
+        group.userData.isWire       = true
+        group.userData.wireColor    = wireColor
+        group.userData.wireRadius   = radius
+        group.userData.startAnchor  = data.meta?.startAnchor ?? null
+        group.userData.endAnchor    = data.meta?.endAnchor   ?? null
+        group.userData.fixedPoints  = points.map((p) => p.clone())
 
         group.userData.rebuildWireGeometry = function (nextPoints) {
           while (group.children.length > 0) {
@@ -342,7 +293,6 @@ export class ComponentFactory {
             child?.geometry?.dispose?.()
             child?.material?.dispose?.()
           }
-
           const wireMat = new THREE.MeshStandardMaterial({
             color: group.userData.wireColor ?? 0x111111,
             roughness: 0.65, metalness: 0.0, emissive: 0x181818,
@@ -351,7 +301,6 @@ export class ComponentFactory {
             color: group.userData.wireColor ?? 0x111111,
             roughness: 0.7, metalness: 0.0,
           })
-
           for (let i = 0; i < nextPoints.length; i++) {
             const joint = new THREE.Mesh(
               new THREE.SphereGeometry((group.userData.wireRadius ?? 0.0038) * 1.15, 10, 10),
@@ -360,14 +309,12 @@ export class ComponentFactory {
             joint.position.copy(nextPoints[i])
             group.add(joint)
           }
-
           for (let i = 0; i < nextPoints.length - 1; i++) {
             const start = nextPoints[i]
             const end   = nextPoints[i + 1]
             const dir   = end.clone().sub(start)
             const len   = dir.length()
             if (len < 0.0001) continue
-
             const mid = start.clone().add(end).multiplyScalar(0.5)
             const segment = new THREE.Mesh(
               new THREE.CylinderGeometry(
@@ -429,7 +376,7 @@ export class ComponentFactory {
     if (data.type === "led") {
       mesh.userData.pins = [
         { id: "anode",   label: "Ánodo",  localPos: new THREE.Vector3(-0.0065, -0.055, 0) },
-        { id: "cathode", label: "Cátodo", localPos: new THREE.Vector3(0.0065, -0.038, 0) },
+        { id: "cathode", label: "Cátodo", localPos: new THREE.Vector3(0.0065,  -0.038, 0) },
       ]
     }
 
@@ -439,27 +386,27 @@ export class ComponentFactory {
     if (data.type === "resistor") {
       mesh.userData.pins = [
         { id: "left",  label: "Pin izquierdo", localPos: new THREE.Vector3(-0.015, -0.022, 0) },
-        { id: "right", label: "Pin derecho",   localPos: new THREE.Vector3(0.015, -0.022, 0) },
+        { id: "right", label: "Pin derecho",   localPos: new THREE.Vector3(0.015,  -0.022, 0) },
       ]
     }
 
     // ---------------------------
-    // Pines: button — separación 3 holes = 0.045m
+    // Pines: button — 3 holes = 0.045m
     // ---------------------------
     if (data.type === "button") {
       mesh.userData.pins = [
         { id: "pin_a", label: "Pin A", localPos: new THREE.Vector3(-0.0225, -0.024, 0) },
-        { id: "pin_b", label: "Pin B", localPos: new THREE.Vector3(0.0225, -0.024, 0) },
+        { id: "pin_b", label: "Pin B", localPos: new THREE.Vector3(0.0225,  -0.024, 0) },
       ]
     }
 
     // ---------------------------
-    // Pines: switch — separación 3 holes = 0.045m
+    // Pines: switch — 3 holes = 0.045m
     // ---------------------------
     if (data.type === "switch") {
       mesh.userData.pins = [
         { id: "pin_a", label: "Pin A", localPos: new THREE.Vector3(-0.0225, -0.024, 0) },
-        { id: "pin_b", label: "Pin B", localPos: new THREE.Vector3(0.0225, -0.024, 0) },
+        { id: "pin_b", label: "Pin B", localPos: new THREE.Vector3(0.0225,  -0.024, 0) },
       ]
     }
 
