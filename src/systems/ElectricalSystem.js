@@ -1,69 +1,34 @@
 /**
  * ElectricalSystem.js
  *
- * Sistema de simulación eléctrica para VR-CIRCUIT.
+ * Simulación eléctrica de nivel medio para VR-CIRCUIT.
  *
- * Cada frame (o cada N frames) reconstruye el grafo eléctrico
- * a partir del estado actual de componentes y cables, resuelve
- * el circuito con un análisis nodal simplificado y aplica
- * los efectos visuales correspondientes a cada componente.
+ * Reglas:
+ * - Una batería 5V tiene terminal positivo y negativo.
+ * - Los cables conectan anchors (terminales, pines, holes).
+ * - Los holes de una misma columna (groupKey) están eléctricamente unidos.
+ * - Para que el LED encienda debe existir un camino cerrado:
+ *     batería(+) → ... → LED(ánodo) → LED(cátodo) → ... → batería(-)
+ *   que además pase por al menos una resistencia.
+ * - Si el camino existe pero SIN resistencia: el LED parpadea (advertencia).
+ * - Si el circuito está incompleto: el LED se apaga.
  *
- * Fallas simuladas:
- *   - LED sin resistencia → parpadeo → quemado (negro permanente)
- *   - Circuito abierto → LED apagado
- *   - Polaridad invertida → LED apagado
+ * Se recalcula cada frame (llamar a update() en el loop principal).
  */
 
-import * as THREE from "three"
-import {
-  getComponentPorts,
-  getComponentInternalEdges,
-  resolveElectricalNodeId,
-  BATTERY_VOLTAGE,
-  LED_FORWARD_VOLTAGE,
-  LED_MIN_CURRENT,
-  LED_MAX_SAFE_CURRENT,
-  LED_BURN_CURRENT,
-} from "../components/CircuitComponent.js"
-
-// ---------------------------
-// Estados del LED
-// ---------------------------
-export const LED_STATE = {
-  OFF: "off",
-  ON: "on",
-  BURNING: "burning",
-  BURNED: "burned",
-}
-
-// Cuánto tiempo en "burning" antes de quemarse definitivamente (ms)
-const BURN_TIME_MS = 2500
-
-// Frecuencia de parpadeo en burning (Hz)
-const BURN_FLICKER_HZ = 8
-
 export class ElectricalSystem {
-  /**
-   * @param {THREE.Scene} scene
-   * @param {AppState} appState
-   * @param {StateSyncSystem} stateSyncSystem
-   * @param {HoleSystem} holeSystem
-   */
-  constructor(scene, appState, stateSyncSystem, holeSystem) {
-    this.scene = scene
+  constructor(appState, stateSyncSystem, holeSystem) {
     this.appState = appState
     this.stateSyncSystem = stateSyncSystem
     this.holeSystem = holeSystem
 
-    // Cada cuántos ms reconstruir el grafo (no cada frame)
-    this.updateIntervalMs = 80
-    this._lastUpdateMs = 0
+    // Control de parpadeo para el estado "sin resistencia"
+    this._blinkIntervalMs = 400
+    this._blinkAccumMs = 0
+    this._blinkOn = false
 
-    // Estado visual de cada LED: componentId → { state, burnMs, bodyMesh, domeMesh, ... }
-    this._ledStates = new Map()
-
-    // Tiempo acumulado para parpadeo
-    this._flickerT = 0
+    // Cache para no reconstruir el grafo si nada cambió
+    this._lastStateHash = null
   }
 
   // ---------------------------
@@ -71,525 +36,317 @@ export class ElectricalSystem {
   // ---------------------------
 
   update(dt) {
-    this._flickerT += dt
-
-    const now = performance.now()
-    if (now - this._lastUpdateMs >= this.updateIntervalMs) {
-      this._lastUpdateMs = now
-      this._runSimulation()
+    // Acumular tiempo para parpadeo
+    this._blinkAccumMs += dt * 1000
+    if (this._blinkAccumMs >= this._blinkIntervalMs) {
+      this._blinkAccumMs -= this._blinkIntervalMs
+      this._blinkOn = !this._blinkOn
     }
 
-    // El parpadeo se actualiza cada frame aunque el grafo no se reconstruya
-    this._updateFlicker(dt)
-  }
+    // Hash rápido del estado (número de componentes + conexiones)
+    const hash = this._computeHash()
+    const stateChanged = hash !== this._lastStateHash
+    this._lastStateHash = hash
 
-  // ---------------------------
-  // Simulación principal
-  // ---------------------------
-
-  _runSimulation() {
+    // Construir grafo y simular
     const graph = this._buildGraph()
-    const results = this._solveGraph(graph)
-    this._applyResults(results)
+    this._simulate(graph, stateChanged)
   }
+
+  // ---------------------------
+  // Hash de estado
+  // ---------------------------
+
+  _computeHash() {
+    const c = this.appState.components
+    return c.length + "_" + c.map(x => x.id + (x.inserted ? "i" : "") + (x.pinConnections ? "p" : "")).join("|")
+  }
+
+  // ---------------------------
+  // Construcción del grafo
+  // ---------------------------
 
   /**
-   * Construye el grafo eléctrico a partir del estado actual.
+   * Cada nodo del grafo es un string que representa un punto eléctrico:
+   *   - Terminal de batería:    "terminal:battery5v_xxx:positive"
+   *   - Hole group:             "group:CENTER_TOP_COL_5"
+   *   - Pin de componente:      "pin:led_xxx:anode"  (solo para componentes NO insertados)
+   *
+   * Los cables crean aristas entre nodos.
+   * Los holes del mismo groupKey están unidos (mismo nodo lógico = el groupKey).
+   * Los pines insertados en holes se unen al groupKey del hole correspondiente.
+   *
+   * Retorna:
+   * {
+   *   edges: Map<nodeId, Set<nodeId>>,   // grafo no dirigido
+   *   batteries: [ { posNode, negNode, componentId } ],
+   *   leds:       [ { anodeNode, cathodeNode, componentId } ],
+   *   resistors:  [ { leftNode, rightNode, componentId } ],
+   * }
    */
   _buildGraph() {
-    const nodes = new Set()
-    const edges = []
-    const components = []
+    const edges = new Map()
+    const batteries = []
+    const leds = []
+    const resistors = []
 
-    if (!this.stateSyncSystem) return { nodes, edges, components }
+    const addEdge = (a, b) => {
+      if (a === b) return
+      if (!edges.has(a)) edges.set(a, new Set())
+      if (!edges.has(b)) edges.set(b, new Set())
+      edges.get(a).add(b)
+      edges.get(b).add(a)
+    }
 
-    // --- Actualizar posiciones de holes ---
-    if (this.holeSystem) this.holeSystem.updateWorldPositions()
+    // Mapa de holeId → groupKey (para resolver pines insertados)
+    const holeGroupMap = new Map()
+    if (this.holeSystem) {
+      for (const hole of this.holeSystem.holes) {
+        holeGroupMap.set(hole.id, hole.groupKey)
+      }
+    }
 
-    // --- Procesar cada componente ---
-    for (const [id, mesh] of this.stateSyncSystem.meshById) {
-      const type = mesh?.userData?.componentType
-      if (!type) continue
-      if (type === "wire") continue
+    // Función: dado un anchor serializado del cable, devuelve su nodeId
+    const anchorToNode = (anchor) => {
+      if (!anchor) return null
 
-      const ports = getComponentPorts(mesh)
-      const internalEdges = getComponentInternalEdges(mesh)
+      if (anchor.kind === "hole" && anchor.holeId) {
+        const gk = holeGroupMap.get(anchor.holeId)
+        return gk ? `group:${gk}` : `hole:${anchor.holeId}`
+      }
 
-      const portNodeMap = {}
+      if (anchor.kind === "terminal" && anchor.componentId) {
+        return `terminal:${anchor.componentId}:${anchor.id}`
+      }
 
-      for (const port of ports) {
-        let nodeId = null
-
-        if (port.kind === "terminal") {
-          nodeId = resolveElectricalNodeId(id, port.anchorId, "terminal", null)
-
-        } else if (port.kind === "pin") {
-          const pinConnections = mesh.userData?.pinConnections
-          const holeId = pinConnections?.[port.anchorId]
-
-          if (holeId && this.holeSystem) {
-            const hole = this.holeSystem.holes.find((h) => h.id === holeId)
-            if (hole) {
-              nodeId = resolveElectricalNodeId(id, port.anchorId, "pin", hole.groupKey)
-            }
-          }
-
-          if (!nodeId) {
-            nodeId = resolveElectricalNodeId(id, port.anchorId, "pin", null)
+      if (anchor.kind === "pin" && anchor.componentId) {
+        // Si el componente está insertado, resolver al groupKey del hole
+        const comp = this.appState.components.find(c => c.id === anchor.componentId)
+        if (comp?.inserted && comp?.pinConnections) {
+          const holeId = comp.pinConnections[anchor.id]
+          if (holeId) {
+            const gk = holeGroupMap.get(holeId)
+            if (gk) return `group:${gk}`
           }
         }
+        return `pin:${anchor.componentId}:${anchor.id}`
+      }
 
-        if (nodeId) {
-          portNodeMap[port.id] = nodeId
-          nodes.add(nodeId)
+      return null
+    }
+
+    // Procesar todos los componentes
+    for (const comp of this.appState.components) {
+
+      if (comp.type === "battery5v") {
+        const posNode = `terminal:${comp.id}:positive`
+        const negNode = `terminal:${comp.id}:negative`
+        batteries.push({ posNode, negNode, componentId: comp.id })
+        // Asegurar que los nodos existan aunque no tengan aristas aún
+        if (!edges.has(posNode)) edges.set(posNode, new Set())
+        if (!edges.has(negNode)) edges.set(negNode, new Set())
+      }
+
+      if (comp.type === "led" && comp.inserted && comp.pinConnections) {
+        const anodeHoleId = comp.pinConnections["anode"]
+        const cathodeHoleId = comp.pinConnections["cathode"]
+
+        const anodeGK = anodeHoleId ? holeGroupMap.get(anodeHoleId) : null
+        const cathodeGK = cathodeHoleId ? holeGroupMap.get(cathodeHoleId) : null
+
+        const anodeNode = anodeGK ? `group:${anodeGK}` : (anodeHoleId ? `hole:${anodeHoleId}` : null)
+        const cathodeNode = cathodeGK ? `group:${cathodeGK}` : (cathodeHoleId ? `hole:${cathodeHoleId}` : null)
+
+        if (anodeNode && cathodeNode) {
+          leds.push({ anodeNode, cathodeNode, componentId: comp.id })
+          // El LED crea una arista dirigida lógica (ánodo→cátodo)
+          // En el grafo la ponemos bidireccional pero la validamos en simulación
+          addEdge(anodeNode, cathodeNode)
         }
       }
 
-      components.push({
-        id,
-        type,
-        mesh,
-        portNodeMap,
-        internalEdges,
-      })
+      if (comp.type === "resistor" && comp.inserted && comp.pinConnections) {
+        const leftHoleId = comp.pinConnections["left"]
+        const rightHoleId = comp.pinConnections["right"]
 
-      for (const edge of internalEdges) {
-        if (edge.isSource) continue
+        const leftGK = leftHoleId ? holeGroupMap.get(leftHoleId) : null
+        const rightGK = rightHoleId ? holeGroupMap.get(rightHoleId) : null
 
-        const fromNode = portNodeMap[edge.from]
-        const toNode = portNodeMap[edge.to]
+        const leftNode = leftGK ? `group:${leftGK}` : (leftHoleId ? `hole:${leftHoleId}` : null)
+        const rightNode = rightGK ? `group:${rightGK}` : (rightHoleId ? `hole:${rightHoleId}` : null)
 
-        if (fromNode && toNode) {
-          edges.push({
-            from: fromNode,
-            to: toNode,
-            resistance: edge.resistance,
-            isLED: !!edge.isLED,
-            forwardVoltage: edge.forwardVoltage ?? 0,
-            componentId: id,
-          })
+        if (leftNode && rightNode) {
+          resistors.push({ leftNode, rightNode, componentId: comp.id })
+          addEdge(leftNode, rightNode)
+        }
+      }
+
+      // Los cables crean aristas directas entre sus anchors
+      if (comp.type === "wire" && comp.meta?.startAnchor && comp.meta?.endAnchor) {
+        const startNode = anchorToNode(comp.meta.startAnchor)
+        const endNode = anchorToNode(comp.meta.endAnchor)
+        if (startNode && endNode) {
+          addEdge(startNode, endNode)
         }
       }
     }
 
-    // --- Procesar cables ---
-    for (const [id, mesh] of this.stateSyncSystem.meshById) {
-      if (mesh?.userData?.componentType !== "wire") continue
-      if (!mesh?.userData?.isWire) continue
+    return { edges, batteries, leds, resistors }
+  }
 
-      const startAnchor = mesh.userData.startAnchor
-      const endAnchor = mesh.userData.endAnchor
+  // ---------------------------
+  // Simulación
+  // ---------------------------
 
-      if (!startAnchor || !endAnchor) continue
+  _simulate(graph, _stateChanged) {
+    const { edges, batteries, leds, resistors } = graph
 
-      const startNode = this._resolveAnchorToNode(startAnchor)
-      const endNode = this._resolveAnchorToNode(endAnchor)
-
-      if (!startNode || !endNode) continue
-      if (startNode === endNode) continue
-
-      nodes.add(startNode)
-      nodes.add(endNode)
-
-      edges.push({
-        from: startNode,
-        to: endNode,
-        resistance: 0,
-        isWire: true,
-        componentId: id,
-      })
+    // Para cada LED, determinar su estado
+    for (const led of leds) {
+      const result = this._evaluateLED(led, graph)
+      this._applyLEDState(led.componentId, result)
     }
 
-    return { nodes, edges, components }
+    // Si no hay LEDs, no hay nada que mostrar
   }
 
   /**
-   * Convierte un anchor serializado al nodo eléctrico correspondiente.
+   * Evalúa si un LED debe encenderse.
+   *
+   * Busca si existe alguna batería tal que:
+   *   - Hay camino de batería(+) → LED(ánodo)
+   *   - Hay camino de LED(cátodo) → batería(-)
+   *   - Al menos uno de esos caminos pasa por una resistencia
+   *
+   * Retorna: "on" | "no_resistor" | "off"
    */
-  _resolveAnchorToNode(anchor) {
-    if (!anchor) return null
-
-    if (anchor.kind === "hole") {
-      if (!this.holeSystem) return null
-      const hole = this.holeSystem.holes.find(
-        (h) => h.id === (anchor.holeId || anchor.id)
-      )
-      if (!hole) return null
-      return `hole_${hole.groupKey}`
-    }
-
-    if (anchor.kind === "terminal") {
-      return resolveElectricalNodeId(
-        anchor.componentId,
-        anchor.id,
-        "terminal",
-        null
-      )
-    }
-
-    if (anchor.kind === "pin") {
-      if (!this.holeSystem) return null
-
-      const mesh = this.stateSyncSystem?.getMeshById(anchor.componentId)
-      const holeId = mesh?.userData?.pinConnections?.[anchor.id]
-
-      if (holeId) {
-        const hole = this.holeSystem.holes.find((h) => h.id === holeId)
-        if (hole) return `hole_${hole.groupKey}`
-      }
-
-      return resolveElectricalNodeId(anchor.componentId, anchor.id, "pin", null)
-    }
-
-    return null
-  }
-
-  /**
-   * Resuelve el grafo eléctrico.
-   */
-  _solveGraph({ nodes, edges, components }) {
-    const results = []
-
-    const batteries = components.filter((c) => c.type === "battery5v")
+  _evaluateLED(led, graph) {
+    const { edges, batteries, resistors } = graph
 
     for (const battery of batteries) {
-      const posNode = battery.portNodeMap["positive"]
-      const negNode = battery.portNodeMap["negative"]
+      // BFS desde batería(+) hacia LED(ánodo), registrando si pasamos por resistencia
+      const toAnode = this._bfsWithResistorCheck(
+        battery.posNode,
+        led.anodeNode,
+        battery.negNode, // no cruzar el negativo en este sentido
+        edges,
+        resistors
+      )
 
-      if (!posNode || !negNode) continue
+      if (!toAnode.reached) continue
 
-      const adj = new Map()
-      for (const node of nodes) adj.set(node, [])
+      // BFS desde LED(cátodo) hacia batería(-), registrando si pasamos por resistencia
+      const toCathode = this._bfsWithResistorCheck(
+        led.cathodeNode,
+        battery.negNode,
+        battery.posNode, // no cruzar el positivo en este sentido
+        edges,
+        resistors
+      )
 
-      for (const edge of edges) {
-        if (!adj.has(edge.from)) adj.set(edge.from, [])
-        if (!adj.has(edge.to)) adj.set(edge.to, [])
+      if (!toCathode.reached) continue
 
-        adj.get(edge.from).push({ node: edge.to, edge })
-        adj.get(edge.to).push({ node: edge.from, edge })
-      }
+      // Circuito completo — ¿hay resistencia en alguno de los dos tramos?
+      const hasResistor = toAnode.passedResistor || toCathode.passedResistor
 
-      const paths = this._findAllPaths(adj, posNode, negNode, 20)
-
-      if (paths.length === 0) continue
-
-      for (const path of paths) {
-        const { totalResistance, ledEdges, resistorEdges } =
-          this._analyzePath(path)
-
-        const ledCount = ledEdges.length
-        const voltageDropLEDs = ledCount * LED_FORWARD_VOLTAGE
-        const availableVoltage = BATTERY_VOLTAGE - voltageDropLEDs
-
-        if (availableVoltage <= 0) continue
-
-        const effectiveResistance = Math.max(totalResistance, 0.1)
-        const current = availableVoltage / effectiveResistance
-
-        const hasResistor = resistorEdges.length > 0
-
-        for (const ledEdge of ledEdges) {
-          results.push({
-            componentId: ledEdge.componentId,
-            current,
-            voltage: availableVoltage,
-            hasResistor,
-            isConnected: true,
-          })
-        }
-      }
+      if (hasResistor) return "on"
+      return "no_resistor"
     }
 
-    return results
+    return "off"
   }
 
   /**
-   * BFS para encontrar todos los caminos simples entre start y end.
+   * BFS desde `startNode` hasta `targetNode`.
+   * Evita cruzar `blockedNode` para no crear caminos inválidos.
+   * Registra si el camino pasa por algún nodo de resistencia.
+   *
+   * Retorna { reached: bool, passedResistor: bool }
    */
-  _findAllPaths(adj, start, end, maxDepth = 15) {
-    const paths = []
-    const queue = [{ node: start, path: [], visited: new Set([start]) }]
+  _bfsWithResistorCheck(startNode, targetNode, blockedNode, edges, resistors) {
+    if (startNode === targetNode) return { reached: true, passedResistor: false }
+
+    // Construir set de nodos que son parte de resistencias
+    const resistorNodes = new Set()
+    for (const r of resistors) {
+      resistorNodes.add(r.leftNode)
+      resistorNodes.add(r.rightNode)
+    }
+
+    const visited = new Set()
+    // Cola: [currentNode, passedResistor]
+    const queue = [[startNode, false]]
+    visited.add(startNode)
 
     while (queue.length > 0) {
-      const { node, path, visited } = queue.shift()
+      const [current, passedR] = queue.shift()
 
-      if (node === end) {
-        paths.push(path)
-        continue
-      }
+      const neighbors = edges.get(current)
+      if (!neighbors) continue
 
-      if (path.length >= maxDepth) continue
+      for (const neighbor of neighbors) {
+        if (visited.has(neighbor)) continue
+        if (neighbor === blockedNode) continue
 
-      const neighbors = adj.get(node) || []
-      for (const { node: next, edge } of neighbors) {
-        if (visited.has(next)) continue
+        const nowPassedR = passedR || resistorNodes.has(neighbor)
 
-        const newVisited = new Set(visited)
-        newVisited.add(next)
+        if (neighbor === targetNode) {
+          return { reached: true, passedResistor: nowPassedR }
+        }
 
-        queue.push({
-          node: next,
-          path: [...path, edge],
-          visited: newVisited,
-        })
+        visited.add(neighbor)
+        queue.push([neighbor, nowPassedR])
       }
     }
 
-    return paths
-  }
-
-  /**
-   * Analiza un camino y extrae su resistencia total y componentes.
-   */
-  _analyzePath(pathEdges) {
-    let totalResistance = 0
-    const ledEdges = []
-    const resistorEdges = []
-    const wireEdges = []
-
-    for (const edge of pathEdges) {
-      totalResistance += edge.resistance ?? 0
-
-      if (edge.isLED) ledEdges.push(edge)
-      else if (edge.isWire) wireEdges.push(edge)
-      else if (!edge.isLED && !edge.isWire && edge.resistance > 0) resistorEdges.push(edge)
-    }
-
-    return { totalResistance, ledEdges, resistorEdges, wireEdges }
+    return { reached: false, passedResistor: false }
   }
 
   // ---------------------------
-  // Aplicar resultados visuales
+  // Aplicar estado visual al LED
   // ---------------------------
 
-  _applyResults(results) {
-    const activeLedIds = new Set(results.map((r) => r.componentId))
+  _applyLEDState(componentId, state) {
+    const mesh = this.stateSyncSystem?.getMeshById(componentId)
+    if (!mesh) return
 
-    for (const [id, mesh] of this.stateSyncSystem.meshById) {
-      if (mesh?.userData?.componentType !== "led") continue
+    // Buscar los materiales del body y dome del LED
+    mesh.traverse((child) => {
+      if (!child.isMesh) return
+      if (child.name !== "LEDBody" && child.name !== "LEDDome") return
 
-      const ledState = this._getLedState(id, mesh)
+      const mat = child.material
+      if (!mat) return
 
-      if (ledState.state === LED_STATE.BURNED) continue
+      // Asegurar que el material tiene emissive
+      if (!("emissive" in mat)) return
 
-      if (!activeLedIds.has(id)) {
-        if (ledState.state !== LED_STATE.OFF) {
-          this._setLedState(id, mesh, LED_STATE.OFF)
+      if (state === "on") {
+        // Encendido: color vivo + emissive fuerte
+        mat.color.setHex(0xff2222)
+        mat.emissive.setHex(0xff1111)
+        mat.emissiveIntensity = 1.8
+        mat.opacity = 1.0
+        mat.transparent = false
+      } else if (state === "no_resistor") {
+        // Sin resistencia: parpadeo de advertencia (naranja)
+        if (this._blinkOn) {
+          mat.color.setHex(0xff6600)
+          mat.emissive.setHex(0xff3300)
+          mat.emissiveIntensity = 1.4
+        } else {
+          mat.color.setHex(0xff3b3b)
+          mat.emissive.setHex(0x000000)
+          mat.emissiveIntensity = 0
         }
+        mat.transparent = false
+      } else {
+        // Apagado: color base sin emissive
+        mat.color.setHex(0xff3b3b)
+        mat.emissive.setHex(0x000000)
+        mat.emissiveIntensity = 0
+        mat.transparent = false
       }
-    }
-
-    for (const result of results) {
-      const mesh = this.stateSyncSystem.getMeshById(result.componentId)
-      if (!mesh) continue
-      if (mesh.userData?.componentType !== "led") continue
-
-      const ledState = this._getLedState(result.componentId, mesh)
-
-      if (ledState.state === LED_STATE.BURNED) continue
-
-      const { current, hasResistor } = result
-
-      if (current < LED_MIN_CURRENT) {
-        this._setLedState(result.componentId, mesh, LED_STATE.OFF)
-        continue
-      }
-
-      if (!hasResistor && current >= LED_BURN_CURRENT) {
-        if (ledState.state !== LED_STATE.BURNING && ledState.state !== LED_STATE.BURNED) {
-          this._setLedState(result.componentId, mesh, LED_STATE.BURNING)
-        }
-        continue
-      }
-
-      if (!hasResistor && current >= LED_MAX_SAFE_CURRENT) {
-        if (ledState.state !== LED_STATE.BURNING && ledState.state !== LED_STATE.BURNED) {
-          this._setLedState(result.componentId, mesh, LED_STATE.BURNING)
-        }
-        continue
-      }
-
-      if (ledState.state !== LED_STATE.ON) {
-        this._setLedState(result.componentId, mesh, LED_STATE.ON)
-      }
-    }
-  }
-
-  // ---------------------------
-  // Estado y visual del LED
-  // ---------------------------
-
-  _getLedState(id, mesh) {
-    if (!this._ledStates.has(id)) {
-      // Buscar LEDBody y LEDDome una sola vez por nombre
-      let bodyMesh = null
-      let domeMesh = null
-
-      mesh.traverse((child) => {
-        if (child.name === "LEDBody") bodyMesh = child
-        if (child.name === "LEDDome") domeMesh = child
-      })
-
-      this._ledStates.set(id, {
-        state: LED_STATE.OFF,
-        burnMs: 0,
-        mesh,
-        bodyMesh,
-        domeMesh,
-        bodyElecMat: null,
-        domeElecMat: null,
-        bodyOrigMat: null,
-        domeOrigMat: null,
-      })
-    }
-    return this._ledStates.get(id)
-  }
-
-  _setLedState(id, mesh, newState) {
-    const ledState = this._getLedState(id, mesh)
-    const prevState = ledState.state
-
-    if (prevState === newState) return
-    if (prevState === LED_STATE.BURNED) return
-
-    ledState.state = newState
-    ledState.mesh = mesh
-
-    if (newState === LED_STATE.BURNING) {
-      ledState.burnMs = 0
-    }
-
-    this._applyLedVisual(ledState, newState)
-  }
-
-  _applyLedVisual(ledState, state) {
-    const { bodyMesh, domeMesh } = ledState
-    if (!bodyMesh && !domeMesh) return
-
-    if (state === LED_STATE.OFF) {
-      this._restoreLedMaterial(ledState)
-      return
-    }
-
-    // Clonar materiales una sola vez
-    if (bodyMesh && !ledState.bodyElecMat) {
-      ledState.bodyOrigMat = bodyMesh.material
-      ledState.bodyElecMat = bodyMesh.material.clone()
-      bodyMesh.material = ledState.bodyElecMat
-    }
-    if (domeMesh && !ledState.domeElecMat) {
-      ledState.domeOrigMat = domeMesh.material
-      ledState.domeElecMat = domeMesh.material.clone()
-      domeMesh.material = ledState.domeElecMat
-    }
-
-    switch (state) {
-      case LED_STATE.ON:
-        if (ledState.bodyElecMat) {
-          ledState.bodyElecMat.color.setHex(0xff3b3b)
-          ledState.bodyElecMat.emissive?.setHex(0xff2200)
-          ledState.bodyElecMat.emissiveIntensity = 1.8
-        }
-        if (ledState.domeElecMat) {
-          ledState.domeElecMat.color.setHex(0xff3b3b)
-          ledState.domeElecMat.emissive?.setHex(0xff2200)
-          ledState.domeElecMat.emissiveIntensity = 1.8
-        }
-        break
-
-      case LED_STATE.BURNING:
-        if (ledState.bodyElecMat) {
-          ledState.bodyElecMat.color.setHex(0xffffff)
-          ledState.bodyElecMat.emissive?.setHex(0xff8800)
-          ledState.bodyElecMat.emissiveIntensity = 2.5
-        }
-        if (ledState.domeElecMat) {
-          ledState.domeElecMat.color.setHex(0xffffff)
-          ledState.domeElecMat.emissive?.setHex(0xff8800)
-          ledState.domeElecMat.emissiveIntensity = 2.5
-        }
-        break
-
-      case LED_STATE.BURNED:
-        if (ledState.bodyElecMat) {
-          ledState.bodyElecMat.color.setHex(0x1a1a1a)
-          ledState.bodyElecMat.emissive?.setHex(0x000000)
-          ledState.bodyElecMat.emissiveIntensity = 0
-        }
-        if (ledState.domeElecMat) {
-          ledState.domeElecMat.color.setHex(0x1a1a1a)
-          ledState.domeElecMat.emissive?.setHex(0x000000)
-          ledState.domeElecMat.emissiveIntensity = 0
-        }
-        break
-    }
-  }
-
-  _restoreLedMaterial(ledState) {
-    if (ledState.bodyMesh && ledState.bodyOrigMat) {
-      ledState.bodyMesh.material = ledState.bodyOrigMat
-      ledState.bodyElecMat = null
-    }
-    if (ledState.domeMesh && ledState.domeOrigMat) {
-      ledState.domeMesh.material = ledState.domeOrigMat
-      ledState.domeElecMat = null
-    }
-  }
-
-  // ---------------------------
-  // Parpadeo burning
-  // ---------------------------
-
-  _updateFlicker(dt) {
-    for (const [id, ledState] of this._ledStates) {
-      if (ledState.state !== LED_STATE.BURNING) continue
-
-      const mesh = ledState.mesh
-      if (!mesh) continue
-
-      ledState.burnMs += dt * 1000
-
-      if (ledState.burnMs >= BURN_TIME_MS) {
-        this._setLedState(id, mesh, LED_STATE.BURNED)
-        console.warn(`🔥 LED ${id} se ha quemado (sin resistencia)`)
-        continue
-      }
-
-      const flickerSin = Math.sin(this._flickerT * BURN_FLICKER_HZ * Math.PI * 2)
-      const flickerVal = (flickerSin + 1) * 0.5
-
-      const r = 1.0
-      const g = 0.3 + flickerVal * 0.5
-      const b = flickerVal * 0.3
-
-      if (ledState.bodyElecMat) {
-        ledState.bodyElecMat.color.setRGB(r, g, b)
-        ledState.bodyElecMat.emissive?.setRGB(r * 0.8, g * 0.5, 0)
-        ledState.bodyElecMat.emissiveIntensity = 1.5 + flickerVal * 2.0
-      }
-      if (ledState.domeElecMat) {
-        ledState.domeElecMat.color.setRGB(r, g, b)
-        ledState.domeElecMat.emissive?.setRGB(r * 0.8, g * 0.5, 0)
-        ledState.domeElecMat.emissiveIntensity = 1.5 + flickerVal * 2.0
-      }
-    }
-  }
-
-  // ---------------------------
-  // Reset
-  // ---------------------------
-
-  resetAllLedStates() {
-    for (const [, ledState] of this._ledStates) {
-      this._restoreLedMaterial(ledState)
-    }
-    this._ledStates.clear()
-  }
-
-  resetLedState(componentId) {
-    const ledState = this._ledStates.get(componentId)
-    if (!ledState) return
-    this._restoreLedMaterial(ledState)
-    this._ledStates.delete(componentId)
+    })
   }
 }

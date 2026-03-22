@@ -52,19 +52,37 @@ export class ComponentFactory {
       case "led": {
         const group = new THREE.Group()
 
-        const redMat = new THREE.MeshStandardMaterial({ color: 0xff3b3b })
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
+
+        // ✅ Material propio por instancia — el ElectricalSystem lo modificará
+        const bodyMat = new THREE.MeshStandardMaterial({
+          color: 0xff3b3b,
+          emissive: new THREE.Color(0x000000),
+          emissiveIntensity: 0,
+          roughness: 0.35,
+          metalness: 0.0,
+        })
+
+        const domeMat = new THREE.MeshStandardMaterial({
+          color: 0xff3b3b,
+          emissive: new THREE.Color(0x000000),
+          emissiveIntensity: 0,
+          roughness: 0.25,
+          metalness: 0.0,
+          transparent: true,
+          opacity: 0.88,
+        })
 
         const body = new THREE.Mesh(
           new THREE.CylinderGeometry(0.02, 0.02, 0.033, 20),
-          redMat
+          bodyMat
         )
         body.name = "LEDBody"
         body.position.y = 0.026
 
         const dome = new THREE.Mesh(
           new THREE.SphereGeometry(0.02, 20, 20),
-          redMat
+          domeMat
         )
         dome.name = "LEDDome"
         dome.position.y = 0.041
@@ -240,9 +258,6 @@ export class ComponentFactory {
     mesh.userData.restSnapMode = "freeze"
     mesh.userData.inserted = !!data.inserted
     mesh.userData.pinConnections = data.pinConnections || null
-
-    // ← ÚNICA adición respecto al original:
-    // Guardar meta para que ElectricalSystem pueda leer resistance, voltage, etc.
     mesh.userData.meta = data.meta || {}
 
     // ---------------------------

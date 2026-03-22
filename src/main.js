@@ -4,6 +4,7 @@ import { VRManager } from "./core/VRManager.js"
 import { AppState } from "./core/AppState.js"
 import { StateSyncSystem } from "./systems/StateSyncSystem.js"
 import { InteractionSystem } from "./systems/InteractionSystem.js"
+import { ElectricalSystem } from "./systems/ElectricalSystem.js"
 
 import { createProtoboard } from "./components/Protoboard.js"
 import { HoleSystem } from "./systems/HoleSystem.js"
@@ -87,10 +88,14 @@ for (const hole of holeSystem.holes) {
     new THREE.SphereGeometry(0.0025, 6, 6),
     holeMat
   )
-
   dot.position.copy(hole.worldPos)
   scene.add(dot)
 }
+
+// ---------------------------
+// Sistema eléctrico
+// ---------------------------
+const electricalSystem = new ElectricalSystem(appState, stateSyncSystem, holeSystem)
 
 // ---------------------------
 // Helpers: IDs y acciones
@@ -349,5 +354,6 @@ renderer.setAnimationLoop(() => {
   interactionSystem.update()
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
+  electricalSystem.update(dt)
   sceneManager.render()
 })
