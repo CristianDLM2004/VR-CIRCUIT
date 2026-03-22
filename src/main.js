@@ -18,9 +18,9 @@ const { scene, camera, renderer } = sceneManager
 
 new VRManager(renderer)
 
-const appState         = new AppState()
+const appState          = new AppState()
 const interactionSystem = new InteractionSystem(sceneManager, appState)
-const stateSyncSystem  = new StateSyncSystem(scene, appState, interactionSystem)
+const stateSyncSystem   = new StateSyncSystem(scene, appState, interactionSystem)
 interactionSystem.setStateSyncSystem(stateSyncSystem)
 
 // ---------------------------
@@ -50,8 +50,7 @@ scene.add(table)
 table.updateMatrixWorld(true)
 
 interactionSystem.registerSurface(floor, { type: "floor" })
-
-const tableBox    = new THREE.Box3().setFromObject(table)
+const tableBox = new THREE.Box3().setFromObject(table)
 const tableMargin = 0.12
 interactionSystem.registerSurface(table, {
   type: "table",
@@ -97,31 +96,28 @@ function genId(prefix = "cmp") {
 function addBattery5V() {
   const id = genId("battery5v")
   const p  = protoboard.position.clone(); p.y += 0.15; p.z += 0.12
-  const data = { id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { voltage: 5 } }
-  appState.addComponent(data)
-  stateSyncSystem.addMeshFromComponent(data)
+  appState.addComponent({ id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { voltage: 5 } })
+  stateSyncSystem.addMeshFromComponent({ id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { voltage: 5 } })
 }
 
 function addLed() {
   const id = genId("led")
   const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.12
-  const data = { id, type: "led", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { color: "red" } }
-  appState.addComponent(data)
-  stateSyncSystem.addMeshFromComponent(data)
+  const data = { id, type: "led", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { color: "red" } }
+  appState.addComponent(data); stateSyncSystem.addMeshFromComponent(data)
 }
 
 function addResistor() {
   const id = genId("resistor")
   const p  = protoboard.position.clone(); p.y += 0.32; p.z += 0.12
-  const data = { id, type: "resistor", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { resistance: 220, bands: ["red", "red", "brown", "gold"] } }
-  appState.addComponent(data)
-  stateSyncSystem.addMeshFromComponent(data)
+  const data = { id, type: "resistor", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { resistance: 220, bands: ["red","red","brown","gold"] } }
+  appState.addComponent(data); stateSyncSystem.addMeshFromComponent(data)
 }
 
 function addButton() {
   const id = genId("button")
   const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.20
-  const data = { id, type: "button", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: {} }
+  const data = { id, type: "button", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: {} }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   if (mesh) mesh.userData._appStateRef = appState
@@ -130,7 +126,7 @@ function addButton() {
 function addSwitch() {
   const id = genId("switch")
   const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.28
-  const data = { id, type: "switch", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { switchState: false } }
+  const data = { id, type: "switch", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { switchState: false } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   if (mesh) mesh.userData._appStateRef = appState
@@ -147,7 +143,6 @@ function loadState() {
   appState.loadFromObject(JSON.parse(raw))
   physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
-  // Restaurar _appStateRef en switches y botones reconstruidos
   for (const mesh of stateSyncSystem.meshById.values()) {
     if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent) {
       mesh.userData._appStateRef = appState
@@ -165,26 +160,37 @@ function clearScene() {
 }
 
 // ---------------------------
-// Modo cable — toggle con feedback visual
+// Modo cable — toggle
 // ---------------------------
 let wireModeActive = false
-let setWireModeVisualFn = null   // se asigna después de crear el panel
+let setWireModeVisualFn = null
 
 function toggleWireMode() {
   wireModeActive = !wireModeActive
-
-  if (typeof interactionSystem.setToolMode === "function") {
-    interactionSystem.setToolMode(wireModeActive ? "wire" : "grab")
-  } else {
-    interactionSystem.toolMode = wireModeActive ? "wire" : "grab"
-  }
-
-  // Actualizar color del botón en el panel
-  if (typeof setWireModeVisualFn === "function") {
-    setWireModeVisualFn(wireModeActive)
-  }
-
+  interactionSystem.setToolMode(wireModeActive ? "wire" : "grab")
+  setWireModeVisualFn?.(wireModeActive)
   console.log(wireModeActive ? "🧵 Modo cable ACTIVADO" : "✋ Modo cable DESACTIVADO")
+}
+
+// ---------------------------
+// Modo app — edición / simulación
+// ---------------------------
+let isSimMode = false
+let setSimModeVisualFn = null
+
+function toggleAppMode() {
+  isSimMode = !isSimMode
+  interactionSystem.setAppMode(isSimMode ? "sim" : "edit")
+  setSimModeVisualFn?.(isSimMode)
+
+  // En modo simulación desactivar el cable si estaba activo
+  if (isSimMode && wireModeActive) {
+    wireModeActive = false
+    interactionSystem.setToolMode("grab")
+    setWireModeVisualFn?.(false)
+  }
+
+  console.log(isSimMode ? "⚡ Modo SIMULACIÓN" : "🔧 Modo EDICIÓN")
 }
 
 // ---------------------------
@@ -193,7 +199,7 @@ function toggleWireMode() {
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY     = -Math.PI / 6
 
-const { group: vrPanel, buttons: panelButtons, setWireModeVisual } = createVRPanel({
+const { group: vrPanel, buttons: panelButtons, setWireModeVisual, setSimModeVisual } = createVRPanel({
   position:   panelWorldPos,
   rotationY:  panelRotY,
   onAdd:      addBattery5V,
@@ -204,12 +210,13 @@ const { group: vrPanel, buttons: panelButtons, setWireModeVisual } = createVRPan
   onWire:     toggleWireMode,
   onSave:     saveState,
   onLoad:     loadState,
+  onMode:     toggleAppMode,
 })
 
-setWireModeVisualFn = setWireModeVisual   // guardar referencia para usarla en toggleWireMode
+setWireModeVisualFn = setWireModeVisual
+setSimModeVisualFn  = setSimModeVisual
 
 scene.add(vrPanel)
-
 for (const b of panelButtons) interactionSystem.register(b)
 
 vrPanel.traverse((o) => {
@@ -232,26 +239,20 @@ function createClearSceneButton({ position, rotationY, onPress }) {
     new THREE.CylinderGeometry(0.09, 0.11, 0.08, 20),
     new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
   )
-  base.position.y = 0.04
-  group.add(base)
+  base.position.y = 0.04; group.add(base)
 
   const button = new THREE.Mesh(
     new THREE.CylinderGeometry(0.07, 0.07, 0.035, 24),
     new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.55 })
   )
-  button.name = "BtnClearScene"
-  button.position.y = 0.095
-  button.userData.isUI      = true
-  button.userData.uiAction  = "clear-scene"
-  button.userData._lastPressMs = 0
-  button.userData._cooldownMs  = 500
+  button.name = "BtnClearScene"; button.position.y = 0.095
+  button.userData.isUI = true; button.userData.uiAction = "clear-scene"
+  button.userData._lastPressMs = 0; button.userData._cooldownMs = 500
   button.userData.onPress = () => {
     const now = performance.now()
     if (now - button.userData._lastPressMs < button.userData._cooldownMs) return
     button.userData._lastPressMs = now
-    // Animación escala
-    button.scale.set(0.9, 0.9, 0.9)
-    setTimeout(() => button.scale.set(1, 1, 1), 100)
+    button.scale.set(0.9, 0.9, 0.9); setTimeout(() => button.scale.set(1,1,1), 100)
     onPress()
   }
   group.add(button)
@@ -285,10 +286,7 @@ clearSceneButtonGroup.traverse((o) => {
 // Trash System
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
-const trashBin    = trashSystem.createTrashBin({
-  parent:   scene,
-  position: new THREE.Vector3(-0.55, 0.0, -0.10),
-})
+const trashBin    = trashSystem.createTrashBin({ parent: scene, position: new THREE.Vector3(-0.55, 0.0, -0.10) })
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -315,6 +313,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "n") addButton()
   if (k === "m") addSwitch()
   if (k === "w") toggleWireMode()
+  if (k === "e") toggleAppMode()
   if (k === "s") saveState()
   if (k === "l") loadState()
   if (k === "x") clearScene()
