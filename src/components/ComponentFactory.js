@@ -13,28 +13,24 @@ export class ComponentFactory {
         const plusMat = new THREE.MeshStandardMaterial({ color: 0xd9534f })
         const minusMat = new THREE.MeshStandardMaterial({ color: 0x5bc0de })
 
-        // cuerpo principal centrado en el origen
         const body = new THREE.Mesh(
           new THREE.BoxGeometry(0.08, 0.11, 0.05),
           bodyMat
         )
         body.position.y = 0
 
-        // tapa superior
         const top = new THREE.Mesh(
           new THREE.BoxGeometry(0.08, 0.012, 0.05),
           topMat
         )
         top.position.y = 0.061
 
-        // terminal positivo
         const plusTerminal = new THREE.Mesh(
           new THREE.CylinderGeometry(0.006, 0.006, 0.008, 14),
           plusMat
         )
         plusTerminal.position.set(-0.018, 0.071, 0)
 
-        // terminal negativo
         const minusTerminal = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0045, 0.0045, 0.008, 14),
           minusMat
@@ -46,7 +42,6 @@ export class ComponentFactory {
         group.add(plusTerminal)
         group.add(minusTerminal)
 
-        // La superficie real de apoyo es solo el cuerpo principal
         group.userData.surfaceContactObject = body
         group.userData.surfaceUpright = true
 
@@ -57,14 +52,7 @@ export class ComponentFactory {
       case "led": {
         const group = new THREE.Group()
 
-        // Materiales del LED — se clonarán individualmente por ElectricalSystem
-        // para no compartir estado entre instancias
-        const redMat = new THREE.MeshStandardMaterial({
-          color: 0xff3b3b,
-          roughness: 0.3,
-          metalness: 0.0,
-          // emissive se asigna dinámicamente por ElectricalSystem
-        })
+        const redMat = new THREE.MeshStandardMaterial({ color: 0xff3b3b })
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
 
         const body = new THREE.Mesh(
@@ -76,7 +64,7 @@ export class ComponentFactory {
 
         const dome = new THREE.Mesh(
           new THREE.SphereGeometry(0.02, 20, 20),
-          redMat.clone() // clonar para que dome y body sean independientes
+          redMat
         )
         dome.name = "LEDDome"
         dome.position.y = 0.041
@@ -85,11 +73,9 @@ export class ComponentFactory {
         const cathodeGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.055, 12)
 
         const anodeLeg = new THREE.Mesh(anodeGeo, legMat)
-        anodeLeg.name = "LEDAnode"
         anodeLeg.position.set(-0.0065, -0.018, 0)
 
         const cathodeLeg = new THREE.Mesh(cathodeGeo, legMat)
-        cathodeLeg.name = "LEDCathode"
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
         group.add(body)
@@ -255,7 +241,8 @@ export class ComponentFactory {
     mesh.userData.inserted = !!data.inserted
     mesh.userData.pinConnections = data.pinConnections || null
 
-    // Guardar meta del componente para el sistema eléctrico
+    // ← ÚNICA adición respecto al original:
+    // Guardar meta para que ElectricalSystem pueda leer resistance, voltage, etc.
     mesh.userData.meta = data.meta || {}
 
     // ---------------------------
@@ -292,9 +279,6 @@ export class ComponentFactory {
           localPos: new THREE.Vector3(0.0065, -0.038, 0),
         },
       ]
-
-      // Estado eléctrico inicial — será controlado por ElectricalSystem
-      mesh.userData.electricalState = "off"
     }
 
     // ---------------------------
@@ -321,68 +305,39 @@ export class ComponentFactory {
     mesh.userData.getPinWorldPositions = function () {
       const results = []
       const worldPos = new THREE.Vector3()
-
       if (!this.pins || !Array.isArray(this.pins)) return results
-
       for (const pin of this.pins) {
         worldPos.copy(pin.localPos)
         mesh.localToWorld(worldPos)
-
-        results.push({
-          id: pin.id,
-          label: pin.label,
-          worldPos: worldPos.clone(),
-        })
+        results.push({ id: pin.id, label: pin.label, worldPos: worldPos.clone() })
       }
-
       return results
     }
 
     mesh.userData.getTerminalWorldPositions = function () {
       const results = []
       const worldPos = new THREE.Vector3()
-
       if (!this.terminals || !Array.isArray(this.terminals)) return results
-
       for (const terminal of this.terminals) {
         worldPos.copy(terminal.localPos)
         mesh.localToWorld(worldPos)
-
-        results.push({
-          id: terminal.id,
-          label: terminal.label,
-          worldPos: worldPos.clone(),
-        })
+        results.push({ id: terminal.id, label: terminal.label, worldPos: worldPos.clone() })
       }
-
       return results
     }
 
     mesh.userData.getConnectionAnchors = function () {
       const results = []
-
       if (Array.isArray(this.terminals)) {
         for (const terminal of this.getTerminalWorldPositions()) {
-          results.push({
-            id: terminal.id,
-            label: terminal.label,
-            kind: "terminal",
-            worldPos: terminal.worldPos.clone(),
-          })
+          results.push({ id: terminal.id, label: terminal.label, kind: "terminal", worldPos: terminal.worldPos.clone() })
         }
       }
-
       if (Array.isArray(this.pins)) {
         for (const pin of this.getPinWorldPositions()) {
-          results.push({
-            id: pin.id,
-            label: pin.label,
-            kind: "pin",
-            worldPos: pin.worldPos.clone(),
-          })
+          results.push({ id: pin.id, label: pin.label, kind: "pin", worldPos: pin.worldPos.clone() })
         }
       }
-
       return results
     }
 
