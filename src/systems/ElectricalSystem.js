@@ -3,14 +3,12 @@
  *
  * Sistema de simulación eléctrica para VR-CIRCUIT.
  *
- * Reconstruye el grafo eléctrico cada N ms, resuelve el circuito
- * y aplica efectos visuales al LED sin interferir con los materiales
- * que usa InteractionSystem para hover/grab.
- *
- * Estrategia de materiales:
- * - Al primer uso, guarda referencias directas a los meshes LEDBody y LEDDome
- * - Clona sus materiales UNA SOLA VEZ y los guarda en userData._elecMat
- * - Nunca hace traverse en cada frame — accede directo por nombre
+ * Correcciones v3:
+ * - _resolveAnchorToNode ahora tiene fallback a worldPos cuando pinConnections
+ *   no está disponible, buscando el hole más cercano en XZ
+ * - _buildGraph también verifica pinConnections actuales del mesh antes de
+ *   usar el anchor serializado del cable
+ * - Sin traverse en el loop — materiales eléctricos por nombre de mesh
  */
 
 import * as THREE from "three"
@@ -24,9 +22,6 @@ import {
   LED_BURN_CURRENT,
 } from "../components/CircuitComponent.js"
 
-// ---------------------------
-// Estados del LED
-// ---------------------------
 export const LED_STATE = {
   OFF: "off",
   ON: "on",
@@ -36,6 +31,9 @@ export const LED_STATE = {
 
 const BURN_TIME_MS = 2500
 const BURN_FLICKER_HZ = 8
+
+// Radio XZ para buscar hole más cercano desde worldPos de un anchor
+const ANCHOR_HOLE_SNAP_RADIUS_XZ = 0.03
 
 export class ElectricalSystem {
   constructor(scene, appState, stateSyncSystem, holeSystem) {
@@ -48,7 +46,7 @@ export class ElectricalSystem {
     this._lastUpdateMs = 0
     this._flickerT = 0
 
-    // componentId → { state, burnMs, bodyMesh, domeMesh, bodyOrigMat, domeOrigMat }
+    // componentId → { state, burnMs, bodyMesh, domeMesh, ... }
     this._ledStates = new Map()
   }
 
@@ -69,7 +67,7 @@ export class ElectricalSystem {
   }
 
   resetAllLedStates() {
-    for (const [id, ledState] of this._ledStates) {
+    for (const [, ledState] of this._ledStates) {
       this._restoreLedMaterial(ledState)
     }
     this._ledStates.clear()
@@ -100,6 +98,7 @@ export class ElectricalSystem {
     if (!this.stateSyncSystem) return { nodes, edges, components }
     if (this.holeSystem) this.holeSystem.updateWorldPositions()
 
+    // --- Componentes ---
     for (const [id, mesh] of this.stateSyncSystem.meshById) {
       const type = mesh?.userData?.componentType
       if (!type || type === "wire") continue
@@ -113,12 +112,16 @@ export class ElectricalSystem {
 
         if (port.kind === "terminal") {
           nodeId = resolveElectricalNodeId(id, port.anchorId, "terminal", null)
+
         } else if (port.kind === "pin") {
+          // Intentar primero con pinConnections actuales del mesh
           const holeId = mesh.userData?.pinConnections?.[port.anchorId]
           if (holeId && this.holeSystem) {
             const hole = this.holeSystem.holes.find((h) => h.id === holeId)
             if (hole) nodeId = resolveElectricalNodeId(id, port.anchorId, "pin", hole.groupKey)
           }
+
+          // Si no está insertado, nodo flotante
           if (!nodeId) nodeId = resolveElectricalNodeId(id, port.anchorId, "pin", null)
         }
 
@@ -147,8 +150,8 @@ export class ElectricalSystem {
       }
     }
 
-    // Cables
-    for (const [id, mesh] of this.stateSyncSystem.meshById) {
+    // --- Cables ---
+    for (const [, mesh] of this.stateSyncSystem.meshById) {
       if (mesh?.userData?.componentType !== "wire") continue
       if (!mesh?.userData?.isWire) continue
 
@@ -158,43 +161,111 @@ export class ElectricalSystem {
 
       const startNode = this._resolveAnchorToNode(startAnchor)
       const endNode = this._resolveAnchorToNode(endAnchor)
+
       if (!startNode || !endNode || startNode === endNode) continue
 
       nodes.add(startNode)
       nodes.add(endNode)
-      edges.push({ from: startNode, to: endNode, resistance: 0, isWire: true, componentId: id })
+      edges.push({
+        from: startNode,
+        to: endNode,
+        resistance: 0,
+        isWire: true,
+      })
     }
 
     return { nodes, edges, components }
   }
 
+  /**
+   * Resuelve un anchor serializado a un nodo eléctrico.
+   *
+   * Orden de resolución:
+   * 1. Si es hole → groupKey del hole
+   * 2. Si es terminal → nodo de terminal de batería
+   * 3. Si es pin → pinConnections actuales del mesh
+   * 4. Si es pin y no hay pinConnections → buscar hole más cercano por worldPos (fallback)
+   * 5. Si nada → nodo flotante
+   */
   _resolveAnchorToNode(anchor) {
     if (!anchor) return null
 
+    // --- Hole directo ---
     if (anchor.kind === "hole") {
       if (!this.holeSystem) return null
-      const hole = this.holeSystem.holes.find((h) => h.id === (anchor.holeId || anchor.id))
+      const hole = this.holeSystem.holes.find(
+        (h) => h.id === (anchor.holeId || anchor.id)
+      )
       if (!hole) return null
       return `hole_${hole.groupKey}`
     }
 
+    // --- Terminal de batería ---
     if (anchor.kind === "terminal") {
+      if (!anchor.componentId) return null
       return resolveElectricalNodeId(anchor.componentId, anchor.id, "terminal", null)
     }
 
+    // --- Pin de componente ---
     if (anchor.kind === "pin") {
-      if (!this.holeSystem) return null
+      if (!anchor.componentId) return null
+
+      // Intentar con pinConnections actuales del mesh
       const mesh = this.stateSyncSystem?.getMeshById(anchor.componentId)
-      const holeId = mesh?.userData?.pinConnections?.[anchor.id]
-      if (holeId) {
-        const hole = this.holeSystem.holes.find((h) => h.id === holeId)
-        if (hole) return `hole_${hole.groupKey}`
+      if (mesh) {
+        const holeId = mesh.userData?.pinConnections?.[anchor.id]
+        if (holeId && this.holeSystem) {
+          const hole = this.holeSystem.holes.find((h) => h.id === holeId)
+          if (hole) return `hole_${hole.groupKey}`
+        }
       }
+
+      // Fallback: buscar hole más cercano por worldPos del anchor
+      // Útil cuando el cable se conectó al pin antes de insertar el componente
+      // o cuando el anchor.worldPos apunta al pin que ya está sobre un hole
+      if (anchor.worldPos && this.holeSystem) {
+        const anchorPos = new THREE.Vector3(
+          anchor.worldPos.x,
+          anchor.worldPos.y,
+          anchor.worldPos.z
+        )
+        const nearestHole = this._findNearestHoleXZ(anchorPos, ANCHOR_HOLE_SNAP_RADIUS_XZ)
+        if (nearestHole) return `hole_${nearestHole.groupKey}`
+      }
+
+      // Sin hole → nodo flotante (no participa en el circuito)
       return resolveElectricalNodeId(anchor.componentId, anchor.id, "pin", null)
     }
 
     return null
   }
+
+  /**
+   * Encuentra el hole más cercano en XZ (ignora diferencia de altura).
+   * Útil para pins de componentes insertados donde Y puede diferir.
+   */
+  _findNearestHoleXZ(worldPos, maxDistXZ) {
+    if (!this.holeSystem) return null
+
+    let best = null
+    let bestDist = maxDistXZ
+
+    for (const hole of this.holeSystem.holes) {
+      const dx = hole.worldPos.x - worldPos.x
+      const dz = hole.worldPos.z - worldPos.z
+      const dist = Math.sqrt(dx * dx + dz * dz)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = hole
+      }
+    }
+
+    return best
+  }
+
+  // ---------------------------
+  // Resolver grafo
+  // ---------------------------
 
   _solveGraph({ nodes, edges, components }) {
     const results = []
@@ -205,8 +276,10 @@ export class ElectricalSystem {
       const negNode = battery.portNodeMap["negative"]
       if (!posNode || !negNode) continue
 
+      // Construir adyacencia
       const adj = new Map()
       for (const node of nodes) adj.set(node, [])
+
       for (const edge of edges) {
         if (!adj.has(edge.from)) adj.set(edge.from, [])
         if (!adj.has(edge.to)) adj.set(edge.to, [])
@@ -219,8 +292,8 @@ export class ElectricalSystem {
 
       for (const path of paths) {
         const { totalResistance, ledEdges, resistorEdges } = this._analyzePath(path)
-        const ledCount = ledEdges.length
-        const voltageDropLEDs = ledCount * LED_FORWARD_VOLTAGE
+
+        const voltageDropLEDs = ledEdges.length * LED_FORWARD_VOLTAGE
         const availableVoltage = 5.0 - voltageDropLEDs
         if (availableVoltage <= 0) continue
 
@@ -229,7 +302,11 @@ export class ElectricalSystem {
         const hasResistor = resistorEdges.length > 0
 
         for (const ledEdge of ledEdges) {
-          results.push({ componentId: ledEdge.componentId, current, hasResistor })
+          results.push({
+            componentId: ledEdge.componentId,
+            current,
+            hasResistor,
+          })
         }
       }
     }
@@ -243,7 +320,12 @@ export class ElectricalSystem {
 
     while (queue.length > 0) {
       const { node, path, visited } = queue.shift()
-      if (node === end) { paths.push(path); continue }
+
+      if (node === end) {
+        paths.push(path)
+        continue
+      }
+
       if (path.length >= maxDepth) continue
 
       for (const { node: next, edge } of (adj.get(node) || [])) {
@@ -274,7 +356,7 @@ export class ElectricalSystem {
   }
 
   // ---------------------------
-  // Aplicar resultados
+  // Aplicar resultados visuales
   // ---------------------------
 
   _applyResults(results) {
@@ -290,7 +372,7 @@ export class ElectricalSystem {
       }
     }
 
-    // Aplicar resultados
+    // Aplicar corriente a LEDs activos
     for (const result of results) {
       const mesh = this.stateSyncSystem.getMeshById(result.componentId)
       if (!mesh || mesh.userData?.componentType !== "led") continue
@@ -331,10 +413,10 @@ export class ElectricalSystem {
 
   _getLedState(id, mesh) {
     if (!this._ledStates.has(id)) {
-      // Buscar los meshes LEDBody y LEDDome por nombre, sin traverse en cada frame
       let bodyMesh = null
       let domeMesh = null
 
+      // Buscar una sola vez por nombre
       mesh.traverse((child) => {
         if (child.name === "LEDBody") bodyMesh = child
         if (child.name === "LEDDome") domeMesh = child
@@ -346,9 +428,10 @@ export class ElectricalSystem {
         mesh,
         bodyMesh,
         domeMesh,
-        // Materiales eléctricos separados — se crean solo si se necesitan
         bodyElecMat: null,
         domeElecMat: null,
+        bodyOrigMat: null,
+        domeOrigMat: null,
       })
     }
     return this._ledStates.get(id)
@@ -365,34 +448,21 @@ export class ElectricalSystem {
     this._applyLedVisual(ledState, newState)
   }
 
-  /**
-   * Aplica el estado visual al LED.
-   *
-   * Estrategia sin interferir con InteractionSystem:
-   * - OFF: restaurar material original
-   * - ON/BURNING/BURNED: asignar un material eléctrico clonado dedicado
-   *
-   * Así el material original del hover (emissive = 0x222222) permanece intacto
-   * cuando el LED está OFF, y cuando está ON tiene su propio material que
-   * InteractionSystem también puede modificar sin problema porque es una copia.
-   */
   _applyLedVisual(ledState, state) {
     const { bodyMesh, domeMesh } = ledState
     if (!bodyMesh && !domeMesh) return
 
     if (state === LED_STATE.OFF) {
-      // Restaurar material original
       this._restoreLedMaterial(ledState)
       return
     }
 
-    // Asegurar materiales eléctricos clonados
+    // Clonar materiales una sola vez
     if (bodyMesh && !ledState.bodyElecMat) {
       ledState.bodyOrigMat = bodyMesh.material
       ledState.bodyElecMat = bodyMesh.material.clone()
       bodyMesh.material = ledState.bodyElecMat
     }
-
     if (domeMesh && !ledState.domeElecMat) {
       ledState.domeOrigMat = domeMesh.material
       ledState.domeElecMat = domeMesh.material.clone()
