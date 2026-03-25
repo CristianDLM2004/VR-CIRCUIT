@@ -30,18 +30,22 @@ export class InteractionSystem {
     this.controllerRayMinLength = 0.08
 
     this.nearEnabled   = true
-    this.nearRadius    = 0.19
+    this.nearRadius    = 0.22
 
-    this.handGrabSurfaceMaxDist  = 0.090
-    this.handGrabSurfaceSlack    = 0.060
-    this.handHoverSurfaceMaxDist = 0.100
+    this.handGrabSurfaceMaxDist  = 0.115
+    this.handGrabSurfaceSlack    = 0.075
+    this.handHoverSurfaceMaxDist = 0.120
 
-    this.handGrabExpandedBoxMargin = 0.040
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.046
-    this.handHoverExpandedBoxMargin = 0.036
+    this.handGrabExpandedBoxMargin = 0.055
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.065
+    this.handHoverExpandedBoxMargin = 0.045
 
-    this.handGrabExpandedSphereMargin = 0.050
-    this.handHoverExpandedSphereMargin = 0.044
+    this.handGrabExpandedSphereMargin = 0.070
+    this.handHoverExpandedSphereMargin = 0.055
+
+    this.insertedGrabBonusBoxMargin = 0.020
+    this.insertedGrabBonusSphereMargin = 0.030
+    this.insertedGrabBonusRadius = 0.025
 
     this.pinchStartDist        = 0.070
     this.pinchEndDist          = 0.100
@@ -112,6 +116,10 @@ export class InteractionSystem {
     this._activePinHoleMarkers = []
 
     this.initXRInputs()
+
+    this.renderer.xr.addEventListener("sessionend", () => {
+      this.handleXRSessionEnd()
+    })
   }
 
   setHoleSystem(hs)       { this.holeSystem = hs }
@@ -239,7 +247,17 @@ export class InteractionSystem {
   }
 
   createHoldState(sourceType, source) {
-    return { active: false, sourceType, source, lastPos: new THREE.Vector3(), lastT: 0, vel: new THREE.Vector3(), samples: [], maxSamples: 8, sampleWindowMs: 120 }
+    return {
+      active: false,
+      sourceType,
+      source,
+      lastPos: new THREE.Vector3(),
+      lastT: 0,
+      vel: new THREE.Vector3(),
+      samples: [],
+      maxSamples: 8,
+      sampleWindowMs: 120,
+    }
   }
 
   createControllerRay() {
@@ -255,6 +273,49 @@ export class InteractionSystem {
     return { line, hitDot: dot }
   }
 
+  handleXRSessionEnd() {
+    for (const h of this.hands) {
+      if (h.heldObject) {
+        const obj = h.heldObject
+        this.scene.attach(obj)
+        this.clearObjectOwner(obj)
+        obj.userData.physics = null
+        h.heldObject = null
+      }
+      h.isPinching = false
+      h.pinchArmed = true
+      h.lostTrackingMs = 0
+      h.openPinchMs = 0
+      h.wirePinchCloseMs = 0
+      this.stopHoldTracking(h.hold)
+    }
+
+    for (const c of this.controllers) {
+      if (c.userData?.heldObject) {
+        const obj = c.userData.heldObject
+        this.scene.attach(obj)
+        this.clearObjectOwner(obj)
+        obj.userData.physics = null
+        c.userData.heldObject = null
+      }
+      if (c.userData?._pressedComponent && typeof c.userData._pressedComponent.userData?.releaseButton === "function") {
+        c.userData._pressedComponent.userData.releaseButton()
+      }
+      c.userData._pressedComponent = null
+      this.stopHoldTracking(c.userData.hold)
+    }
+
+    for (const [, pressed] of this._handHeldButton) {
+      if (typeof pressed.userData?.releaseButton === "function") pressed.userData.releaseButton()
+    }
+    this._handHeldButton.clear()
+
+    this.clearWireHoverAnchor()
+    this.clearWireDraft()
+    this.setHover(null)
+    this.clearActivePinHoleMarkers()
+  }
+
   isHandTrackingActive() {
     const s = this.renderer.xr.getSession?.()
     if (!s) return false
@@ -262,7 +323,10 @@ export class InteractionSystem {
   }
 
   isJointTracked(joint)      { return !!(joint && joint.visible !== false) }
-  isHandEntryTracked(he)     { if (!he?.hand?.joints) return false; return this.isJointTracked(he.hand.joints["thumb-tip"]) && this.isJointTracked(he.hand.joints["index-finger-tip"]) }
+  isHandEntryTracked(he)     {
+    if (!he?.hand?.joints) return false
+    return this.isJointTracked(he.hand.joints["thumb-tip"]) && this.isJointTracked(he.hand.joints["index-finger-tip"])
+  }
 
   setHover(newH) {
     if (this.hovered === newH) return
@@ -277,8 +341,8 @@ export class InteractionSystem {
     }
   }
 
-  distanceToObjectSurface(obj, pt)        { this._box.setFromObject(obj);  return this._box.distanceToPoint(pt) }
-  getObjectCenterDistance(obj, pt)         { this._box.setFromObject(obj);  this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
+  distanceToObjectSurface(obj, pt)        { this._box.setFromObject(obj); return this._box.distanceToPoint(pt) }
+  getObjectCenterDistance(obj, pt)        { this._box.setFromObject(obj); this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
   getExpandedBoxDistance(obj, pt, m=0.02) { this._box2.setFromObject(obj); this._box2.expandByScalar(m); return this._box2.distanceToPoint(pt) }
 
   getExpandedSphereDistance(obj, pt, margin = 0.03) {
@@ -298,8 +362,15 @@ export class InteractionSystem {
   }
 
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
-    const adaptiveBoxMargin = this.getAdaptiveExpandedMargin(obj, baseBoxMargin)
-    const adaptiveSphereMargin = this.getAdaptiveExpandedMargin(obj, baseSphereMargin)
+    const inserted = !!obj?.userData?.inserted || !!obj?.userData?.pinConnections
+
+    const adaptiveBoxMargin =
+      this.getAdaptiveExpandedMargin(obj, baseBoxMargin) +
+      (inserted ? this.insertedGrabBonusBoxMargin : 0)
+
+    const adaptiveSphereMargin =
+      this.getAdaptiveExpandedMargin(obj, baseSphereMargin) +
+      (inserted ? this.insertedGrabBonusSphereMargin : 0)
 
     const sd = this.distanceToObjectSurface(obj, pt)
     const cd = this.getObjectCenterDistance(obj, pt)
@@ -313,7 +384,8 @@ export class InteractionSystem {
       sphereD,
       adaptiveBoxMargin,
       adaptiveSphereMargin,
-      score: sphereD * 5.4 + ed * 3.0 + sd * 1.35 + cd * 0.40,
+      inserted,
+      score: sphereD * 5.8 + ed * 2.8 + sd * 1.15 + cd * 0.32,
     }
   }
 
@@ -435,7 +507,11 @@ export class InteractionSystem {
       const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
       let dist = this.controllerRayMaxLength
 
-      if (this.toolMode === "wire") {
+      if (controller.userData?.heldObject) {
+        const held = controller.userData.heldObject
+        held.getWorldPosition(this._tmpG)
+        dist = THREE.MathUtils.clamp(origin.distanceTo(this._tmpG), this.controllerRayMinLength, this.controllerRayMaxLength)
+      } else if (this.toolMode === "wire") {
         const hoverBelongsToThisController =
           this.wireHoverSourceType === "controller" &&
           this.wireHoverSourceIndex === (controller.userData?.sourceIndex ?? -1)
@@ -1144,14 +1220,15 @@ export class InteractionSystem {
   canHandGrabObject(he, obj) {
     if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) return false
 
-    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
+    const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.008 : 0.0
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     this.getGrabPointWorld(he, this._tmpC)
     const { sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.35
+    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
     if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) return false
     if (ed > 0.0001 && sphereD > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
 
@@ -1163,15 +1240,16 @@ export class InteractionSystem {
     let best = null
     let bestScore = Infinity
 
-    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.008 : 0.0
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
 
+      const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
       const { sd, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
-      const centerLimit = maxDist + adaptiveBoxMargin * 1.35
+      const centerLimit = maxDist + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
 
       if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
       if (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001 && sphereD > 0.0001) continue
@@ -1581,13 +1659,13 @@ export class InteractionSystem {
           if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
           continue
         }
-        const { sd, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(
+        const { sd, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
           obj,
           this._tmpA,
           this.handHoverExpandedBoxMargin,
           this.handHoverExpandedSphereMargin
         )
-        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.35
+        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
         if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
         if (sd > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
         if (score < bestScore) { bestScore = score; best = obj }
@@ -1723,7 +1801,7 @@ export class InteractionSystem {
     this._lastUpdateTime = now
 
     const handsActive = this.isHandTrackingActive()
-    const showControllerRays = this.toolMode === "wire" ? !handsActive : !handsActive
+    const showControllerRays = !handsActive
     this.updateControllerRays(showControllerRays)
 
     if (handsActive) {
