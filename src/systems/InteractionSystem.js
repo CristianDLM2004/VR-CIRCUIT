@@ -24,18 +24,20 @@ export class InteractionSystem {
 
     this.hovered         = null
     this.controllerRays  = []
-    this.controllerRayMaxLength = 1.35
+
+    // Longitud fija del rayo para todos los modos
+    this.controllerRayMaxLength = 0.95
 
     this.nearEnabled   = true
-    this.nearRadius    = 0.145
+    this.nearRadius    = 0.175
 
-    this.handGrabSurfaceMaxDist  = 0.050
-    this.handGrabSurfaceSlack    = 0.030
-    this.handHoverSurfaceMaxDist = 0.065
+    this.handGrabSurfaceMaxDist  = 0.072
+    this.handGrabSurfaceSlack    = 0.045
+    this.handHoverSurfaceMaxDist = 0.085
 
-    this.handGrabExpandedBoxMargin = 0.020
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.026
-    this.handHoverExpandedBoxMargin = 0.016
+    this.handGrabExpandedBoxMargin = 0.030
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.036
+    this.handHoverExpandedBoxMargin = 0.026
 
     this.pinchStartDist        = 0.070
     this.pinchEndDist          = 0.100
@@ -265,9 +267,11 @@ export class InteractionSystem {
     const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffffff }))
     line.name = "ControllerRay"
     line.scale.z = this.controllerRayMaxLength
+
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.01, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }))
     dot.name = "ControllerRayDot"
     dot.position.z = -this.controllerRayMaxLength
+
     return { line, hitDot: dot }
   }
 
@@ -296,6 +300,28 @@ export class InteractionSystem {
   distanceToObjectSurface(obj, pt)        { this._box.setFromObject(obj);  return this._box.distanceToPoint(pt) }
   getObjectCenterDistance(obj, pt)         { this._box.setFromObject(obj);  this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
   getExpandedBoxDistance(obj, pt, m=0.02) { this._box2.setFromObject(obj); this._box2.expandByScalar(m); return this._box2.distanceToPoint(pt) }
+
+  getAdaptiveExpandedMargin(obj, baseMargin = 0.02) {
+    this._box.setFromObject(obj)
+    this._box.getSize(this._tmpSize)
+    const minDim = Math.min(this._tmpSize.x, this._tmpSize.y, this._tmpSize.z)
+    const extra = THREE.MathUtils.clamp(0.022 - minDim, 0, 0.018)
+    return baseMargin + extra
+  }
+
+  getGrabCandidateScore(obj, pt, baseMargin) {
+    const adaptiveMargin = this.getAdaptiveExpandedMargin(obj, baseMargin)
+    const sd = this.distanceToObjectSurface(obj, pt)
+    const cd = this.getObjectCenterDistance(obj, pt)
+    const ed = this.getExpandedBoxDistance(obj, pt, adaptiveMargin)
+    return {
+      sd,
+      cd,
+      ed,
+      adaptiveMargin,
+      score: ed * 4.0 + sd * 1.7 + cd * 0.8,
+    }
+  }
 
   pickInteractableFromHitObject(hit) {
     let obj = hit
@@ -364,8 +390,6 @@ export class InteractionSystem {
           out.copy(best.point)
           return out
         }
-        out.copy(direction).multiplyScalar(this.controllerRayMaxLength).add(origin)
-        return out
       }
     }
 
@@ -419,40 +443,8 @@ export class InteractionSystem {
       r.hitDot.visible = visible
       if (!visible) continue
 
-      const controller = r.controller
-      const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
-      let dist = this.controllerRayMaxLength
-
-      if (this.toolMode === "wire") {
-        const hoverBelongsToThisController =
-          this.wireHoverSourceType === "controller" &&
-          this.wireHoverSourceIndex === (controller.userData?.sourceIndex ?? -1)
-
-        if (hoverBelongsToThisController) {
-          const p = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
-          if (p) dist = THREE.MathUtils.clamp(origin.distanceTo(p), 0.05, this.controllerRayMaxLength)
-        } else {
-          const targetPoint = this.getControllerWirePointerWorld(controller, this._tmpG)
-          if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), 0.05, this.controllerRayMaxLength)
-        }
-      } else {
-        this.raycaster.ray.origin.copy(origin)
-        this.raycaster.ray.direction.copy(direction)
-
-        const hits = this.raycaster.intersectObjects(this.interactables, true)
-        for (const h of hits) {
-          if (h.distance > this.controllerRayMaxLength) continue
-          const p = this.pickInteractableFromHitObject(h.object)
-          if (!p) continue
-          if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
-            dist = Math.min(this.controllerRayMaxLength, Math.max(0.05, h.distance))
-            break
-          }
-        }
-      }
-
-      r.line.scale.z = dist
-      r.hitDot.position.z = -dist
+      r.line.scale.z = this.controllerRayMaxLength
+      r.hitDot.position.z = -this.controllerRayMaxLength
     }
   }
 
@@ -1143,23 +1135,43 @@ export class InteractionSystem {
 
   canHandGrabObject(he, obj) {
     if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) return false
-    const extra = this.isAnyOtherHandHolding(he) ? this.handGrabExpandedBoxMarginWhenOtherHandBusy : this.handGrabExpandedBoxMargin
+
+    const baseMargin = this.isAnyOtherHandHolding(he)
+      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
+      : this.handGrabExpandedBoxMargin
+
     this.getGrabPointWorld(he, this._tmpC)
-    if (this.getObjectCenterDistance(obj, this._tmpC) > this.nearRadius) return false
-    if (this.getExpandedBoxDistance(obj, this._tmpC, extra) > 0.0001 && this.distanceToObjectSurface(obj, this._tmpC) > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+    const { sd, cd, ed, adaptiveMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseMargin)
+
+    const centerLimit = this.nearRadius + adaptiveMargin * 1.4
+    if (cd > centerLimit && ed > 0.0001) return false
+    if (ed > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+
     return true
   }
 
   findNearestComponentToHand(he, maxDist) {
     this.getGrabPointWorld(he, this._tmpC)
-    let best = null, bestScore = Infinity
-    const extra = this.isAnyOtherHandHolding(he) ? this.handGrabExpandedBoxMarginWhenOtherHandBusy : this.handGrabExpandedBoxMargin
+    let best = null
+    let bestScore = Infinity
+
+    const baseMargin = this.isAnyOtherHandHolding(he)
+      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
+      : this.handGrabExpandedBoxMargin
+
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
-      const sd = this.distanceToObjectSurface(obj, this._tmpC), cd = this.getObjectCenterDistance(obj, this._tmpC), ed = this.getExpandedBoxDistance(obj, this._tmpC, extra)
-      if (cd > maxDist || (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001)) continue
-      const score = ed * 6 + sd * 2.4 + cd
-      if (score < bestScore) { bestScore = score; best = obj }
+
+      const { sd, cd, ed, adaptiveMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseMargin)
+      const centerLimit = maxDist + adaptiveMargin * 1.4
+
+      if (cd > centerLimit && ed > 0.0001) continue
+      if (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001) continue
+
+      if (score < bestScore) {
+        bestScore = score
+        best = obj
+      }
     }
     return best
   }
@@ -1558,7 +1570,8 @@ export class InteractionSystem {
 
   computeHandHover() {
     if (!this.nearEnabled) return null
-    let best = null, bestScore = Infinity
+    let best = null
+    let bestScore = Infinity
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h) || h.heldObject) continue
       this.getGrabPointWorld(h, this._tmpA)
@@ -1570,9 +1583,10 @@ export class InteractionSystem {
           if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
           continue
         }
-        const sd = this.distanceToObjectSurface(obj, this._tmpA), cd = this.getObjectCenterDistance(obj, this._tmpA), ed = this.getExpandedBoxDistance(obj, this._tmpA, this.handHoverExpandedBoxMargin)
-        if (cd > this.nearRadius || (sd > this.handHoverSurfaceMaxDist && ed > 0.0001)) continue
-        const score = ed*6 + sd*2.4 + cd
+        const { sd, cd, ed, adaptiveMargin, score } = this.getGrabCandidateScore(obj, this._tmpA, this.handHoverExpandedBoxMargin)
+        const centerLimit = this.nearRadius + adaptiveMargin * 1.4
+        if (cd > centerLimit && ed > 0.0001) continue
+        if (sd > this.handHoverSurfaceMaxDist && ed > 0.0001) continue
         if (score < bestScore) { bestScore = score; best = obj }
       }
     }
