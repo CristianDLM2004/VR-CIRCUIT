@@ -22,8 +22,9 @@ export class InteractionSystem {
     this.surfaces      = []
     this.holeSystem    = null
 
-    this.hovered        = null
-    this.controllerRays = []
+    this.hovered         = null
+    this.controllerRays  = []
+    this.controllerRayMaxLength = 1.35
 
     this.nearEnabled   = true
     this.nearRadius    = 0.145
@@ -63,13 +64,13 @@ export class InteractionSystem {
     // ---------------------------
     // Wire mode
     // ---------------------------
-    this.toolMode           = "grab"
-    this.wireHoverAnchor    = null
-    this.wireHoverEndpoint  = null
-    this.wireHoverHandIndex = null
+    this.toolMode            = "grab"
+    this.wireHoverAnchor     = null
+    this.wireHoverEndpoint   = null
+    this.wireHoverHandIndex  = null
     this.wireHoverSourceType = null
     this.wireHoverSourceIndex = null
-    this._wireHoverMarker   = null
+    this._wireHoverMarker    = null
 
     this.wireHoverMaxDist         = 0.055
     this.wireHoverReleaseDist     = 0.085
@@ -80,7 +81,7 @@ export class InteractionSystem {
     // Soporte para controles en modo cable
     this.wireControllerHoverPerpMaxDist    = 0.022
     this.wireControllerEndpointPerpMaxDist = 0.026
-    this.wireControllerRayMaxDist          = 5.0
+    this.wireControllerRayMaxDist          = this.controllerRayMaxLength
     this.wireControllerFallbackDist        = 0.35
 
     this.wireAnchorPriority = { terminal: 0, pin: 1, hole: 2 }
@@ -262,9 +263,11 @@ export class InteractionSystem {
   createControllerRay() {
     const geo  = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)])
     const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffffff }))
-    line.name = "ControllerRay"; line.scale.z = 5
+    line.name = "ControllerRay"
+    line.scale.z = this.controllerRayMaxLength
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.01, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }))
-    dot.name = "ControllerRayDot"; dot.position.z = -5
+    dot.name = "ControllerRayDot"
+    dot.position.z = -this.controllerRayMaxLength
     return { line, hitDot: dot }
   }
 
@@ -351,17 +354,22 @@ export class InteractionSystem {
       this.raycaster.ray.origin.copy(origin)
       this.raycaster.ray.direction.copy(direction)
       const hits = this.raycaster.intersectObjects(surfaceMeshes, true)
-      const best = hits.length && typeof this.interactionSystem?.pickBestSurfaceHit === "function"
-        ? this.interactionSystem.pickBestSurfaceHit(hits, null)
+      const best = typeof this.pickBestSurfaceHit === "function"
+        ? this.pickBestSurfaceHit(hits, null)
         : (hits[0] || null)
 
       if (best?.point) {
-        out.copy(best.point)
+        const dist = origin.distanceTo(best.point)
+        if (dist <= this.controllerRayMaxLength) {
+          out.copy(best.point)
+          return out
+        }
+        out.copy(direction).multiplyScalar(this.controllerRayMaxLength).add(origin)
         return out
       }
     }
 
-    out.copy(origin).add(direction.multiplyScalar(this.wireControllerFallbackDist))
+    out.copy(origin).add(direction.multiplyScalar(Math.min(this.wireControllerFallbackDist, this.controllerRayMaxLength)))
     return out
   }
 
@@ -387,6 +395,7 @@ export class InteractionSystem {
 
     const hits = this.raycaster.intersectObjects(this.interactables, true)
     for (const h of hits) {
+      if (h.distance > this.controllerRayMaxLength) continue
       const picked = this.pickInteractableFromHitObject(h.object)
       if (!picked || !this.interactables.includes(picked) || picked.userData?.isSurface) continue
       if (picked.userData?.isUI) return picked
@@ -412,7 +421,7 @@ export class InteractionSystem {
 
       const controller = r.controller
       const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
-      let dist = 5
+      let dist = this.controllerRayMaxLength
 
       if (this.toolMode === "wire") {
         const hoverBelongsToThisController =
@@ -421,10 +430,10 @@ export class InteractionSystem {
 
         if (hoverBelongsToThisController) {
           const p = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
-          if (p) dist = THREE.MathUtils.clamp(origin.distanceTo(p), 0.05, 5)
+          if (p) dist = THREE.MathUtils.clamp(origin.distanceTo(p), 0.05, this.controllerRayMaxLength)
         } else {
           const targetPoint = this.getControllerWirePointerWorld(controller, this._tmpG)
-          if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), 0.05, 5)
+          if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), 0.05, this.controllerRayMaxLength)
         }
       } else {
         this.raycaster.ray.origin.copy(origin)
@@ -432,10 +441,11 @@ export class InteractionSystem {
 
         const hits = this.raycaster.intersectObjects(this.interactables, true)
         for (const h of hits) {
+          if (h.distance > this.controllerRayMaxLength) continue
           const p = this.pickInteractableFromHitObject(h.object)
           if (!p) continue
           if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
-            dist = Math.min(5, Math.max(0.05, h.distance))
+            dist = Math.min(this.controllerRayMaxLength, Math.max(0.05, h.distance))
             break
           }
         }
@@ -504,7 +514,7 @@ export class InteractionSystem {
 
     for (const anchor of anchors) {
       const { along, perp } = this.projectPointToControllerRay(controller, anchor.worldPos, this._tmpG)
-      if (along < 0.03 || along > this.wireControllerRayMaxDist) continue
+      if (along < 0.03 || along > this.controllerRayMaxLength) continue
       if (perp > bestPerp) continue
 
       if (!best) {
@@ -594,7 +604,7 @@ export class InteractionSystem {
 
     for (const ep of this.getAllWireEndpoints()) {
       const { along, perp } = this.projectPointToControllerRay(controller, ep.worldPos, this._tmpG)
-      if (along < 0.03 || along > this.wireControllerRayMaxDist) continue
+      if (along < 0.03 || along > this.controllerRayMaxLength) continue
       if (perp > bestPerp) continue
 
       if (!best || perp < bestPerp - 0.001 || (Math.abs(perp - bestPerp) <= 0.001 && along < bestAlong)) {
@@ -705,7 +715,7 @@ export class InteractionSystem {
             const tp = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
             if (tp) {
               const { perp, along } = this.projectPointToControllerRay(controller, tp, this._tmpG)
-              if (along > 0.03 && along <= this.wireControllerRayMaxDist && perp <= this.wireControllerEndpointPerpMaxDist * 1.6) {
+              if (along > 0.03 && along <= this.controllerRayMaxLength && perp <= this.wireControllerEndpointPerpMaxDist * 1.6) {
                 const m = this.ensureWireHoverMarker()
                 m.position.copy(tp)
                 m.visible = true
@@ -1427,6 +1437,14 @@ export class InteractionSystem {
     const ctrl = event.target
     if (!ctrl || ctrl.userData?.heldObject) return
 
+    const target = this.computeControllerHoverFor(ctrl)
+
+    // UI del panel siempre debe seguir funcionando, incluso en modo cable
+    if (target?.userData?.isUI && typeof target.userData?.onPress === "function") {
+      target.userData.onPress()
+      return
+    }
+
     if (this.toolMode === "wire") {
       const ctrlIndex = ctrl.userData?.sourceIndex ?? 0
       const hoverMatchesThisController =
@@ -1469,14 +1487,7 @@ export class InteractionSystem {
       return
     }
 
-    const target = this.computeControllerHoverFor(ctrl)
     if (!target || target.userData?.isSurface) return
-
-    // Botón UI del panel — siempre
-    if (target.userData?.isUI && typeof target.userData?.onPress === "function") {
-      target.userData.onPress()
-      return
-    }
 
     // Modo simulación: activar botón/switch
     if (this.isSimMode()) {
@@ -1489,7 +1500,7 @@ export class InteractionSystem {
         target.userData.onPress()
         return
       }
-      return   // en sim no agarramos nada más
+      return
     }
 
     // Modo edición: grab normal
