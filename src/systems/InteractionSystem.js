@@ -5,115 +5,115 @@ import { XRHandModelFactory } from "three/examples/jsm/webxr/XRHandModelFactory.
 export class InteractionSystem {
   constructor(sceneManager, appState) {
     this.sceneManager = sceneManager
-    this.appState     = appState
+    this.appState = appState
 
-    this.scene    = sceneManager.scene
+    this.scene = sceneManager.scene
     this.renderer = sceneManager.renderer
-    this.camera   = sceneManager.camera
+    this.camera = sceneManager.camera
     this.stateSyncSystem = null
 
-    this.raycaster     = new THREE.Raycaster()
+    this.raycaster = new THREE.Raycaster()
     this.downRaycaster = new THREE.Raycaster()
-    this.tempMatrix    = new THREE.Matrix4()
+    this.tempMatrix = new THREE.Matrix4()
 
-    this.controllers   = []
-    this.hands         = []
+    this.controllers = []
+    this.hands = []
     this.interactables = []
-    this.surfaces      = []
-    this.holeSystem    = null
+    this.surfaces = []
+    this.holeSystem = null
 
-    this.hovered         = null
-    this.controllerRays  = []
+    this.hovered = null
+    this.controllerRays = []
 
     this.controllerRayMaxLength = 1.15
     this.controllerRayMinLength = 0.08
 
-    this.nearEnabled   = true
-    this.nearRadius    = 0.18
+    this.nearEnabled = true
+    this.nearRadius = 0.22
 
-    this.handGrabSurfaceMaxDist  = 0.085
-    this.handGrabSurfaceSlack    = 0.045
-    this.handHoverSurfaceMaxDist = 0.095
+    this.handGrabSurfaceMaxDist = 0.11
+    this.handGrabSurfaceSlack = 0.06
+    this.handHoverSurfaceMaxDist = 0.12
 
-    this.handGrabExpandedBoxMargin = 0.026
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.034
-    this.handHoverExpandedBoxMargin = 0.020
+    this.handGrabExpandedBoxMargin = 0.040
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.050
+    this.handHoverExpandedBoxMargin = 0.032
 
-    this.handGrabExpandedSphereMargin = 0.034
-    this.handHoverExpandedSphereMargin = 0.026
+    this.handGrabExpandedSphereMargin = 0.045
+    this.handHoverExpandedSphereMargin = 0.035
 
-    this.insertedGrabBonusBoxMargin = 0.010
-    this.insertedGrabBonusSphereMargin = 0.014
-    this.insertedGrabBonusRadius = 0.014
+    this.insertedGrabBonusBoxMargin = 0.012
+    this.insertedGrabBonusSphereMargin = 0.016
+    this.insertedGrabBonusRadius = 0.016
 
-    this.pinchStartDist        = 0.070
-    this.pinchEndDist          = 0.100
+    this.pinchStartDist = 0.070
+    this.pinchEndDist = 0.100
     this.pinchReleaseResetDist = 0.115
 
-    this.uiPokeRadius    = 0.028
+    this.uiPokeRadius = 0.028
     this.uiReleaseRadius = 0.048
 
     this.throwVelocityMultiplier = 1.9
-    this.throwMinSpeed           = 0.22
-    this.directPlaceMaxDrop      = 0.12
+    this.throwMinSpeed = 0.22
+    this.directPlaceMaxDrop = 0.12
 
     this.handTrackingReleaseGraceMs = 280
-    this.handOpenReleaseGraceMs     = 80
+    this.handOpenReleaseGraceMs = 80
 
     this.appMode = "edit"
 
     this._handHeldButton = new Map()
 
-    this.toolMode            = "grab"
-    this.wireHoverAnchor     = null
-    this.wireHoverEndpoint   = null
-    this.wireHoverHandIndex  = null
+    this.toolMode = "grab"
+    this.wireHoverAnchor = null
+    this.wireHoverEndpoint = null
+    this.wireHoverHandIndex = null
     this.wireHoverSourceType = null
     this.wireHoverSourceIndex = null
-    this._wireHoverMarker    = null
+    this._wireHoverMarker = null
 
-    this.wireHoverMaxDist         = 0.055
-    this.wireHoverReleaseDist     = 0.085
+    this.wireHoverMaxDist = 0.055
+    this.wireHoverReleaseDist = 0.085
     this.wireEndpointHoverMaxDist = 0.020
-    this.wirePinchStartDist       = 0.016
-    this.wirePinchEndDist         = 0.030
+    this.wirePinchStartDist = 0.016
+    this.wirePinchEndDist = 0.030
 
-    this.wireControllerHoverPerpMaxDist    = 0.022
+    this.wireControllerHoverPerpMaxDist = 0.022
     this.wireControllerEndpointPerpMaxDist = 0.026
-    this.wireControllerRayMaxDist          = this.controllerRayMaxLength
-    this.wireControllerFallbackDist        = 0.35
+    this.wireControllerRayMaxDist = this.controllerRayMaxLength
+    this.wireControllerFallbackDist = 0.35
 
     this.wireAnchorPriority = { terminal: 0, pin: 1, hole: 2 }
 
     this.wireDraftStartAnchor = null
-    this.wireDraftHandIndex   = null
-    this.wireDraftSourceType  = null
+    this.wireDraftHandIndex = null
+    this.wireDraftSourceType = null
     this.wireDraftSourceIndex = null
-    this.wireDraftWaypoints   = []
-    this.wireDraftColor       = 0x111111
-    this._wireDraftMeshes     = []
-    this.wireDraftRadius      = 0.0038
+    this.wireDraftWaypoints = []
+    this.wireDraftColor = 0x111111
+    this._wireDraftMeshes = []
+    this.wireDraftRadius = 0.0038
 
     this.wireActionCooldownMs = 90
-    this._lastWireActionMs    = 0
+    this._lastWireActionMs = 0
 
-    this._tmpA    = new THREE.Vector3()
-    this._tmpB    = new THREE.Vector3()
-    this._tmpC    = new THREE.Vector3()
-    this._tmpD    = new THREE.Vector3()
-    this._tmpE    = new THREE.Vector3()
-    this._tmpF    = new THREE.Vector3()
-    this._tmpG    = new THREE.Vector3()
-    this._tmpH    = new THREE.Vector3()
-    this._tmpI    = new THREE.Vector3()
-    this._tmpJ    = new THREE.Vector3()
+    this._tmpA = new THREE.Vector3()
+    this._tmpB = new THREE.Vector3()
+    this._tmpC = new THREE.Vector3()
+    this._tmpD = new THREE.Vector3()
+    this._tmpE = new THREE.Vector3()
+    this._tmpF = new THREE.Vector3()
+    this._tmpG = new THREE.Vector3()
+    this._tmpH = new THREE.Vector3()
+    this._tmpI = new THREE.Vector3()
+    this._tmpJ = new THREE.Vector3()
     this._tmpSize = new THREE.Vector3()
-    this._box     = new THREE.Box3()
-    this._box2    = new THREE.Box3()
-    this._sphere  = new THREE.Sphere()
+    this._box = new THREE.Box3()
+    this._box2 = new THREE.Box3()
+    this._sphere = new THREE.Sphere()
 
-    this._lastPokedButton  = null
-    this._lastUpdateTime   = performance.now()
+    this._lastPokedButton = null
+    this._lastUpdateTime = performance.now()
     this._activePinHoleMarkers = []
 
     this.initXRInputs()
@@ -123,7 +123,7 @@ export class InteractionSystem {
     })
   }
 
-  setHoleSystem(hs)       { this.holeSystem = hs }
+  setHoleSystem(hs) { this.holeSystem = hs }
   setStateSyncSystem(sss) { this.stateSyncSystem = sss }
 
   setAppMode(mode) {
@@ -166,7 +166,7 @@ export class InteractionSystem {
     }
   }
 
-  isSimMode()  { return this.appMode === "sim" }
+  isSimMode() { return this.appMode === "sim" }
   isEditMode() { return this.appMode === "edit" }
 
   isComponentWithOnPress(obj) {
@@ -192,14 +192,18 @@ export class InteractionSystem {
 
   registerSurface(mesh, options = {}) {
     if (!mesh) return
-    const type   = options.type   || "floor"
+    const type = options.type || "floor"
     const bounds = options.bounds || null
-    mesh.userData.isSurface    = true
+    mesh.userData.isSurface = true
     mesh.userData.interactable = false
     if ("componentId" in mesh.userData) delete mesh.userData.componentId
     this.unregister(mesh)
     const existing = this.surfaces.find((s) => s.mesh === mesh)
-    if (existing) { existing.type = type; existing.bounds = bounds; return }
+    if (existing) {
+      existing.type = type
+      existing.bounds = bounds
+      return
+    }
     this.surfaces.push({ mesh, type, bounds })
   }
 
@@ -209,14 +213,14 @@ export class InteractionSystem {
 
     for (let i = 0; i < 2; i++) {
       const controller = this.renderer.xr.getController(i)
-      controller.userData.sourceType  = "controller"
+      controller.userData.sourceType = "controller"
       controller.userData.sourceIndex = i
-      controller.userData.heldObject  = null
-      controller.userData.hold        = this.createHoldState("controller", controller)
+      controller.userData.heldObject = null
+      controller.userData.hold = this.createHoldState("controller", controller)
       controller.userData._pressedComponent = null
 
       controller.addEventListener("selectstart", (e) => this.onControllerSelectStart(e))
-      controller.addEventListener("selectend",   (e) => this.onControllerSelectEnd(e))
+      controller.addEventListener("selectend", (e) => this.onControllerSelectEnd(e))
       this.scene.add(controller)
 
       const grip = this.renderer.xr.getControllerGrip(i)
@@ -270,12 +274,15 @@ export class InteractionSystem {
   }
 
   createControllerRay() {
-    const geo  = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)])
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)])
     const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffffff }))
     line.name = "ControllerRay"
     line.scale.z = this.controllerRayMaxLength
 
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.01, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }))
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.01, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    )
     dot.name = "ControllerRayDot"
     dot.position.z = -this.controllerRayMaxLength
 
@@ -376,9 +383,22 @@ export class InteractionSystem {
     }
   }
 
-  distanceToObjectSurface(obj, pt) { this._box.setFromObject(obj); return this._box.distanceToPoint(pt) }
-  getObjectCenterDistance(obj, pt) { this._box.setFromObject(obj); this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
-  getExpandedBoxDistance(obj, pt, m=0.02) { this._box2.setFromObject(obj); this._box2.expandByScalar(m); return this._box2.distanceToPoint(pt) }
+  distanceToObjectSurface(obj, pt) {
+    this._box.setFromObject(obj)
+    return this._box.distanceToPoint(pt)
+  }
+
+  getObjectCenterDistance(obj, pt) {
+    this._box.setFromObject(obj)
+    this._box.getCenter(this._tmpE)
+    return this._tmpE.distanceTo(pt)
+  }
+
+  getExpandedBoxDistance(obj, pt, m = 0.02) {
+    this._box2.setFromObject(obj)
+    this._box2.expandByScalar(m)
+    return this._box2.distanceToPoint(pt)
+  }
 
   getExpandedSphereDistance(obj, pt, margin = 0.03) {
     this._box.setFromObject(obj)
@@ -416,43 +436,21 @@ export class InteractionSystem {
   }
 
   getClosestGrabPointWorld(obj, worldPoint, out) {
-    if (obj?.userData?.getGrabWorldPoints) {
-      const grabPoints = obj.userData.getGrabWorldPoints()
-      if (Array.isArray(grabPoints) && grabPoints.length) {
-        let best = null
-        let bestScore = Infinity
-
-        for (const gp of grabPoints) {
-          const radius = obj.userData?.grabRadius ?? 0.02
-          const d = Math.max(0, gp.worldPos.distanceTo(worldPoint) - radius)
-          const weight = gp.weight ?? 1
-          const score = d / Math.max(0.0001, weight)
-
-          if (score < bestScore) {
-            bestScore = score
-            best = gp
-          }
-        }
-
-        if (best) {
-          out.copy(best.worldPos)
-          return out
-        }
-      }
-    }
-
-    if (obj?.userData?.grabTarget) {
-      this._box.setFromObject(obj.userData.grabTarget)
-      out.copy(worldPoint).clamp(this._box.min, this._box.max)
-      return out
-    }
-
-    return this.getClosestPointOnObjectBounds(obj, worldPoint, out)
+    const target = obj?.userData?.grabTarget || obj
+    this._box.setFromObject(target)
+    out.copy(worldPoint).clamp(this._box.min, this._box.max)
+    return out
   }
 
   getGrabDistanceToObject(obj, worldPoint) {
-    const radius = obj?.userData?.grabRadius ?? 0.02
-    let best = Infinity
+    const radius = obj?.userData?.grabRadius ?? 0.018
+    const target = obj?.userData?.grabTarget || obj
+
+    this._box.setFromObject(target)
+
+    const bodyDistance = Math.max(0, this._box.distanceToPoint(worldPoint) - radius)
+
+    let best = bodyDistance
 
     if (obj?.userData?.getGrabWorldPoints) {
       const grabPoints = obj.userData.getGrabWorldPoints()
@@ -465,11 +463,7 @@ export class InteractionSystem {
       }
     }
 
-    if (isFinite(best)) return best
-
-    const target = obj?.userData?.grabTarget || obj
-    this._box.setFromObject(target)
-    return Math.max(0, this._box.distanceToPoint(worldPoint) - radius)
+    return best
   }
 
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
@@ -491,20 +485,16 @@ export class InteractionSystem {
     const ed = this.getExpandedBoxDistance(target, pt, adaptiveBoxMargin)
     const sphereD = this.getExpandedSphereDistance(target, pt, adaptiveSphereMargin)
 
-    this.getClosestGrabPointWorld(obj, pt, this._tmpJ)
-    const nearestGrabPointDist = this._tmpJ.distanceTo(pt)
-
     return {
       grabD,
       sd,
       cd,
       ed,
       sphereD,
-      nearestGrabPointDist,
       adaptiveBoxMargin,
       adaptiveSphereMargin,
       inserted,
-      score: grabD * 8.0 + nearestGrabPointDist * 4.6 + sphereD * 2.4 + ed * 1.15 + cd * 0.18,
+      score: grabD * 8.0 + sd * 2.4 + sphereD * 1.4 + ed * 0.9 + cd * 0.04,
     }
   }
 
@@ -519,8 +509,8 @@ export class InteractionSystem {
   }
 
   makeOwnerToken(t, i) { return `${t}:${i}` }
-  getObjectOwner(obj)   { return obj?.userData?.heldBy || null }
-  setObjectOwner(obj,t) { if (obj) obj.userData.heldBy = t }
+  getObjectOwner(obj) { return obj?.userData?.heldBy || null }
+  setObjectOwner(obj, t) { if (obj) obj.userData.heldBy = t }
   clearObjectOwner(obj) { if (obj) obj.userData.heldBy = null }
 
   isObjectFreeForGrab(obj) {
@@ -531,7 +521,9 @@ export class InteractionSystem {
     return !this.getObjectOwner(obj)
   }
 
-  isAnyOtherHandHolding(he) { return this.hands.some((h) => h !== he && !!h.heldObject) }
+  isAnyOtherHandHolding(he) {
+    return this.hands.some((h) => h !== he && !!h.heldObject)
+  }
 
   getControllerRayWorld(controller, outOrigin, outDir) {
     this.tempMatrix.identity().extractRotation(controller.matrixWorld)
@@ -679,9 +671,18 @@ export class InteractionSystem {
   getGrabPointWorld(he, out) {
     const thumb = this.getThumbTipWorld(he, this._tmpA)
     const index = this.getIndexTipWorld(he, this._tmpB)
-    if (thumb && index) { out.copy(thumb).add(index).multiplyScalar(0.5); return out }
-    if (index) { out.copy(index); return out }
-    if (thumb) { out.copy(thumb); return out }
+    if (thumb && index) {
+      out.copy(thumb).add(index).multiplyScalar(0.5)
+      return out
+    }
+    if (index) {
+      out.copy(index)
+      return out
+    }
+    if (thumb) {
+      out.copy(thumb)
+      return out
+    }
     he.pinchPoint.getWorldPosition(out)
     return out
   }
@@ -691,13 +692,27 @@ export class InteractionSystem {
     if (this.holeSystem) {
       this.holeSystem.updateWorldPositions()
       for (const hole of this.holeSystem.holes) {
-        anchors.push({ kind: "hole", id: hole.id, label: hole.id, worldPos: hole.worldPos.clone(), holeId: hole.id, groupKey: hole.groupKey })
+        anchors.push({
+          kind: "hole",
+          id: hole.id,
+          label: hole.id,
+          worldPos: hole.worldPos.clone(),
+          holeId: hole.id,
+          groupKey: hole.groupKey
+        })
       }
     }
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || typeof obj.userData?.getConnectionAnchors !== "function") continue
       for (const a of obj.userData.getConnectionAnchors()) {
-        anchors.push({ kind: a.kind, id: a.id, label: a.label, worldPos: a.worldPos.clone(), componentId: obj.userData.componentId, componentType: obj.userData.componentType })
+        anchors.push({
+          kind: a.kind,
+          id: a.id,
+          label: a.label,
+          worldPos: a.worldPos.clone(),
+          componentId: obj.userData.componentId,
+          componentType: obj.userData.componentType
+        })
       }
     }
     return anchors
@@ -707,17 +722,33 @@ export class InteractionSystem {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject) return null
     this.getGrabPointWorld(he, this._tmpC)
     const anchors = this.getAllConnectionAnchors()
-    let best = null, bestDist = maxDist
+    let best = null
+    let bestDist = maxDist
     for (const anchor of anchors) {
       const d = anchor.worldPos.distanceTo(this._tmpC)
       if (d > bestDist) continue
-      if (!best) { best = anchor; bestDist = d; continue }
-      const bp = this.wireAnchorPriority[best.kind]   ?? 999
+      if (!best) {
+        best = anchor
+        bestDist = d
+        continue
+      }
+      const bp = this.wireAnchorPriority[best.kind] ?? 999
       const cp = this.wireAnchorPriority[anchor.kind] ?? 999
-      if (d < bestDist - 0.001) { best = anchor; bestDist = d }
-      else if (Math.abs(d - bestDist) <= 0.001 && cp < bp) { best = anchor; bestDist = d }
+      if (d < bestDist - 0.001) {
+        best = anchor
+        bestDist = d
+      } else if (Math.abs(d - bestDist) <= 0.001 && cp < bp) {
+        best = anchor
+        bestDist = d
+      }
     }
-    return best ? { ...best, distance: bestDist, handIndex: he.index, sourceType: "hand", sourceIndex: he.index } : null
+    return best ? {
+      ...best,
+      distance: bestDist,
+      handIndex: he.index,
+      sourceType: "hand",
+      sourceIndex: he.index
+    } : null
   }
 
   findBestWireAnchorForController(controller, maxPerpDist = this.wireControllerHoverPerpMaxDist) {
@@ -739,7 +770,7 @@ export class InteractionSystem {
         continue
       }
 
-      const bp = this.wireAnchorPriority[best.kind]   ?? 999
+      const bp = this.wireAnchorPriority[best.kind] ?? 999
       const cp = this.wireAnchorPriority[anchor.kind] ?? 999
 
       if (perp < bestPerp - 0.001) {
@@ -769,7 +800,10 @@ export class InteractionSystem {
 
   ensureWireHoverMarker() {
     if (this._wireHoverMarker) return this._wireHoverMarker
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 12, 12), new THREE.MeshBasicMaterial({ color: 0x00ffff }))
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0065, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0x00ffff })
+    )
     m.name = "WireHoverMarker"
     m.visible = false
     this.scene.add(m)
@@ -793,8 +827,8 @@ export class InteractionSystem {
       if (!mesh?.userData?.isWire) continue
       const sw = this.getWireEndpointWorldPosition(mesh, "start")
       const ew = this.getWireEndpointWorldPosition(mesh, "end")
-      if (sw) eps.push({ kind:"wire-endpoint", endpointType:"start", wireId:mesh.userData.componentId, worldPos:sw })
-      if (ew) eps.push({ kind:"wire-endpoint", endpointType:"end",   wireId:mesh.userData.componentId, worldPos:ew })
+      if (sw) eps.push({ kind: "wire-endpoint", endpointType: "start", wireId: mesh.userData.componentId, worldPos: sw })
+      if (ew) eps.push({ kind: "wire-endpoint", endpointType: "end", wireId: mesh.userData.componentId, worldPos: ew })
     }
     return eps
   }
@@ -802,12 +836,22 @@ export class InteractionSystem {
   findBestWireEndpointForHand(he, maxDist = this.wireEndpointHoverMaxDist) {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
     this.getGrabPointWorld(he, this._tmpC)
-    let best = null, bestDist = maxDist
+    let best = null
+    let bestDist = maxDist
     for (const ep of this.getAllWireEndpoints()) {
       const d = ep.worldPos.distanceTo(this._tmpC)
-      if (d < bestDist) { best = ep; bestDist = d }
+      if (d < bestDist) {
+        best = ep
+        bestDist = d
+      }
     }
-    return best ? { ...best, distance: bestDist, handIndex: he.index, sourceType: "hand", sourceIndex: he.index } : null
+    return best ? {
+      ...best,
+      distance: bestDist,
+      handIndex: he.index,
+      sourceType: "hand",
+      sourceIndex: he.index
+    } : null
   }
 
   findBestWireEndpointForController(controller, maxPerpDist = this.wireControllerEndpointPerpMaxDist) {
@@ -902,11 +946,17 @@ export class InteractionSystem {
       if (this.wireDraftSourceType === "hand") {
         const he = this.hands.find((h) => h.index === this.wireDraftSourceIndex)
         const ac = this.findBestWireAnchorForHand(he)
-        if (ac) { best = ac; bestType = "anchor" }
+        if (ac) {
+          best = ac
+          bestType = "anchor"
+        }
       } else if (this.wireDraftSourceType === "controller") {
         const controller = this.getControllerByIndex(this.wireDraftSourceIndex)
         const ac = this.findBestWireAnchorForController(controller)
-        if (ac) { best = ac; bestType = "anchor" }
+        if (ac) {
+          best = ac
+          bestType = "anchor"
+        }
       }
     }
 
@@ -970,7 +1020,12 @@ export class InteractionSystem {
     }
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 18),
-      new THREE.MeshStandardMaterial({ color: this.wireDraftColor ?? 0x111111, roughness: 0.65, metalness: 0.0, emissive: 0x181818 })
+      new THREE.MeshStandardMaterial({
+        color: this.wireDraftColor ?? 0x111111,
+        roughness: 0.65,
+        metalness: 0.0,
+        emissive: 0x181818
+      })
     )
     mesh.name = `WireDraftMesh_${index}`
     mesh.visible = false
@@ -1051,12 +1106,15 @@ export class InteractionSystem {
   updateWireDraftSegment(mesh, start, end) {
     const dir = this._tmpB.copy(end).sub(start)
     const len = dir.length()
-    if (len < 0.001) { mesh.visible = false; return }
+    if (len < 0.001) {
+      mesh.visible = false
+      return
+    }
     mesh.visible = true
     const mid = this._tmpC.copy(start).add(end).multiplyScalar(0.5)
     mesh.position.copy(mid)
     dir.normalize()
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir)
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
     mesh.scale.set(1, len, 1)
   }
 
@@ -1109,10 +1167,10 @@ export class InteractionSystem {
     const data = {
       id,
       type: "wire",
-      transform: { x:0, y:0, z:0, qx:0, qy:0, qz:0, qw:1 },
+      transform: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
       meta: {
         color: wc,
-        points: pts.map((p) => ({ x:p.x, y:p.y, z:p.z })),
+        points: pts.map((p) => ({ x: p.x, y: p.y, z: p.z })),
         startAnchor: this.serializeWireAnchor(sa),
         endAnchor: this.serializeWireAnchor(endAnchor),
       },
@@ -1136,7 +1194,9 @@ export class InteractionSystem {
     return true
   }
 
-  findComponentMeshById(id) { return this.stateSyncSystem?.getMeshById(id) ?? null }
+  findComponentMeshById(id) {
+    return this.stateSyncSystem?.getMeshById(id) ?? null
+  }
 
   resolveAnchorWorldPosition(anchor) {
     if (!anchor) return null
@@ -1169,7 +1229,7 @@ export class InteractionSystem {
     if (r) return r
     const fp = Array.isArray(wireMesh.userData.fixedPoints) ? wireMesh.userData.fixedPoints : null
     if (!fp || fp.length < 2) return null
-    return type === "start" ? fp[0].clone() : fp[fp.length-1].clone()
+    return type === "start" ? fp[0].clone() : fp[fp.length - 1].clone()
   }
 
   deleteWireById(id) {
@@ -1223,7 +1283,7 @@ export class InteractionSystem {
       const sw = this.resolveAnchorWorldPosition(mesh.userData.startAnchor)
       const ew = this.resolveAnchorWorldPosition(mesh.userData.endAnchor)
       if (sw) fp[0] = sw
-      if (ew) fp[fp.length-1] = ew
+      if (ew) fp[fp.length - 1] = ew
       mesh.userData.rebuildWireGeometry(fp)
     }
   }
@@ -1270,7 +1330,7 @@ export class InteractionSystem {
 
     const needed = pts.length - 1
     for (let i = 0; i < needed; i++) {
-      this.updateWireDraftSegment(this.ensureWireDraftMesh(i), pts[i], pts[i+1])
+      this.updateWireDraftSegment(this.ensureWireDraftMesh(i), pts[i], pts[i + 1])
     }
     for (let i = needed; i < this._wireDraftMeshes.length; i++) {
       const m = this._wireDraftMeshes[i]
@@ -1320,13 +1380,21 @@ export class InteractionSystem {
 
         if (obj.userData?.isUI) {
           const d = this.distanceToObjectSurface(obj, this._tmpA)
-          if (d < bestDist) { bestDist = d; bestObj = obj; bestHand = h }
+          if (d < bestDist) {
+            bestDist = d
+            bestObj = obj
+            bestHand = h
+          }
           continue
         }
 
         if (this.isSimMode() && this.isComponentWithOnPress(obj)) {
           const d = this.distanceToObjectSurface(obj, this._tmpA)
-          if (d < bestDist) { bestDist = d; bestObj = obj; bestHand = h }
+          if (d < bestDist) {
+            bestDist = d
+            bestObj = obj
+            bestHand = h
+          }
         }
       }
     }
@@ -1334,12 +1402,21 @@ export class InteractionSystem {
     if (!bestObj || !bestHand) return
 
     if (bestObj.userData?.isUI) {
-      if (typeof bestObj.userData?.onPress === "function") { bestObj.userData.onPress(); this._lastPokedButton = bestObj }
+      if (typeof bestObj.userData?.onPress === "function") {
+        bestObj.userData.onPress()
+        this._lastPokedButton = bestObj
+      }
     } else if (this.isSimMode()) {
       if (bestObj.userData?.isButtonComponent) {
-        if (typeof bestObj.userData?.pressButton === "function") { bestObj.userData.pressButton(); this._handHeldButton.set(bestHand.index, bestObj) }
+        if (typeof bestObj.userData?.pressButton === "function") {
+          bestObj.userData.pressButton()
+          this._handHeldButton.set(bestHand.index, bestObj)
+        }
       } else if (bestObj.userData?.isSwitchComponent) {
-        if (typeof bestObj.userData?.onPress === "function") { bestObj.userData.onPress(); this._lastPokedButton = bestObj }
+        if (typeof bestObj.userData?.onPress === "function") {
+          bestObj.userData.onPress()
+          this._lastPokedButton = bestObj
+        }
       }
     }
   }
@@ -1348,7 +1425,7 @@ export class InteractionSystem {
     const tt = this.getJointWorld(hand, "thumb-tip", this._tmpA)
     if (!tt) return null
     let best = Infinity
-    for (const name of ["index-finger-tip","index-finger-phalanx-distal","index-finger-phalanx-intermediate"]) {
+    for (const name of ["index-finger-tip", "index-finger-phalanx-distal", "index-finger-phalanx-intermediate"]) {
       const p = this.getJointWorld(hand, name, this._tmpB)
       if (p) {
         const d = tt.distanceTo(p)
@@ -1407,9 +1484,10 @@ export class InteractionSystem {
   persistMeshTransform(mesh) {
     const id = mesh?.userData?.componentId
     if (!id) return
-    const p = mesh.position, q = mesh.quaternion
+    const p = mesh.position
+    const q = mesh.quaternion
     this.appState.updateComponent(id, {
-      transform: { x:p.x, y:p.y, z:p.z, qx:q.x, qy:q.y, qz:q.z, qw:q.w }
+      transform: { x: p.x, y: p.y, z: p.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w }
     })
   }
 
@@ -1418,10 +1496,10 @@ export class InteractionSystem {
     hs.sourceType = sourceType
     hs.source = source
     hs.lastT = performance.now()
-    hs.vel.set(0,0,0)
+    hs.vel.set(0, 0, 0)
     hs.samples.length = 0
-    hs.grabOffset.set(0,0,0)
-    hs.grabLocalPoint.set(0,0,0)
+    hs.grabOffset.set(0, 0, 0)
+    hs.grabLocalPoint.set(0, 0, 0)
     hs.holdDistance = 0
 
     if (sourceType === "controller") source.getWorldPosition(hs.lastPos)
@@ -1433,16 +1511,17 @@ export class InteractionSystem {
     hs.sourceType = null
     hs.source = null
     hs.lastT = 0
-    hs.vel.set(0,0,0)
+    hs.vel.set(0, 0, 0)
     hs.samples.length = 0
-    hs.grabOffset.set(0,0,0)
-    hs.grabLocalPoint.set(0,0,0)
+    hs.grabOffset.set(0, 0, 0)
+    hs.grabLocalPoint.set(0, 0, 0)
     hs.holdDistance = 0
   }
 
   updateHoldVelocity(hs) {
     if (!hs?.active || !hs.sourceType || !hs.source) return
-    const now = performance.now(), dt = (now - hs.lastT) / 1000
+    const now = performance.now()
+    const dt = (now - hs.lastT) / 1000
     if (dt <= 0.0001) return
     if (hs.sourceType === "controller") hs.source.getWorldPosition(this._tmpA)
     else this.getGrabPointWorld(hs.source, this._tmpA)
@@ -1452,10 +1531,12 @@ export class InteractionSystem {
     const minT = now - hs.sampleWindowMs
     while (hs.samples.length && hs.samples[0].t < minT) hs.samples.shift()
     if (hs.samples.length) {
-      hs.vel.set(0,0,0)
+      hs.vel.set(0, 0, 0)
       for (const s of hs.samples) hs.vel.add(s.v)
-      hs.vel.multiplyScalar(1/hs.samples.length)
-    } else hs.vel.copy(v)
+      hs.vel.multiplyScalar(1 / hs.samples.length)
+    } else {
+      hs.vel.copy(v)
+    }
     hs.lastPos.copy(this._tmpA)
     hs.lastT = now
   }
@@ -1463,7 +1544,7 @@ export class InteractionSystem {
   getReleaseVelocity(hs, forceZero = false) {
     if (forceZero) return new THREE.Vector3()
     const v = hs.vel.clone().multiplyScalar(this.throwVelocityMultiplier)
-    if (v.length() < this.throwMinSpeed) v.set(0,0,0)
+    if (v.length() < this.throwMinSpeed) v.set(0, 0, 0)
     return v
   }
 
@@ -1471,9 +1552,9 @@ export class InteractionSystem {
     if (!object || this.surfaces.length === 0) return null
     const origin = object.position.clone()
     origin.y += 2
-    this.downRaycaster.set(origin, new THREE.Vector3(0,-1,0))
+    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
     const disallowed = Array.isArray(object.userData?.surfaceDisallowedTypes) ? object.userData.surfaceDisallowedTypes : []
-    const entries    = this.surfaces.filter((s) => !disallowed.includes(s.type))
+    const entries = this.surfaces.filter((s) => !disallowed.includes(s.type))
     if (!entries.length) return null
     const hits = this.downRaycaster.intersectObjects(entries.map((s) => s.mesh), true)
     return hits.length ? this.pickBestSurfaceHit(hits, object) : null
@@ -1492,9 +1573,12 @@ export class InteractionSystem {
     if (center.y - halfY < best.point.y) {
       object.position.y += (best.point.y + halfY - center.y) + 0.001
       if (object.userData?.surfaceUpright) {
-        const fwd = new THREE.Vector3(0,0,1).applyQuaternion(object.quaternion).setY(0)
+        const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
         let yaw = object.rotation.y
-        if (fwd.lengthSq() > 1e-8) { fwd.normalize(); yaw = Math.atan2(fwd.x, fwd.z) }
+        if (fwd.lengthSq() > 1e-8) {
+          fwd.normalize()
+          yaw = Math.atan2(fwd.x, fwd.z)
+        }
         object.rotation.set(0, yaw, 0)
         object.updateMatrixWorld(true)
       }
@@ -1513,7 +1597,8 @@ export class InteractionSystem {
     if (valid.length !== object.userData.pins.length) return false
     const [pinA, pinB] = [object.userData.pins[0], object.userData.pins[1]]
     if (!pinA || !pinB) return false
-    const mA = valid.find((m) => m.pinId === pinA.id), mB = valid.find((m) => m.pinId === pinB.id)
+    const mA = valid.find((m) => m.pinId === pinA.id)
+    const mB = valid.find((m) => m.pinId === pinB.id)
     if (!mA || !mB) return false
     object.userData.pinConnections = { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
     const dir = new THREE.Vector3().subVectors(mB.hole.worldPos, mA.hole.worldPos).setY(0)
@@ -1540,18 +1625,23 @@ export class InteractionSystem {
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
     if (object.userData?.surfaceUpright) {
-      const fwd = new THREE.Vector3(0,0,1).applyQuaternion(object.quaternion).setY(0)
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
       let yaw = object.rotation.y
-      if (fwd.lengthSq() > 1e-8) { fwd.normalize(); yaw = Math.atan2(fwd.x, fwd.z) }
+      if (fwd.lengthSq() > 1e-8) {
+        fwd.normalize()
+        yaw = Math.atan2(fwd.x, fwd.z)
+      }
       object.rotation.set(0, yaw, 0)
       object.updateMatrixWorld(true)
     }
     const co = object.userData?.surfaceContactObject || object
     const bbox = new THREE.Box3().setFromObject(co)
-    const size = new THREE.Vector3(), center = new THREE.Vector3()
+    const size = new THREE.Vector3()
+    const center = new THREE.Vector3()
     bbox.getSize(size)
     bbox.getCenter(center)
-    const halfY = size.y * 0.5, drop = (center.y - halfY) - best.point.y
+    const halfY = size.y * 0.5
+    const drop = (center.y - halfY) - best.point.y
     if (drop < -0.03 || drop > this.directPlaceMaxDrop) return false
     object.position.y += (best.point.y + halfY - center.y)
     if (this.holeSystem && Array.isArray(object.userData?.pins)) this.holeSystem.trySnapObject(object, 0.03)
@@ -1655,14 +1745,14 @@ export class InteractionSystem {
     this.startHoldTracking(he.hold, "hand", he)
 
     this.getGrabPointWorld(he, this._tmpA)
-    this.getClosestGrabPointWorld(target, this._tmpA, this._tmpB)
 
-    target.worldToLocal(this._tmpC.copy(this._tmpB))
-    he.hold.grabLocalPoint.copy(this._tmpC)
+    target.getWorldPosition(this._tmpB)
+    he.hold.grabOffset.copy(this._tmpB).sub(this._tmpA)
 
-    target.localToWorld(this._tmpD.copy(he.hold.grabLocalPoint))
-    he.hold.grabOffset.copy(this._tmpD).sub(this._tmpA)
-    he.hold.holdDistance = this._tmpD.distanceTo(this._tmpA)
+    this.getObjectGrabCenterWorld(target, this._tmpC)
+    target.worldToLocal(this._tmpD.copy(this._tmpC))
+    he.hold.grabLocalPoint.copy(this._tmpD)
+    he.hold.holdDistance = this._tmpC.distanceTo(this._tmpA)
   }
 
   onHandPinchEnd(he, options = {}) {
@@ -1777,7 +1867,9 @@ export class InteractionSystem {
     const ctrl = event?.target
     if (!ctrl) return
     if (ctrl.userData?._pressedComponent) {
-      if (typeof ctrl.userData._pressedComponent.userData?.releaseButton === "function") ctrl.userData._pressedComponent.userData.releaseButton()
+      if (typeof ctrl.userData._pressedComponent.userData?.releaseButton === "function") {
+        ctrl.userData._pressedComponent.userData.releaseButton()
+      }
       ctrl.userData._pressedComponent = null
       return
     }
@@ -1797,11 +1889,11 @@ export class InteractionSystem {
       return null
     }
     const disallowed = Array.isArray(object?.userData?.surfaceDisallowedTypes) ? object.userData.surfaceDisallowedTypes : []
-    const filtered   = hits.filter((h) => {
+    const filtered = hits.filter((h) => {
       const s = getEntry(h.object)
       return s && !disallowed.includes(s.type)
     })
-    for (const priority of ["protoboard","table","floor"]) {
+    for (const priority of ["protoboard", "table", "floor"]) {
       const h = filtered.find((h) => getEntry(h.object)?.type === priority)
       if (h) return { ...h, surface: getEntry(h.object) }
     }
@@ -1821,7 +1913,10 @@ export class InteractionSystem {
         if (obj.userData?.componentId && !this.isObjectFreeForGrab(obj)) continue
         if (obj.userData?.isUI) {
           const d = this.distanceToObjectSurface(obj, this._tmpA)
-          if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
+          if (d < bestScore && d < this.uiPokeRadius * 2) {
+            bestScore = d
+            best = obj
+          }
           continue
         }
         const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
@@ -1833,7 +1928,10 @@ export class InteractionSystem {
         const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
         if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
         if (grabD > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
-        if (score < bestScore) { bestScore = score; best = obj }
+        if (score < bestScore) {
+          bestScore = score
+          best = obj
+        }
       }
     }
     return best
@@ -1917,7 +2015,8 @@ export class InteractionSystem {
         const it = this.getJointWorld(h.hand, "index-finger-tip", this._tmpF)
         let wd = Infinity
         if (tt && it) wd = tt.distanceTo(it)
-        const close = wd <= this.wirePinchStartDist, open = wd >= this.wirePinchEndDist
+        const close = wd <= this.wirePinchStartDist
+        const open = wd >= this.wirePinchEndDist
         if (open) {
           h.isPinching = false
           h.pinchArmed = true
@@ -1944,7 +2043,10 @@ export class InteractionSystem {
       }
 
       h.openPinchMs = 0
-      if (this.isSimMode()) { h.isPinching = false; continue }
+      if (this.isSimMode()) {
+        h.isPinching = false
+        continue
+      }
       if (dist <= this.pinchStartDist && h.pinchArmed) this.onHandPinchStart(h)
       else if (dist > this.pinchEndDist) h.isPinching = false
     }
@@ -1962,7 +2064,10 @@ export class InteractionSystem {
     if (!object || !this.holeSystem || !object.userData?.getPinWorldPositions) return
     for (const match of this.holeSystem.getNearestHolesForPins(object.userData.getPinWorldPositions(), 0.05)) {
       if (!match.hole) continue
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.0075, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }))
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.0075, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      )
       m.position.copy(match.hole.worldPos)
       this.scene.add(m)
       this._activePinHoleMarkers.push(m)
