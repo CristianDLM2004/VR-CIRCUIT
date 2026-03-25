@@ -193,12 +193,10 @@ export class ComponentFactory {
         rocker.position.y = 0.022
         rocker.rotation.z = -Math.PI / 10
 
-        // Símbolo I (ON) — arriba del rocker
-        const symbolI = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.007, 0.002), symbolMat)
+        const symbolI = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.002, 0.002), symbolMat)
         symbolI.position.set(-0.008, 0.006, 0)
         rocker.add(symbolI)
 
-        // Símbolo O (OFF) — arriba del rocker
         const symbolO = new THREE.Mesh(new THREE.TorusGeometry(0.003, 0.001, 8, 16), symbolMat)
         symbolO.position.set(0.008, 0.006, 0)
         symbolO.rotation.x = Math.PI / 2

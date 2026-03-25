@@ -25,22 +25,23 @@ export class InteractionSystem {
     this.hovered         = null
     this.controllerRays  = []
 
-    // Longitud fija del rayo para todos los modos
-    this.controllerRayMaxLength = 0.95
+    // Rayo dinámico, pero con máximo más corto
+    this.controllerRayMaxLength = 1.15
+    this.controllerRayMinLength = 0.08
 
     this.nearEnabled   = true
-    this.nearRadius    = 0.185
+    this.nearRadius    = 0.19
 
-    this.handGrabSurfaceMaxDist  = 0.082
-    this.handGrabSurfaceSlack    = 0.055
-    this.handHoverSurfaceMaxDist = 0.095
+    this.handGrabSurfaceMaxDist  = 0.090
+    this.handGrabSurfaceSlack    = 0.060
+    this.handHoverSurfaceMaxDist = 0.100
 
-    this.handGrabExpandedBoxMargin = 0.036
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.042
-    this.handHoverExpandedBoxMargin = 0.032
+    this.handGrabExpandedBoxMargin = 0.040
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.046
+    this.handHoverExpandedBoxMargin = 0.036
 
-    this.handGrabExpandedSphereMargin = 0.038
-    this.handHoverExpandedSphereMargin = 0.034
+    this.handGrabExpandedSphereMargin = 0.050
+    this.handHoverExpandedSphereMargin = 0.044
 
     this.pinchStartDist        = 0.070
     this.pinchEndDist          = 0.100
@@ -56,19 +57,10 @@ export class InteractionSystem {
     this.handTrackingReleaseGraceMs = 280
     this.handOpenReleaseGraceMs     = 80
 
-    // ---------------------------
-    // MODOS DE OPERACIÓN
-    // "edit" → grab/move todos los componentes, sin activar botón/switch
-    // "sim"  → no grab, solo activar botón/switch eléctricamente
-    // ---------------------------
-    this.appMode = "edit"   // "edit" | "sim"
+    this.appMode = "edit"
 
-    // Tracking de botón de componente presionado por cada mano (para release)
-    this._handHeldButton = new Map()   // Map<handIndex, mesh>
+    this._handHeldButton = new Map()
 
-    // ---------------------------
-    // Wire mode
-    // ---------------------------
     this.toolMode            = "grab"
     this.wireHoverAnchor     = null
     this.wireHoverEndpoint   = null
@@ -83,7 +75,6 @@ export class InteractionSystem {
     this.wirePinchStartDist       = 0.016
     this.wirePinchEndDist         = 0.030
 
-    // Soporte para controles en modo cable
     this.wireControllerHoverPerpMaxDist    = 0.022
     this.wireControllerEndpointPerpMaxDist = 0.026
     this.wireControllerRayMaxDist          = this.controllerRayMaxLength
@@ -123,9 +114,6 @@ export class InteractionSystem {
     this.initXRInputs()
   }
 
-  // ---------------------------
-  // Setters
-  // ---------------------------
   setHoleSystem(hs)       { this.holeSystem = hs }
   setStateSyncSystem(sss) { this.stateSyncSystem = sss }
 
@@ -169,9 +157,6 @@ export class InteractionSystem {
     }
   }
 
-  // ---------------------------
-  // Helpers de modo
-  // ---------------------------
   isSimMode()  { return this.appMode === "sim" }
   isEditMode() { return this.appMode === "edit" }
 
@@ -183,9 +168,6 @@ export class InteractionSystem {
     )
   }
 
-  // ---------------------------
-  // Register / unregister
-  // ---------------------------
   register(mesh) {
     if (!mesh) return
     if (mesh.userData?.isSurface) return
@@ -212,9 +194,6 @@ export class InteractionSystem {
     this.surfaces.push({ mesh, type, bounds })
   }
 
-  // ---------------------------
-  // XR Setup
-  // ---------------------------
   initXRInputs() {
     const cmf = new XRControllerModelFactory()
     const hmf = new XRHandModelFactory()
@@ -334,7 +313,7 @@ export class InteractionSystem {
       sphereD,
       adaptiveBoxMargin,
       adaptiveSphereMargin,
-      score: sphereD * 5.0 + ed * 3.4 + sd * 1.8 + cd * 0.55,
+      score: sphereD * 5.4 + ed * 3.0 + sd * 1.35 + cd * 0.40,
     }
   }
 
@@ -363,9 +342,6 @@ export class InteractionSystem {
 
   isAnyOtherHandHolding(he) { return this.hands.some((h) => h !== he && !!h.heldObject) }
 
-  // ---------------------------
-  // Controller ray helpers
-  // ---------------------------
   getControllerRayWorld(controller, outOrigin, outDir) {
     this.tempMatrix.identity().extractRotation(controller.matrixWorld)
     outOrigin.setFromMatrixPosition(controller.matrixWorld)
@@ -405,6 +381,8 @@ export class InteractionSystem {
           out.copy(best.point)
           return out
         }
+        out.copy(direction).multiplyScalar(this.controllerRayMaxLength).add(origin)
+        return out
       }
     }
 
@@ -422,11 +400,6 @@ export class InteractionSystem {
     return { along, perp, projected }
   }
 
-  // ---------------------------
-  // Controller hover
-  // En modo sim: solo detecta isUI y componentes con onPress
-  // En modo edit: detecta isUI y grabs normales
-  // ---------------------------
   computeControllerHoverFor(controller) {
     this.tempMatrix.identity().extractRotation(controller.matrixWorld)
     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
@@ -458,8 +431,40 @@ export class InteractionSystem {
       r.hitDot.visible = visible
       if (!visible) continue
 
-      r.line.scale.z = this.controllerRayMaxLength
-      r.hitDot.position.z = -this.controllerRayMaxLength
+      const controller = r.controller
+      const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
+      let dist = this.controllerRayMaxLength
+
+      if (this.toolMode === "wire") {
+        const hoverBelongsToThisController =
+          this.wireHoverSourceType === "controller" &&
+          this.wireHoverSourceIndex === (controller.userData?.sourceIndex ?? -1)
+
+        if (hoverBelongsToThisController) {
+          const p = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
+          if (p) dist = THREE.MathUtils.clamp(origin.distanceTo(p), this.controllerRayMinLength, this.controllerRayMaxLength)
+        } else {
+          const targetPoint = this.getControllerWirePointerWorld(controller, this._tmpG)
+          if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), this.controllerRayMinLength, this.controllerRayMaxLength)
+        }
+      } else {
+        this.raycaster.ray.origin.copy(origin)
+        this.raycaster.ray.direction.copy(direction)
+
+        const hits = this.raycaster.intersectObjects(this.interactables, true)
+        for (const h of hits) {
+          if (h.distance > this.controllerRayMaxLength) continue
+          const p = this.pickInteractableFromHitObject(h.object)
+          if (!p) continue
+          if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
+            dist = THREE.MathUtils.clamp(h.distance, this.controllerRayMinLength, this.controllerRayMaxLength)
+            break
+          }
+        }
+      }
+
+      r.line.scale.z = dist
+      r.hitDot.position.z = -dist
     }
   }
 
@@ -475,9 +480,6 @@ export class InteractionSystem {
     he.pinchPoint.getWorldPosition(out); return out
   }
 
-  // ---------------------------
-  // Wire mode helpers
-  // ---------------------------
   getAllConnectionAnchors() {
     const anchors = []
     if (this.holeSystem) {
@@ -1059,11 +1061,6 @@ export class InteractionSystem {
     }
   }
 
-  // ---------------------------
-  // updateUIPoke — UNIFICADO
-  // Botones UI del panel: siempre activos
-  // Botón/switch de componente: SOLO en modo simulación
-  // ---------------------------
   updateUIPoke() {
     if (this.hands.some((h) => h.heldObject)) return
 
@@ -1452,9 +1449,6 @@ export class InteractionSystem {
     this.onHandPinchEnd(he, { forceZeroVelocity: forceZero })
   }
 
-  // ---------------------------
-  // Controlador: selectstart
-  // ---------------------------
   onControllerSelectStart(event) {
     const ctrl = event.target
     if (!ctrl || ctrl.userData?.heldObject) return
@@ -1536,9 +1530,6 @@ export class InteractionSystem {
     ctrl.attach(target)
   }
 
-  // ---------------------------
-  // Controlador: selectend
-  // ---------------------------
   onControllerSelectEnd(event) {
     const ctrl = event?.target
     if (!ctrl) return
@@ -1732,7 +1723,7 @@ export class InteractionSystem {
     this._lastUpdateTime = now
 
     const handsActive = this.isHandTrackingActive()
-    const showControllerRays = this.toolMode === "wire" ? true : !handsActive
+    const showControllerRays = this.toolMode === "wire" ? !handsActive : !handsActive
     this.updateControllerRays(showControllerRays)
 
     if (handsActive) {
