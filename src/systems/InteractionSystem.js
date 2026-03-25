@@ -29,15 +29,18 @@ export class InteractionSystem {
     this.controllerRayMaxLength = 0.95
 
     this.nearEnabled   = true
-    this.nearRadius    = 0.175
+    this.nearRadius    = 0.185
 
-    this.handGrabSurfaceMaxDist  = 0.072
-    this.handGrabSurfaceSlack    = 0.045
-    this.handHoverSurfaceMaxDist = 0.085
+    this.handGrabSurfaceMaxDist  = 0.082
+    this.handGrabSurfaceSlack    = 0.055
+    this.handHoverSurfaceMaxDist = 0.095
 
-    this.handGrabExpandedBoxMargin = 0.030
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.036
-    this.handHoverExpandedBoxMargin = 0.026
+    this.handGrabExpandedBoxMargin = 0.036
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.042
+    this.handHoverExpandedBoxMargin = 0.032
+
+    this.handGrabExpandedSphereMargin = 0.038
+    this.handHoverExpandedSphereMargin = 0.034
 
     this.pinchStartDist        = 0.070
     this.pinchEndDist          = 0.100
@@ -111,6 +114,7 @@ export class InteractionSystem {
     this._tmpSize = new THREE.Vector3()
     this._box     = new THREE.Box3()
     this._box2    = new THREE.Box3()
+    this._sphere  = new THREE.Sphere()
 
     this._lastPokedButton  = null
     this._lastUpdateTime   = performance.now()
@@ -130,7 +134,6 @@ export class InteractionSystem {
     if (this.appMode === next) return
     this.appMode = next
 
-    // Al entrar en modo simulación, soltar todo lo que esté agarrado
     if (this.appMode === "sim") {
       for (const h of this.hands) {
         if (h.heldObject) this.forceReleaseHand(h, true)
@@ -140,14 +143,12 @@ export class InteractionSystem {
           this.releaseHeldObject(c.userData.heldObject, c.userData.hold, () => { c.userData.heldObject = null })
         }
       }
-      // Limpiar botones presionados
       for (const [, pressed] of this._handHeldButton) {
         if (typeof pressed.userData?.releaseButton === "function") pressed.userData.releaseButton()
       }
       this._handHeldButton.clear()
     }
 
-    // Al salir de modo simulación: liberar cualquier botón aún presionado
     if (this.appMode === "edit") {
       for (const [, pressed] of this._handHeldButton) {
         if (typeof pressed.userData?.releaseButton === "function") pressed.userData.releaseButton()
@@ -301,25 +302,39 @@ export class InteractionSystem {
   getObjectCenterDistance(obj, pt)         { this._box.setFromObject(obj);  this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
   getExpandedBoxDistance(obj, pt, m=0.02) { this._box2.setFromObject(obj); this._box2.expandByScalar(m); return this._box2.distanceToPoint(pt) }
 
+  getExpandedSphereDistance(obj, pt, margin = 0.03) {
+    this._box.setFromObject(obj)
+    this._box.getBoundingSphere(this._sphere)
+    const r = this._sphere.radius + margin
+    const d = this._sphere.center.distanceTo(pt) - r
+    return Math.max(0, d)
+  }
+
   getAdaptiveExpandedMargin(obj, baseMargin = 0.02) {
     this._box.setFromObject(obj)
     this._box.getSize(this._tmpSize)
     const minDim = Math.min(this._tmpSize.x, this._tmpSize.y, this._tmpSize.z)
-    const extra = THREE.MathUtils.clamp(0.022 - minDim, 0, 0.018)
+    const extra = THREE.MathUtils.clamp(0.028 - minDim, 0, 0.020)
     return baseMargin + extra
   }
 
-  getGrabCandidateScore(obj, pt, baseMargin) {
-    const adaptiveMargin = this.getAdaptiveExpandedMargin(obj, baseMargin)
+  getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
+    const adaptiveBoxMargin = this.getAdaptiveExpandedMargin(obj, baseBoxMargin)
+    const adaptiveSphereMargin = this.getAdaptiveExpandedMargin(obj, baseSphereMargin)
+
     const sd = this.distanceToObjectSurface(obj, pt)
     const cd = this.getObjectCenterDistance(obj, pt)
-    const ed = this.getExpandedBoxDistance(obj, pt, adaptiveMargin)
+    const ed = this.getExpandedBoxDistance(obj, pt, adaptiveBoxMargin)
+    const sphereD = this.getExpandedSphereDistance(obj, pt, adaptiveSphereMargin)
+
     return {
       sd,
       cd,
       ed,
-      adaptiveMargin,
-      score: ed * 4.0 + sd * 1.7 + cd * 0.8,
+      sphereD,
+      adaptiveBoxMargin,
+      adaptiveSphereMargin,
+      score: sphereD * 5.0 + ed * 3.4 + sd * 1.8 + cd * 0.55,
     }
   }
 
@@ -1052,7 +1067,6 @@ export class InteractionSystem {
   updateUIPoke() {
     if (this.hands.some((h) => h.heldObject)) return
 
-    // Gestionar release de botones de componente presionados (modo sim)
     for (const [handIndex, pressed] of this._handHeldButton.entries()) {
       const he = this.hands.find((h) => h.index === handIndex)
       if (!he || !this.isHandEntryTracked(he)) {
@@ -1067,7 +1081,6 @@ export class InteractionSystem {
       }
     }
 
-    // Cooldown para botones UI
     if (this._lastPokedButton) {
       let minDist = Infinity
       for (const h of this.hands) {
@@ -1091,14 +1104,12 @@ export class InteractionSystem {
       for (const obj of this.interactables) {
         if (obj.userData?.isSurface) continue
 
-        // Botones UI del panel: siempre detectables
         if (obj.userData?.isUI) {
           const d = this.distanceToObjectSurface(obj, this._tmpA)
           if (d < bestDist) { bestDist = d; bestObj = obj; bestHand = h }
           continue
         }
 
-        // Componentes con onPress: SOLO en modo simulación
         if (this.isSimMode() && this.isComponentWithOnPress(obj)) {
           const d = this.distanceToObjectSurface(obj, this._tmpA)
           if (d < bestDist) { bestDist = d; bestObj = obj; bestHand = h }
@@ -1136,16 +1147,16 @@ export class InteractionSystem {
   canHandGrabObject(he, obj) {
     if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) return false
 
-    const baseMargin = this.isAnyOtherHandHolding(he)
-      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
-      : this.handGrabExpandedBoxMargin
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
+    const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
+    const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     this.getGrabPointWorld(he, this._tmpC)
-    const { sd, cd, ed, adaptiveMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseMargin)
+    const { sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-    const centerLimit = this.nearRadius + adaptiveMargin * 1.4
-    if (cd > centerLimit && ed > 0.0001) return false
-    if (ed > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.35
+    if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) return false
+    if (ed > 0.0001 && sphereD > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
 
     return true
   }
@@ -1155,24 +1166,25 @@ export class InteractionSystem {
     let best = null
     let bestScore = Infinity
 
-    const baseMargin = this.isAnyOtherHandHolding(he)
-      ? this.handGrabExpandedBoxMarginWhenOtherHandBusy
-      : this.handGrabExpandedBoxMargin
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
+    const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
+    const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
 
-      const { sd, cd, ed, adaptiveMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseMargin)
-      const centerLimit = maxDist + adaptiveMargin * 1.4
+      const { sd, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
+      const centerLimit = maxDist + adaptiveBoxMargin * 1.35
 
-      if (cd > centerLimit && ed > 0.0001) continue
-      if (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001) continue
+      if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
+      if (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001 && sphereD > 0.0001) continue
 
       if (score < bestScore) {
         bestScore = score
         best = obj
       }
     }
+
     return best
   }
 
@@ -1397,10 +1409,8 @@ export class InteractionSystem {
       return
     }
 
-    // En modo simulación: el pinch NO agarra componentes
     if (this.isSimMode()) return
 
-    // Modo edición: grab normal
     const target = this.findNearestComponentToHand(he, this.nearRadius)
     if (!target || !this.canHandGrabObject(he, target)) return
     if (target.userData?.inserted || target.userData?.pinConnections) {
@@ -1451,7 +1461,6 @@ export class InteractionSystem {
 
     const target = this.computeControllerHoverFor(ctrl)
 
-    // UI del panel siempre debe seguir funcionando, incluso en modo cable
     if (target?.userData?.isUI && typeof target.userData?.onPress === "function") {
       target.userData.onPress()
       return
@@ -1501,7 +1510,6 @@ export class InteractionSystem {
 
     if (!target || target.userData?.isSurface) return
 
-    // Modo simulación: activar botón/switch
     if (this.isSimMode()) {
       if (target.userData?.isButtonComponent && typeof target.userData?.pressButton === "function") {
         target.userData.pressButton()
@@ -1515,7 +1523,6 @@ export class InteractionSystem {
       return
     }
 
-    // Modo edición: grab normal
     if (!target.userData?.componentId || !this.isObjectFreeForGrab(target)) return
     if (target.userData?.inserted || target.userData?.pinConnections) {
       target.userData.inserted = false
@@ -1583,10 +1590,15 @@ export class InteractionSystem {
           if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
           continue
         }
-        const { sd, cd, ed, adaptiveMargin, score } = this.getGrabCandidateScore(obj, this._tmpA, this.handHoverExpandedBoxMargin)
-        const centerLimit = this.nearRadius + adaptiveMargin * 1.4
-        if (cd > centerLimit && ed > 0.0001) continue
-        if (sd > this.handHoverSurfaceMaxDist && ed > 0.0001) continue
+        const { sd, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(
+          obj,
+          this._tmpA,
+          this.handHoverExpandedBoxMargin,
+          this.handHoverExpandedSphereMargin
+        )
+        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.35
+        if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
+        if (sd > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
         if (score < bestScore) { bestScore = score; best = obj }
       }
     }
@@ -1688,7 +1700,6 @@ export class InteractionSystem {
       }
 
       h.openPinchMs = 0
-      // En modo simulación el pinch no agarra — pero sí se procesa para wire
       if (this.isSimMode()) { h.isPinching = false; continue }
       if (dist <= this.pinchStartDist && h.pinchArmed) this.onHandPinchStart(h)
       else if (dist > this.pinchEndDist) h.isPinching = false

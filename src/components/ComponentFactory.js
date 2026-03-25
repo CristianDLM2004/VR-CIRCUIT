@@ -138,8 +138,7 @@ export class ComponentFactory {
         group.userData._lastPressMs        = 0
         group.userData._cooldownMs         = 120
 
-        // ✅ onPress: igual que botones UI — compatible con poke y controlador
-        group.userData.isUI    = false   // no es panel UI
+        group.userData.isUI    = false
         group.userData.onPress = function () {
           const now = performance.now()
           if (now - group.userData._lastPressMs < group.userData._cooldownMs) return
@@ -192,16 +191,16 @@ export class ComponentFactory {
         const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.010, 0.020), rockerOffMat.clone())
         rocker.name = "SwitchRocker"
         rocker.position.y = 0.022
-        rocker.rotation.z = -Math.PI / 10   // OFF: lado O abajo
+        rocker.rotation.z = -Math.PI / 10
 
-        // Símbolo I (ON) — lado izquierdo
+        // Símbolo I (ON) — arriba del rocker
         const symbolI = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.007, 0.002), symbolMat)
-        symbolI.position.set(-0.008, 0.002, 0.011)
+        symbolI.position.set(-0.008, 0.006, 0)
         rocker.add(symbolI)
 
-        // Símbolo O (OFF) — lado derecho
+        // Símbolo O (OFF) — arriba del rocker
         const symbolO = new THREE.Mesh(new THREE.TorusGeometry(0.003, 0.001, 8, 16), symbolMat)
-        symbolO.position.set(0.008, 0.002, 0.011)
+        symbolO.position.set(0.008, 0.006, 0)
         symbolO.rotation.x = Math.PI / 2
         rocker.add(symbolO)
 
@@ -224,15 +223,13 @@ export class ComponentFactory {
         group.userData.switchRockerOffMat = rocker.material
         group.userData.isSwitchComponent  = true
         group.userData._lastPressMs       = 0
-        group.userData._cooldownMs        = 300   // evita doble toggle por el mismo gesto
+        group.userData._cooldownMs        = 300
 
-        // Aplicar estado inicial
         if (initialState) {
           rocker.rotation.z = ROCKER_ON_Z
           rocker.material   = rockerOnMat.clone()
         }
 
-        // ✅ onPress: toggle al presionar — compatible con poke y controlador
         group.userData.onPress = function () {
           const now = performance.now()
           if (now - group.userData._lastPressMs < group.userData._cooldownMs) return
@@ -249,11 +246,9 @@ export class ComponentFactory {
             ? group.userData.switchRockerOnMat.clone()
             : group.userData.switchRockerOffMat.clone()
 
-          // Animación de escala (feedback visual)
           group.scale.copy(SCALE_PRESSED)
           setTimeout(() => { group.scale.copy(SCALE_NORMAL) }, 80)
 
-          // Persistir en appState
           const id = group.userData.componentId
           if (id && group.userData._appStateRef) {
             group.userData._appStateRef.updateComponent(id, {
@@ -341,16 +336,10 @@ export class ComponentFactory {
         return null
     }
 
-    // ---------------------------
-    // Transform
-    // ---------------------------
     const t = data.transform || { x: 0, y: 1.2, z: -1, qx: 0, qy: 0, qz: 0, qw: 1 }
     mesh.position.set(t.x, t.y, t.z)
     mesh.quaternion.set(t.qx ?? 0, t.qy ?? 0, t.qz ?? 0, t.qw ?? 1)
 
-    // ---------------------------
-    // Metadata base
-    // ---------------------------
     mesh.userData.componentId    = data.id
     mesh.userData.interactable   = data.type === "wire" ? false : true
     mesh.userData.isSurface      = false
@@ -360,9 +349,6 @@ export class ComponentFactory {
     mesh.userData.pinConnections = data.pinConnections || null
     mesh.userData.meta           = data.meta || {}
 
-    // ---------------------------
-    // Terminales: battery5v
-    // ---------------------------
     if (data.type === "battery5v") {
       mesh.userData.terminals = [
         { id: "positive", label: "Positivo", localPos: new THREE.Vector3(-0.018, 0.071, 0) },
@@ -370,9 +356,6 @@ export class ComponentFactory {
       ]
     }
 
-    // ---------------------------
-    // Pines: led
-    // ---------------------------
     if (data.type === "led") {
       mesh.userData.pins = [
         { id: "anode",   label: "Ánodo",  localPos: new THREE.Vector3(-0.0065, -0.055, 0) },
@@ -380,9 +363,6 @@ export class ComponentFactory {
       ]
     }
 
-    // ---------------------------
-    // Pines: resistor
-    // ---------------------------
     if (data.type === "resistor") {
       mesh.userData.pins = [
         { id: "left",  label: "Pin izquierdo", localPos: new THREE.Vector3(-0.015, -0.022, 0) },
@@ -390,9 +370,6 @@ export class ComponentFactory {
       ]
     }
 
-    // ---------------------------
-    // Pines: button — 3 holes = 0.045m
-    // ---------------------------
     if (data.type === "button") {
       mesh.userData.pins = [
         { id: "pin_a", label: "Pin A", localPos: new THREE.Vector3(-0.0225, -0.024, 0) },
@@ -400,9 +377,6 @@ export class ComponentFactory {
       ]
     }
 
-    // ---------------------------
-    // Pines: switch — 3 holes = 0.045m
-    // ---------------------------
     if (data.type === "switch") {
       mesh.userData.pins = [
         { id: "pin_a", label: "Pin A", localPos: new THREE.Vector3(-0.0225, -0.024, 0) },
@@ -410,9 +384,6 @@ export class ComponentFactory {
       ]
     }
 
-    // ---------------------------
-    // Helpers de posición mundial
-    // ---------------------------
     mesh.userData.getPinWorldPositions = function () {
       const results  = []
       const worldPos = new THREE.Vector3()
