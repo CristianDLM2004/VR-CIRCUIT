@@ -29,22 +29,22 @@ export class InteractionSystem {
     this.controllerRayMinLength = 0.08
 
     this.nearEnabled   = true
-    this.nearRadius    = 0.22
+    this.nearRadius    = 0.18
 
-    this.handGrabSurfaceMaxDist  = 0.115
-    this.handGrabSurfaceSlack    = 0.075
-    this.handHoverSurfaceMaxDist = 0.120
+    this.handGrabSurfaceMaxDist  = 0.085
+    this.handGrabSurfaceSlack    = 0.045
+    this.handHoverSurfaceMaxDist = 0.095
 
-    this.handGrabExpandedBoxMargin = 0.055
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.065
-    this.handHoverExpandedBoxMargin = 0.045
+    this.handGrabExpandedBoxMargin = 0.026
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.034
+    this.handHoverExpandedBoxMargin = 0.020
 
-    this.handGrabExpandedSphereMargin = 0.070
-    this.handHoverExpandedSphereMargin = 0.055
+    this.handGrabExpandedSphereMargin = 0.034
+    this.handHoverExpandedSphereMargin = 0.026
 
-    this.insertedGrabBonusBoxMargin = 0.020
-    this.insertedGrabBonusSphereMargin = 0.030
-    this.insertedGrabBonusRadius = 0.025
+    this.insertedGrabBonusBoxMargin = 0.010
+    this.insertedGrabBonusSphereMargin = 0.014
+    this.insertedGrabBonusRadius = 0.014
 
     this.pinchStartDist        = 0.070
     this.pinchEndDist          = 0.100
@@ -292,16 +292,27 @@ export class InteractionSystem {
       this.scene.attach(obj)
       this.clearObjectOwner(obj)
       obj.userData.physics = null
+      this.resolveSurfacePenetration(obj)
+      if (!this.tryPlaceObjectDirectly(obj)) this.persistMeshTransform(obj)
+    }
+  }
+
+  finalizeDetachedObjectAfterXRExit(obj) {
+    if (!obj) return
+    this.scene.attach(obj)
+    this.clearObjectOwner(obj)
+    obj.userData.physics = null
+    this.resolveSurfacePenetration(obj)
+    if (!this.trySnapComponentPinsToHoles(obj, 0.05)) {
+      this.tryPlaceObjectDirectly(obj)
+      this.persistMeshTransform(obj)
     }
   }
 
   handleXRSessionEnd() {
     for (const h of this.hands) {
       if (h.heldObject) {
-        const obj = h.heldObject
-        this.scene.attach(obj)
-        this.clearObjectOwner(obj)
-        obj.userData.physics = null
+        this.finalizeDetachedObjectAfterXRExit(h.heldObject)
         h.heldObject = null
       }
       this.detachHeldComponentsFromNode(h.hand)
@@ -315,10 +326,7 @@ export class InteractionSystem {
 
     for (const c of this.controllers) {
       if (c.userData?.heldObject) {
-        const obj = c.userData.heldObject
-        this.scene.attach(obj)
-        this.clearObjectOwner(obj)
-        obj.userData.physics = null
+        this.finalizeDetachedObjectAfterXRExit(c.userData.heldObject)
         c.userData.heldObject = null
       }
       this.detachHeldComponentsFromNode(c)
@@ -381,10 +389,11 @@ export class InteractionSystem {
   }
 
   getAdaptiveExpandedMargin(obj, baseMargin = 0.02) {
-    this._box.setFromObject(obj)
+    const target = obj?.userData?.grabTarget || obj
+    this._box.setFromObject(target)
     this._box.getSize(this._tmpSize)
     const minDim = Math.min(this._tmpSize.x, this._tmpSize.y, this._tmpSize.z)
-    const extra = THREE.MathUtils.clamp(0.028 - minDim, 0, 0.020)
+    const extra = THREE.MathUtils.clamp(0.020 - minDim, 0, 0.012)
     return baseMargin + extra
   }
 
@@ -392,6 +401,75 @@ export class InteractionSystem {
     this._box.setFromObject(obj)
     out.copy(worldPoint).clamp(this._box.min, this._box.max)
     return out
+  }
+
+  getObjectGrabCenterWorld(obj, out) {
+    if (obj?.userData?.getGrabCenterWorld) {
+      out.copy(obj.userData.getGrabCenterWorld())
+      return out
+    }
+
+    const target = obj?.userData?.grabTarget || obj
+    this._box.setFromObject(target)
+    this._box.getCenter(out)
+    return out
+  }
+
+  getClosestGrabPointWorld(obj, worldPoint, out) {
+    if (obj?.userData?.getGrabWorldPoints) {
+      const grabPoints = obj.userData.getGrabWorldPoints()
+      if (Array.isArray(grabPoints) && grabPoints.length) {
+        let best = null
+        let bestScore = Infinity
+
+        for (const gp of grabPoints) {
+          const radius = obj.userData?.grabRadius ?? 0.02
+          const d = Math.max(0, gp.worldPos.distanceTo(worldPoint) - radius)
+          const weight = gp.weight ?? 1
+          const score = d / Math.max(0.0001, weight)
+
+          if (score < bestScore) {
+            bestScore = score
+            best = gp
+          }
+        }
+
+        if (best) {
+          out.copy(best.worldPos)
+          return out
+        }
+      }
+    }
+
+    if (obj?.userData?.grabTarget) {
+      this._box.setFromObject(obj.userData.grabTarget)
+      out.copy(worldPoint).clamp(this._box.min, this._box.max)
+      return out
+    }
+
+    return this.getClosestPointOnObjectBounds(obj, worldPoint, out)
+  }
+
+  getGrabDistanceToObject(obj, worldPoint) {
+    const radius = obj?.userData?.grabRadius ?? 0.02
+    let best = Infinity
+
+    if (obj?.userData?.getGrabWorldPoints) {
+      const grabPoints = obj.userData.getGrabWorldPoints()
+      if (Array.isArray(grabPoints) && grabPoints.length) {
+        for (const gp of grabPoints) {
+          const weight = gp.weight ?? 1
+          const d = Math.max(0, gp.worldPos.distanceTo(worldPoint) - radius) / Math.max(0.0001, weight)
+          if (d < best) best = d
+        }
+      }
+    }
+
+    if (isFinite(best)) return best
+
+    const target = obj?.userData?.grabTarget || obj
+    this._box.setFromObject(target)
+    return Math.max(0, this._box.distanceToPoint(worldPoint) - radius)
   }
 
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
@@ -405,24 +483,28 @@ export class InteractionSystem {
       this.getAdaptiveExpandedMargin(obj, baseSphereMargin) +
       (inserted ? this.insertedGrabBonusSphereMargin : 0)
 
-    const sd = this.distanceToObjectSurface(obj, pt)
-    const cd = this.getObjectCenterDistance(obj, pt)
-    const ed = this.getExpandedBoxDistance(obj, pt, adaptiveBoxMargin)
-    const sphereD = this.getExpandedSphereDistance(obj, pt, adaptiveSphereMargin)
+    const target = obj?.userData?.grabTarget || obj
 
-    this.getClosestPointOnObjectBounds(obj, pt, this._tmpJ)
-    const nearestBoundsPointDist = this._tmpJ.distanceTo(pt)
+    const grabD = this.getGrabDistanceToObject(obj, pt)
+    const sd = this.distanceToObjectSurface(target, pt)
+    const cd = this.getObjectGrabCenterWorld(obj, this._tmpH).distanceTo(pt)
+    const ed = this.getExpandedBoxDistance(target, pt, adaptiveBoxMargin)
+    const sphereD = this.getExpandedSphereDistance(target, pt, adaptiveSphereMargin)
+
+    this.getClosestGrabPointWorld(obj, pt, this._tmpJ)
+    const nearestGrabPointDist = this._tmpJ.distanceTo(pt)
 
     return {
+      grabD,
       sd,
       cd,
       ed,
       sphereD,
-      nearestBoundsPointDist,
+      nearestGrabPointDist,
       adaptiveBoxMargin,
       adaptiveSphereMargin,
       inserted,
-      score: nearestBoundsPointDist * 6.8 + sphereD * 3.6 + ed * 1.9 + cd * 0.20,
+      score: grabD * 8.0 + nearestGrabPointDist * 4.6 + sphereD * 2.4 + ed * 1.15 + cd * 0.18,
     }
   }
 
@@ -1280,16 +1362,16 @@ export class InteractionSystem {
     if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) return false
 
     const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
-    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.008 : 0.0
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     this.getGrabPointWorld(he, this._tmpC)
-    const { sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
+    const { grabD, sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
+    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
     if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) return false
-    if (ed > 0.0001 && sphereD > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+    if (grabD > this.handGrabSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
 
     return true
   }
@@ -1299,7 +1381,7 @@ export class InteractionSystem {
     let best = null
     let bestScore = Infinity
 
-    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.008 : 0.0
+    const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
@@ -1307,11 +1389,11 @@ export class InteractionSystem {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
 
       const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
-      const { sd, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
-      const centerLimit = maxDist + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
+      const { grabD, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
+      const centerLimit = maxDist + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
 
       if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-      if (sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack && ed > 0.0001 && sphereD > 0.0001) continue
+      if (grabD > this.handGrabSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
 
       if (score < bestScore) {
         bestScore = score
@@ -1568,11 +1650,12 @@ export class InteractionSystem {
     }
 
     he.heldObject = target
+    target.userData.physics = null
     this.setObjectOwner(target, this.makeOwnerToken("hand", he.index))
     this.startHoldTracking(he.hold, "hand", he)
 
     this.getGrabPointWorld(he, this._tmpA)
-    this.getClosestPointOnObjectBounds(target, this._tmpA, this._tmpB)
+    this.getClosestGrabPointWorld(target, this._tmpA, this._tmpB)
 
     target.worldToLocal(this._tmpC.copy(this._tmpB))
     he.hold.grabLocalPoint.copy(this._tmpC)
@@ -1683,6 +1766,7 @@ export class InteractionSystem {
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
 
+    target.userData.physics = null
     ctrl.userData.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("controller", ctrl.userData.sourceIndex ?? 0))
     this.startHoldTracking(ctrl.userData.hold, "controller", ctrl)
@@ -1740,15 +1824,15 @@ export class InteractionSystem {
           if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
           continue
         }
-        const { sd, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
+        const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
           obj,
           this._tmpA,
           this.handHoverExpandedBoxMargin,
           this.handHoverExpandedSphereMargin
         )
-        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.45 + (inserted ? this.insertedGrabBonusRadius : 0)
+        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
         if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-        if (sd > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
+        if (grabD > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
         if (score < bestScore) { bestScore = score; best = obj }
       }
     }
@@ -1886,7 +1970,15 @@ export class InteractionSystem {
   }
 
   update() {
-    if (!this.renderer.xr.isPresenting) return
+    const xrPresenting = this.renderer.xr.isPresenting
+
+    if (!xrPresenting) {
+      this.cleanupDetachedHolds()
+      this.updateDynamicWires()
+      this.clearActivePinHoleMarkers()
+      this.setHover(null)
+      return
+    }
 
     const now = performance.now()
     const dtMs = Math.min(50, now - this._lastUpdateTime)
