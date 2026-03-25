@@ -105,6 +105,8 @@ export class InteractionSystem {
     this._tmpF    = new THREE.Vector3()
     this._tmpG    = new THREE.Vector3()
     this._tmpH    = new THREE.Vector3()
+    this._tmpI    = new THREE.Vector3()
+    this._tmpJ    = new THREE.Vector3()
     this._tmpSize = new THREE.Vector3()
     this._box     = new THREE.Box3()
     this._box2    = new THREE.Box3()
@@ -262,6 +264,7 @@ export class InteractionSystem {
       maxSamples: 8,
       sampleWindowMs: 120,
       grabOffset: new THREE.Vector3(),
+      grabLocalPoint: new THREE.Vector3(),
       holdDistance: 0,
     }
   }
@@ -343,8 +346,11 @@ export class InteractionSystem {
     return Array.from(s.inputSources || []).some((src) => !!src.hand)
   }
 
-  isJointTracked(joint)      { return !!(joint && joint.visible !== false) }
-  isHandEntryTracked(he)     {
+  isJointTracked(joint) {
+    return !!(joint && joint.visible !== false)
+  }
+
+  isHandEntryTracked(he) {
     if (!he?.hand?.joints) return false
     return this.isJointTracked(he.hand.joints["thumb-tip"]) && this.isJointTracked(he.hand.joints["index-finger-tip"])
   }
@@ -362,8 +368,8 @@ export class InteractionSystem {
     }
   }
 
-  distanceToObjectSurface(obj, pt)        { this._box.setFromObject(obj); return this._box.distanceToPoint(pt) }
-  getObjectCenterDistance(obj, pt)        { this._box.setFromObject(obj); this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
+  distanceToObjectSurface(obj, pt) { this._box.setFromObject(obj); return this._box.distanceToPoint(pt) }
+  getObjectCenterDistance(obj, pt) { this._box.setFromObject(obj); this._box.getCenter(this._tmpE); return this._tmpE.distanceTo(pt) }
   getExpandedBoxDistance(obj, pt, m=0.02) { this._box2.setFromObject(obj); this._box2.expandByScalar(m); return this._box2.distanceToPoint(pt) }
 
   getExpandedSphereDistance(obj, pt, margin = 0.03) {
@@ -382,6 +388,12 @@ export class InteractionSystem {
     return baseMargin + extra
   }
 
+  getClosestPointOnObjectBounds(obj, worldPoint, out) {
+    this._box.setFromObject(obj)
+    out.copy(worldPoint).clamp(this._box.min, this._box.max)
+    return out
+  }
+
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
     const inserted = !!obj?.userData?.inserted || !!obj?.userData?.pinConnections
 
@@ -398,15 +410,19 @@ export class InteractionSystem {
     const ed = this.getExpandedBoxDistance(obj, pt, adaptiveBoxMargin)
     const sphereD = this.getExpandedSphereDistance(obj, pt, adaptiveSphereMargin)
 
+    this.getClosestPointOnObjectBounds(obj, pt, this._tmpJ)
+    const nearestBoundsPointDist = this._tmpJ.distanceTo(pt)
+
     return {
       sd,
       cd,
       ed,
       sphereD,
+      nearestBoundsPointDist,
       adaptiveBoxMargin,
       adaptiveSphereMargin,
       inserted,
-      score: sphereD * 5.8 + ed * 2.8 + sd * 1.15 + cd * 0.32,
+      score: nearestBoundsPointDist * 6.8 + sphereD * 3.6 + ed * 1.9 + cd * 0.20,
     }
   }
 
@@ -525,7 +541,7 @@ export class InteractionSystem {
       if (!visible) continue
 
       const controller = r.controller
-      const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
+      const { origin } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
       let dist = this.controllerRayMaxLength
 
       if (controller.userData?.heldObject) {
@@ -545,18 +561,10 @@ export class InteractionSystem {
           if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), this.controllerRayMinLength, this.controllerRayMaxLength)
         }
       } else {
-        this.raycaster.ray.origin.copy(origin)
-        this.raycaster.ray.direction.copy(direction)
-
-        const hits = this.raycaster.intersectObjects(this.interactables, true)
-        for (const h of hits) {
-          if (h.distance > this.controllerRayMaxLength) continue
-          const p = this.pickInteractableFromHitObject(h.object)
-          if (!p) continue
-          if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
-            dist = THREE.MathUtils.clamp(h.distance, this.controllerRayMinLength, this.controllerRayMaxLength)
-            break
-          }
+        const target = this.computeControllerHoverFor(controller)
+        if (target) {
+          target.getWorldPosition(this._tmpG)
+          dist = THREE.MathUtils.clamp(origin.distanceTo(this._tmpG), this.controllerRayMinLength, this.controllerRayMaxLength)
         }
       }
 
@@ -1331,6 +1339,7 @@ export class InteractionSystem {
     hs.vel.set(0,0,0)
     hs.samples.length = 0
     hs.grabOffset.set(0,0,0)
+    hs.grabLocalPoint.set(0,0,0)
     hs.holdDistance = 0
 
     if (sourceType === "controller") source.getWorldPosition(hs.lastPos)
@@ -1345,6 +1354,7 @@ export class InteractionSystem {
     hs.vel.set(0,0,0)
     hs.samples.length = 0
     hs.grabOffset.set(0,0,0)
+    hs.grabLocalPoint.set(0,0,0)
     hs.holdDistance = 0
   }
 
@@ -1562,8 +1572,14 @@ export class InteractionSystem {
     this.startHoldTracking(he.hold, "hand", he)
 
     this.getGrabPointWorld(he, this._tmpA)
-    he.hold.grabOffset.copy(target.position).sub(this._tmpA)
-    he.hold.holdDistance = target.position.distanceTo(this._tmpA)
+    this.getClosestPointOnObjectBounds(target, this._tmpA, this._tmpB)
+
+    target.worldToLocal(this._tmpC.copy(this._tmpB))
+    he.hold.grabLocalPoint.copy(this._tmpC)
+
+    target.localToWorld(this._tmpD.copy(he.hold.grabLocalPoint))
+    he.hold.grabOffset.copy(this._tmpD).sub(this._tmpA)
+    he.hold.holdDistance = this._tmpD.distanceTo(this._tmpA)
   }
 
   onHandPinchEnd(he, options = {}) {
@@ -1872,7 +1888,8 @@ export class InteractionSystem {
   update() {
     if (!this.renderer.xr.isPresenting) return
 
-    const now = performance.now(), dtMs = Math.min(50, now - this._lastUpdateTime)
+    const now = performance.now()
+    const dtMs = Math.min(50, now - this._lastUpdateTime)
     this._lastUpdateTime = now
 
     const handsActive = this.isHandTrackingActive()
