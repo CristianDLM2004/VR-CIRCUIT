@@ -25,7 +25,6 @@ export class InteractionSystem {
     this.hovered         = null
     this.controllerRays  = []
 
-    // Rayo dinámico, pero con máximo más corto
     this.controllerRayMaxLength = 1.15
     this.controllerRayMinLength = 0.08
 
@@ -237,11 +236,16 @@ export class InteractionSystem {
       hand.add(pp)
 
       this.hands.push({
-        index: i, hand, pinchPoint: pp,
-        isPinching: false, pinchArmed: true,
+        index: i,
+        hand,
+        pinchPoint: pp,
+        isPinching: false,
+        pinchArmed: true,
         heldObject: null,
         hold: this.createHoldState("hand", null),
-        lostTrackingMs: 0, openPinchMs: 0, wirePinchCloseMs: 0,
+        lostTrackingMs: 0,
+        openPinchMs: 0,
+        wirePinchCloseMs: 0,
       })
     }
   }
@@ -257,6 +261,8 @@ export class InteractionSystem {
       samples: [],
       maxSamples: 8,
       sampleWindowMs: 120,
+      grabOffset: new THREE.Vector3(),
+      holdDistance: 0,
     }
   }
 
@@ -273,6 +279,19 @@ export class InteractionSystem {
     return { line, hitDot: dot }
   }
 
+  detachHeldComponentsFromNode(root) {
+    if (!root) return
+    const found = []
+    root.traverse((obj) => {
+      if (obj?.userData?.componentId) found.push(obj)
+    })
+    for (const obj of found) {
+      this.scene.attach(obj)
+      this.clearObjectOwner(obj)
+      obj.userData.physics = null
+    }
+  }
+
   handleXRSessionEnd() {
     for (const h of this.hands) {
       if (h.heldObject) {
@@ -282,6 +301,7 @@ export class InteractionSystem {
         obj.userData.physics = null
         h.heldObject = null
       }
+      this.detachHeldComponentsFromNode(h.hand)
       h.isPinching = false
       h.pinchArmed = true
       h.lostTrackingMs = 0
@@ -298,6 +318,7 @@ export class InteractionSystem {
         obj.userData.physics = null
         c.userData.heldObject = null
       }
+      this.detachHeldComponentsFromNode(c)
       if (c.userData?._pressedComponent && typeof c.userData._pressedComponent.userData?.releaseButton === "function") {
         c.userData._pressedComponent.userData.releaseButton()
       }
@@ -544,16 +565,35 @@ export class InteractionSystem {
     }
   }
 
-  getJointWorld(hand, name, out) { const j = hand.joints?.[name]; if (!this.isJointTracked(j)) return null; j.getWorldPosition(out); return out }
-  getIndexTipWorld(he, out) { const p = this.getJointWorld(he.hand, "index-finger-tip", out); if (p) return p; he.pinchPoint.getWorldPosition(out); return out }
-  getThumbTipWorld(he, out) { const p = this.getJointWorld(he.hand, "thumb-tip", out); if (p) return p; he.pinchPoint.getWorldPosition(out); return out }
+  getJointWorld(hand, name, out) {
+    const j = hand.joints?.[name]
+    if (!this.isJointTracked(j)) return null
+    j.getWorldPosition(out)
+    return out
+  }
+
+  getIndexTipWorld(he, out) {
+    const p = this.getJointWorld(he.hand, "index-finger-tip", out)
+    if (p) return p
+    he.pinchPoint.getWorldPosition(out)
+    return out
+  }
+
+  getThumbTipWorld(he, out) {
+    const p = this.getJointWorld(he.hand, "thumb-tip", out)
+    if (p) return p
+    he.pinchPoint.getWorldPosition(out)
+    return out
+  }
+
   getGrabPointWorld(he, out) {
     const thumb = this.getThumbTipWorld(he, this._tmpA)
     const index = this.getIndexTipWorld(he, this._tmpB)
     if (thumb && index) { out.copy(thumb).add(index).multiplyScalar(0.5); return out }
     if (index) { out.copy(index); return out }
     if (thumb) { out.copy(thumb); return out }
-    he.pinchPoint.getWorldPosition(out); return out
+    he.pinchPoint.getWorldPosition(out)
+    return out
   }
 
   getAllConnectionAnchors() {
@@ -1098,6 +1138,17 @@ export class InteractionSystem {
     }
   }
 
+  updateHandHeldObjectPose(he) {
+    if (!he?.heldObject) return
+    if (!this.isHandEntryTracked(he)) return
+
+    const obj = he.heldObject
+    this.getGrabPointWorld(he, this._tmpA)
+
+    obj.position.copy(this._tmpA).add(he.hold.grabOffset)
+    obj.updateMatrixWorld(true)
+  }
+
   updateWireDraftPreview() {
     if (this.toolMode !== "wire") {
       this.clearWireDraft()
@@ -1267,7 +1318,9 @@ export class InteractionSystem {
     const id = mesh?.userData?.componentId
     if (!id) return
     const p = mesh.position, q = mesh.quaternion
-    this.appState.updateComponent(id, { transform: { x:p.x, y:p.y, z:p.z, qx:q.x, qy:q.y, qz:q.z, qw:q.w } })
+    this.appState.updateComponent(id, {
+      transform: { x:p.x, y:p.y, z:p.z, qx:q.x, qy:q.y, qz:q.z, qw:q.w }
+    })
   }
 
   startHoldTracking(hs, sourceType, source) {
@@ -1277,6 +1330,9 @@ export class InteractionSystem {
     hs.lastT = performance.now()
     hs.vel.set(0,0,0)
     hs.samples.length = 0
+    hs.grabOffset.set(0,0,0)
+    hs.holdDistance = 0
+
     if (sourceType === "controller") source.getWorldPosition(hs.lastPos)
     else this.getGrabPointWorld(source, hs.lastPos)
   }
@@ -1288,6 +1344,8 @@ export class InteractionSystem {
     hs.lastT = 0
     hs.vel.set(0,0,0)
     hs.samples.length = 0
+    hs.grabOffset.set(0,0,0)
+    hs.holdDistance = 0
   }
 
   updateHoldVelocity(hs) {
@@ -1377,7 +1435,10 @@ export class InteractionSystem {
     object.position.y -= 0.02
     object.updateMatrixWorld(true)
     const id = object.userData?.componentId
-    if (id) this.appState.updateComponent(id, { inserted: true, pinConnections: { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id } })
+    if (id) this.appState.updateComponent(id, {
+      inserted: true,
+      pinConnections: { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
+    })
     this.persistMeshTransform(object)
     return true
   }
@@ -1488,18 +1549,21 @@ export class InteractionSystem {
 
     const target = this.findNearestComponentToHand(he, this.nearRadius)
     if (!target || !this.canHandGrabObject(he, target)) return
+
     if (target.userData?.inserted || target.userData?.pinConnections) {
       target.userData.inserted = false
       target.userData.pinConnections = null
       const id = target.userData?.componentId
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
+
     he.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("hand", he.index))
     this.startHoldTracking(he.hold, "hand", he)
-    const joint = he.hand.joints?.["index-finger-tip"]
-    if (this.isJointTracked(joint)) joint.attach(target)
-    else he.pinchPoint.attach(target)
+
+    this.getGrabPointWorld(he, this._tmpA)
+    he.hold.grabOffset.copy(target.position).sub(this._tmpA)
+    he.hold.holdDistance = target.position.distanceTo(this._tmpA)
   }
 
   onHandPinchEnd(he, options = {}) {
@@ -1602,6 +1666,7 @@ export class InteractionSystem {
       const id = target.userData?.componentId
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
+
     ctrl.userData.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("controller", ctrl.userData.sourceIndex ?? 0))
     this.startHoldTracking(ctrl.userData.hold, "controller", ctrl)
@@ -1676,20 +1741,29 @@ export class InteractionSystem {
 
   updateHeldObjects() {
     let active = null
+
     for (const h of this.hands) {
-      if (h.heldObject) { this.updateHoldVelocity(h.hold); active = h.heldObject }
+      if (h.heldObject) {
+        this.updateHandHeldObjectPose(h)
+        this.updateHoldVelocity(h.hold)
+        active = h.heldObject
+      }
     }
+
     for (const c of this.controllers) {
-      if (c.userData?.heldObject) { this.updateHoldVelocity(c.userData.hold); active = c.userData.heldObject }
+      if (c.userData?.heldObject) {
+        this.updateHoldVelocity(c.userData.hold)
+        active = c.userData.heldObject
+      }
     }
+
     if (active) this.updatePinHoleMarkersForHeldObject(active)
     else this.clearActivePinHoleMarkers()
   }
 
   cleanupDetachedHolds() {
     for (const h of this.hands) {
-      if (h.heldObject && h.heldObject.parent === this.scene) {
-        this.clearObjectOwner(h.heldObject)
+      if (h.heldObject && this.getObjectOwner(h.heldObject) !== this.makeOwnerToken("hand", h.index)) {
         h.heldObject = null
         h.isPinching = false
         h.openPinchMs = 0
@@ -1697,9 +1771,9 @@ export class InteractionSystem {
         this.stopHoldTracking(h.hold)
       }
     }
+
     for (const c of this.controllers) {
-      if (c.userData?.heldObject && c.userData.heldObject.parent === this.scene) {
-        this.clearObjectOwner(c.userData.heldObject)
+      if (c.userData?.heldObject && this.getObjectOwner(c.userData.heldObject) !== this.makeOwnerToken("controller", c.userData.sourceIndex ?? 0)) {
         c.userData.heldObject = null
         this.stopHoldTracking(c.userData.hold)
       }
@@ -1726,6 +1800,7 @@ export class InteractionSystem {
         }
         continue
       }
+
       h.lostTrackingMs = 0
       if (dist >= this.pinchReleaseResetDist) h.pinchArmed = true
 
