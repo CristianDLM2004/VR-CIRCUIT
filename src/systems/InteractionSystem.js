@@ -22,7 +22,7 @@ export class InteractionSystem {
     this.surfaces      = []
     this.holeSystem    = null
 
-    this.hovered       = null
+    this.hovered        = null
     this.controllerRays = []
 
     this.nearEnabled   = true
@@ -67,6 +67,8 @@ export class InteractionSystem {
     this.wireHoverAnchor    = null
     this.wireHoverEndpoint  = null
     this.wireHoverHandIndex = null
+    this.wireHoverSourceType = null
+    this.wireHoverSourceIndex = null
     this._wireHoverMarker   = null
 
     this.wireHoverMaxDist         = 0.055
@@ -75,10 +77,18 @@ export class InteractionSystem {
     this.wirePinchStartDist       = 0.016
     this.wirePinchEndDist         = 0.030
 
+    // Soporte para controles en modo cable
+    this.wireControllerHoverPerpMaxDist    = 0.022
+    this.wireControllerEndpointPerpMaxDist = 0.026
+    this.wireControllerRayMaxDist          = 5.0
+    this.wireControllerFallbackDist        = 0.35
+
     this.wireAnchorPriority = { terminal: 0, pin: 1, hole: 2 }
 
     this.wireDraftStartAnchor = null
     this.wireDraftHandIndex   = null
+    this.wireDraftSourceType  = null
+    this.wireDraftSourceIndex = null
     this.wireDraftWaypoints   = []
     this.wireDraftColor       = 0x111111
     this._wireDraftMeshes     = []
@@ -93,6 +103,8 @@ export class InteractionSystem {
     this._tmpD    = new THREE.Vector3()
     this._tmpE    = new THREE.Vector3()
     this._tmpF    = new THREE.Vector3()
+    this._tmpG    = new THREE.Vector3()
+    this._tmpH    = new THREE.Vector3()
     this._tmpSize = new THREE.Vector3()
     this._box     = new THREE.Box3()
     this._box2    = new THREE.Box3()
@@ -267,9 +279,15 @@ export class InteractionSystem {
 
   setHover(newH) {
     if (this.hovered === newH) return
-    if (this.hovered) { this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x000000) }); if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x000000) }
+    if (this.hovered) {
+      this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x000000) })
+      if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x000000)
+    }
     this.hovered = newH
-    if (this.hovered) { this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x222222) }); if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x222222) }
+    if (this.hovered) {
+      this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x222222) })
+      if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x222222)
+    }
   }
 
   distanceToObjectSurface(obj, pt)        { this._box.setFromObject(obj);  return this._box.distanceToPoint(pt) }
@@ -302,6 +320,62 @@ export class InteractionSystem {
   isAnyOtherHandHolding(he) { return this.hands.some((h) => h !== he && !!h.heldObject) }
 
   // ---------------------------
+  // Controller ray helpers
+  // ---------------------------
+  getControllerRayWorld(controller, outOrigin, outDir) {
+    this.tempMatrix.identity().extractRotation(controller.matrixWorld)
+    outOrigin.setFromMatrixPosition(controller.matrixWorld)
+    outDir.set(0, 0, -1).applyMatrix4(this.tempMatrix).normalize()
+    return { origin: outOrigin, direction: outDir }
+  }
+
+  getControllerByIndex(index) {
+    return this.controllers.find((c) => (c.userData?.sourceIndex ?? -1) === index) || null
+  }
+
+  getControllerWirePointerWorld(controller, out) {
+    if (!controller) return null
+
+    if (this.wireHoverSourceType === "controller" && this.wireHoverSourceIndex === (controller.userData?.sourceIndex ?? -1)) {
+      const target = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
+      if (target) {
+        out.copy(target)
+        return out
+      }
+    }
+
+    const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
+
+    const surfaceMeshes = this.surfaces.map((s) => s.mesh)
+    if (surfaceMeshes.length) {
+      this.raycaster.ray.origin.copy(origin)
+      this.raycaster.ray.direction.copy(direction)
+      const hits = this.raycaster.intersectObjects(surfaceMeshes, true)
+      const best = hits.length && typeof this.interactionSystem?.pickBestSurfaceHit === "function"
+        ? this.interactionSystem.pickBestSurfaceHit(hits, null)
+        : (hits[0] || null)
+
+      if (best?.point) {
+        out.copy(best.point)
+        return out
+      }
+    }
+
+    out.copy(origin).add(direction.multiplyScalar(this.wireControllerFallbackDist))
+    return out
+  }
+
+  projectPointToControllerRay(controller, point, outProjected = null) {
+    const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
+    const toPoint = this._tmpG.copy(point).sub(origin)
+    const along = toPoint.dot(direction)
+    const projected = outProjected || new THREE.Vector3()
+    projected.copy(direction).multiplyScalar(Math.max(0, along)).add(origin)
+    const perp = projected.distanceTo(point)
+    return { along, perp, projected }
+  }
+
+  // ---------------------------
   // Controller hover
   // En modo sim: solo detecta isUI y componentes con onPress
   // En modo edit: detecta isUI y grabs normales
@@ -323,27 +397,52 @@ export class InteractionSystem {
   }
 
   computeControllerHover() {
-    for (const c of this.controllers) { const b = this.computeControllerHoverFor(c); if (b) return b }
+    for (const c of this.controllers) {
+      const b = this.computeControllerHoverFor(c)
+      if (b) return b
+    }
     return null
   }
 
   updateControllerRays(visible) {
     for (const r of this.controllerRays) {
-      r.line.visible = visible; r.hitDot.visible = visible
+      r.line.visible = visible
+      r.hitDot.visible = visible
       if (!visible) continue
-      this.tempMatrix.identity().extractRotation(r.controller.matrixWorld)
-      this.raycaster.ray.origin.setFromMatrixPosition(r.controller.matrixWorld)
-      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
-      const hits = this.raycaster.intersectObjects(this.interactables, true)
+
+      const controller = r.controller
+      const { origin, direction } = this.getControllerRayWorld(controller, this._tmpE, this._tmpF)
       let dist = 5
-      for (const h of hits) {
-        const p = this.pickInteractableFromHitObject(h.object)
-        if (!p) continue
-        if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
-          dist = Math.min(5, Math.max(0.05, h.distance)); break
+
+      if (this.toolMode === "wire") {
+        const hoverBelongsToThisController =
+          this.wireHoverSourceType === "controller" &&
+          this.wireHoverSourceIndex === (controller.userData?.sourceIndex ?? -1)
+
+        if (hoverBelongsToThisController) {
+          const p = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
+          if (p) dist = THREE.MathUtils.clamp(origin.distanceTo(p), 0.05, 5)
+        } else {
+          const targetPoint = this.getControllerWirePointerWorld(controller, this._tmpG)
+          if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), 0.05, 5)
+        }
+      } else {
+        this.raycaster.ray.origin.copy(origin)
+        this.raycaster.ray.direction.copy(direction)
+
+        const hits = this.raycaster.intersectObjects(this.interactables, true)
+        for (const h of hits) {
+          const p = this.pickInteractableFromHitObject(h.object)
+          if (!p) continue
+          if (p.userData?.isUI || (this.isSimMode() && this.isComponentWithOnPress(p)) || (this.isEditMode() && this.isObjectFreeForGrab(p))) {
+            dist = Math.min(5, Math.max(0.05, h.distance))
+            break
+          }
         }
       }
-      r.line.scale.z = dist; r.hitDot.position.z = -dist
+
+      r.line.scale.z = dist
+      r.hitDot.position.z = -dist
     }
   }
 
@@ -393,160 +492,82 @@ export class InteractionSystem {
       if (d < bestDist - 0.001) { best = anchor; bestDist = d }
       else if (Math.abs(d - bestDist) <= 0.001 && cp < bp) { best = anchor; bestDist = d }
     }
-    return best ? { ...best, distance: bestDist, handIndex: he.index } : null
+    return best ? { ...best, distance: bestDist, handIndex: he.index, sourceType: "hand", sourceIndex: he.index } : null
+  }
+
+  findBestWireAnchorForController(controller, maxPerpDist = this.wireControllerHoverPerpMaxDist) {
+    if (!controller || controller.userData?.heldObject) return null
+    const anchors = this.getAllConnectionAnchors()
+    let best = null
+    let bestPerp = maxPerpDist
+    let bestAlong = Infinity
+
+    for (const anchor of anchors) {
+      const { along, perp } = this.projectPointToControllerRay(controller, anchor.worldPos, this._tmpG)
+      if (along < 0.03 || along > this.wireControllerRayMaxDist) continue
+      if (perp > bestPerp) continue
+
+      if (!best) {
+        best = anchor
+        bestPerp = perp
+        bestAlong = along
+        continue
+      }
+
+      const bp = this.wireAnchorPriority[best.kind]   ?? 999
+      const cp = this.wireAnchorPriority[anchor.kind] ?? 999
+
+      if (perp < bestPerp - 0.001) {
+        best = anchor
+        bestPerp = perp
+        bestAlong = along
+      } else if (Math.abs(perp - bestPerp) <= 0.001) {
+        if (cp < bp || (cp === bp && along < bestAlong)) {
+          best = anchor
+          bestPerp = perp
+          bestAlong = along
+        }
+      }
+    }
+
+    return best
+      ? {
+          ...best,
+          distance: bestPerp,
+          rayDistance: bestAlong,
+          controllerIndex: controller.userData?.sourceIndex ?? 0,
+          sourceType: "controller",
+          sourceIndex: controller.userData?.sourceIndex ?? 0,
+        }
+      : null
   }
 
   ensureWireHoverMarker() {
     if (this._wireHoverMarker) return this._wireHoverMarker
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 12, 12), new THREE.MeshBasicMaterial({ color: 0x00ffff }))
-    m.name = "WireHoverMarker"; m.visible = false; this.scene.add(m)
-    this._wireHoverMarker = m; return m
+    m.name = "WireHoverMarker"
+    m.visible = false
+    this.scene.add(m)
+    this._wireHoverMarker = m
+    return m
   }
 
   clearWireHoverAnchor() {
-    this.wireHoverAnchor = null; this.wireHoverEndpoint = null; this.wireHoverHandIndex = null
+    this.wireHoverAnchor = null
+    this.wireHoverEndpoint = null
+    this.wireHoverHandIndex = null
+    this.wireHoverSourceType = null
+    this.wireHoverSourceIndex = null
     if (this._wireHoverMarker) this._wireHoverMarker.visible = false
   }
 
-  updateWireHover() {
-    if (this.toolMode !== "wire") { this.clearWireHoverAnchor(); return }
-    let best = null, bestType = null
-    for (const he of this.hands) {
-      const ac = this.findBestWireAnchorForHand(he)
-      const ep = this.findBestWireEndpointForHand(he)
-      if (!this.wireDraftStartAnchor) {
-        if (ac && ep) { best = ep.distance <= ac.distance ? ep : ac; bestType = best === ep ? "endpoint" : "anchor" }
-        else if (ep)  { best = ep; bestType = "endpoint" }
-        else if (ac)  { best = ac; bestType = "anchor" }
-      } else {
-        if (ac && (!best || ac.distance < best.distance)) { best = ac; bestType = "anchor" }
-      }
-      if (best) break
-    }
-    if (!best) {
-      if (this.wireHoverAnchor || this.wireHoverEndpoint) {
-        const th = this.hands.find((h) => h.index === this.wireHoverHandIndex)
-        if (th && this.isHandEntryTracked(th)) {
-          this.getGrabPointWorld(th, this._tmpD)
-          const tp = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
-          if (tp && tp.distanceTo(this._tmpD) <= this.wireHoverReleaseDist) { const m = this.ensureWireHoverMarker(); m.position.copy(tp); m.visible = true; return }
-        }
-      }
-      this.clearWireHoverAnchor(); return
-    }
-    this.wireHoverHandIndex = best.handIndex
-    if (bestType === "anchor") { this.wireHoverAnchor = best; this.wireHoverEndpoint = null }
-    else                       { this.wireHoverAnchor = null; this.wireHoverEndpoint = best }
-    const m = this.ensureWireHoverMarker(); m.position.copy(best.worldPos); m.visible = true
-  }
-
-  ensureWireDraftMesh(index = 0) {
-    if (this._wireDraftMeshes[index]) { const m = this._wireDraftMeshes[index]; if (m.material?.color) m.material.color.setHex(this.wireDraftColor ?? 0x111111); return m }
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 18), new THREE.MeshStandardMaterial({ color: this.wireDraftColor ?? 0x111111, roughness: 0.65, metalness: 0.0, emissive: 0x181818 }))
-    mesh.name = `WireDraftMesh_${index}`; mesh.visible = false; this.scene.add(mesh)
-    this._wireDraftMeshes[index] = mesh; return mesh
-  }
-
-  clearWireDraft() {
-    this.wireDraftStartAnchor = null; this.wireDraftHandIndex = null; this.wireDraftWaypoints = []; this.wireDraftColor = 0x111111
-    for (const m of this._wireDraftMeshes) { if (m) m.visible = false }
-  }
-
-  startWireDraftFromAnchor(anchor, handIndex) {
-    if (!anchor) return
-    this.wireDraftStartAnchor = { ...anchor, worldPos: anchor.worldPos.clone() }; this.wireDraftHandIndex = handIndex; this.wireDraftWaypoints = []
-    this.wireDraftColor = this.getWireColorFromAnchors(anchor, null)
-    const mesh = this.ensureWireDraftMesh(0)
-    if (mesh.material?.color) mesh.material.color.setHex(this.wireDraftColor)
-    if (mesh.material?.emissive) mesh.material.emissive.setHex(0x181818)
-    mesh.visible = true
-  }
-
-  canRunWireAction() { const now = performance.now(); if (now - this._lastWireActionMs < this.wireActionCooldownMs) return false; this._lastWireActionMs = now; return true }
-
-  addWireWaypointFromHand(he) {
-    if (!he || !this.wireDraftStartAnchor || this.wireDraftHandIndex !== he.index || !this.isHandEntryTracked(he) || !this.canRunWireAction()) return false
-    this.getGrabPointWorld(he, this._tmpA); const np = this._tmpA.clone()
-    const pts = [this.wireDraftStartAnchor.worldPos, ...this.wireDraftWaypoints]
-    if (pts[pts.length - 1].distanceTo(np) < 0.015) return false
-    this.wireDraftWaypoints.push(np); return true
-  }
-
-  getWireDraftPoints(end = null) {
-    const pts = []; if (!this.wireDraftStartAnchor) return pts
-    pts.push(this.wireDraftStartAnchor.worldPos.clone())
-    for (const p of this.wireDraftWaypoints) pts.push(p.clone())
-    if (end) pts.push(end.clone())
-    return pts
-  }
-
-  updateWireDraftSegment(mesh, start, end) {
-    const dir = this._tmpB.copy(end).sub(start); const len = dir.length()
-    if (len < 0.001) { mesh.visible = false; return }
-    mesh.visible = true; const mid = this._tmpC.copy(start).add(end).multiplyScalar(0.5)
-    mesh.position.copy(mid); dir.normalize(); mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir); mesh.scale.set(1, len, 1)
-  }
-
-  generateComponentId(prefix = "cmp") { return globalThis.crypto?.randomUUID ? `${prefix}_${globalThis.crypto.randomUUID()}` : `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}` }
-
-  serializeWireAnchor(a) {
-    if (!a) return null
-    return { kind: a.kind ?? null, id: a.id ?? null, label: a.label ?? null, componentId: a.componentId ?? null, componentType: a.componentType ?? null, holeId: a.holeId ?? null, groupKey: a.groupKey ?? null, worldPos: a.worldPos ? { x: a.worldPos.x, y: a.worldPos.y, z: a.worldPos.z } : null }
-  }
-
-  isSameWireAnchor(a, b) {
-    if (!a || !b || a.kind !== b.kind) return false
-    if (a.kind === "hole") return a.holeId === b.holeId
-    return a.componentId === b.componentId && a.id === b.id
-  }
-
-  getWireColorFromAnchors(s, e) {
-    const pick = (a) => { if (!a) return null; if (a.componentType === "battery5v" && a.id === "positive") return 0xff2a2a; if (a.componentType === "battery5v" && a.id === "negative") return 0x5bc0de; return null }
-    return pick(s) ?? pick(e) ?? 0x111111
-  }
-
-  finalizeWireDraftToAnchor(endAnchor, he) {
-    if (!endAnchor || !he || !this.wireDraftStartAnchor || this.wireDraftHandIndex !== he.index || !this.stateSyncSystem || !this.canRunWireAction()) return false
-    const sa = this.wireDraftStartAnchor
-    if (this.isSameWireAnchor(sa, endAnchor)) return false
-    const pts = [sa.worldPos.clone(), ...this.wireDraftWaypoints.map((p) => p.clone()), endAnchor.worldPos.clone()]
-    if (pts.length < 2) return false
-    const id = this.generateComponentId("wire"), wc = this.getWireColorFromAnchors(sa, endAnchor)
-    const data = { id, type: "wire", transform: { x:0,y:0,z:0,qx:0,qy:0,qz:0,qw:1 }, meta: { color: wc, points: pts.map((p) => ({ x:p.x,y:p.y,z:p.z })), startAnchor: this.serializeWireAnchor(sa), endAnchor: this.serializeWireAnchor(endAnchor) } }
-    this.appState.addComponent(data); this.stateSyncSystem.addMeshFromComponent(data)
-    this.clearWireDraft(); this.clearWireHoverAnchor()
-    he.isPinching = true; he.pinchArmed = false; he.wirePinchCloseMs = 0
-    console.log("✅ Cable cerrado"); return true
-  }
-
-  findComponentMeshById(id) { return this.stateSyncSystem?.getMeshById(id) ?? null }
-
-  resolveAnchorWorldPosition(anchor) {
-    if (!anchor) return null
-    if (anchor.kind === "hole") { if (!this.holeSystem) return null; this.holeSystem.updateWorldPositions(); const h = this.holeSystem.holes.find((h) => h.id === anchor.holeId || h.id === anchor.id); return h ? h.worldPos.clone() : null }
-    if (anchor.componentId) {
-      const mesh = this.findComponentMeshById(anchor.componentId); if (!mesh) return null
-      if (anchor.kind === "terminal" && typeof mesh.userData?.getTerminalWorldPositions === "function") { const f = mesh.userData.getTerminalWorldPositions().find((t) => t.id === anchor.id); return f ? f.worldPos.clone() : null }
-      if (anchor.kind === "pin"      && typeof mesh.userData?.getPinWorldPositions      === "function") { const f = mesh.userData.getPinWorldPositions().find((p) => p.id === anchor.id); return f ? f.worldPos.clone() : null }
-    }
-    if (anchor.worldPos) return new THREE.Vector3(anchor.worldPos.x, anchor.worldPos.y, anchor.worldPos.z)
-    return null
-  }
-
-  getWireEndpointWorldPosition(wireMesh, type) {
-    if (!wireMesh?.userData?.isWire) return null
-    const anchor = type === "start" ? wireMesh.userData.startAnchor : wireMesh.userData.endAnchor
-    const r = this.resolveAnchorWorldPosition(anchor); if (r) return r
-    const fp = Array.isArray(wireMesh.userData.fixedPoints) ? wireMesh.userData.fixedPoints : null
-    if (!fp || fp.length < 2) return null
-    return type === "start" ? fp[0].clone() : fp[fp.length-1].clone()
-  }
-
   getAllWireEndpoints() {
-    const eps = []; if (!this.stateSyncSystem) return eps
+    const eps = []
+    if (!this.stateSyncSystem) return eps
     for (const mesh of this.stateSyncSystem.meshById.values()) {
       if (!mesh?.userData?.isWire) continue
-      const sw = this.getWireEndpointWorldPosition(mesh, "start"); const ew = this.getWireEndpointWorldPosition(mesh, "end")
+      const sw = this.getWireEndpointWorldPosition(mesh, "start")
+      const ew = this.getWireEndpointWorldPosition(mesh, "end")
       if (sw) eps.push({ kind:"wire-endpoint", endpointType:"start", wireId:mesh.userData.componentId, worldPos:sw })
       if (ew) eps.push({ kind:"wire-endpoint", endpointType:"end",   wireId:mesh.userData.componentId, worldPos:ew })
     }
@@ -557,45 +578,468 @@ export class InteractionSystem {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
     this.getGrabPointWorld(he, this._tmpC)
     let best = null, bestDist = maxDist
-    for (const ep of this.getAllWireEndpoints()) { const d = ep.worldPos.distanceTo(this._tmpC); if (d < bestDist) { best = ep; bestDist = d } }
-    return best ? { ...best, distance: bestDist, handIndex: he.index } : null
+    for (const ep of this.getAllWireEndpoints()) {
+      const d = ep.worldPos.distanceTo(this._tmpC)
+      if (d < bestDist) { best = ep; bestDist = d }
+    }
+    return best ? { ...best, distance: bestDist, handIndex: he.index, sourceType: "hand", sourceIndex: he.index } : null
   }
 
-  deleteWireById(id) { if (!id || !this.stateSyncSystem) return false; this.appState.removeComponent(id); this.stateSyncSystem.removeMeshById(id); return true }
+  findBestWireEndpointForController(controller, maxPerpDist = this.wireControllerEndpointPerpMaxDist) {
+    if (!controller || controller.userData?.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
 
-  reopenWireFromEndEndpoint(ep, he) {
-    if (!ep || ep.endpointType !== "end" || !he || !this.stateSyncSystem) return false
-    const wm = this.stateSyncSystem.getMeshById(ep.wireId); if (!wm?.userData?.isWire) return false
-    const sa = wm.userData.startAnchor; const fp = Array.isArray(wm.userData.fixedPoints) ? wm.userData.fixedPoints.map((p) => p.clone()) : []
+    let best = null
+    let bestPerp = maxPerpDist
+    let bestAlong = Infinity
+
+    for (const ep of this.getAllWireEndpoints()) {
+      const { along, perp } = this.projectPointToControllerRay(controller, ep.worldPos, this._tmpG)
+      if (along < 0.03 || along > this.wireControllerRayMaxDist) continue
+      if (perp > bestPerp) continue
+
+      if (!best || perp < bestPerp - 0.001 || (Math.abs(perp - bestPerp) <= 0.001 && along < bestAlong)) {
+        best = ep
+        bestPerp = perp
+        bestAlong = along
+      }
+    }
+
+    return best
+      ? {
+          ...best,
+          distance: bestPerp,
+          rayDistance: bestAlong,
+          controllerIndex: controller.userData?.sourceIndex ?? 0,
+          sourceType: "controller",
+          sourceIndex: controller.userData?.sourceIndex ?? 0,
+        }
+      : null
+  }
+
+  updateWireHover() {
+    if (this.toolMode !== "wire") {
+      this.clearWireHoverAnchor()
+      return
+    }
+
+    let best = null
+    let bestType = null
+
+    if (!this.wireDraftStartAnchor) {
+      for (const he of this.hands) {
+        const ac = this.findBestWireAnchorForHand(he)
+        const ep = this.findBestWireEndpointForHand(he)
+
+        let candidate = null
+        let candidateType = null
+
+        if (ac && ep) {
+          candidate = ep.distance <= ac.distance ? ep : ac
+          candidateType = candidate === ep ? "endpoint" : "anchor"
+        } else if (ep) {
+          candidate = ep
+          candidateType = "endpoint"
+        } else if (ac) {
+          candidate = ac
+          candidateType = "anchor"
+        }
+
+        if (candidate && (!best || candidate.distance < best.distance)) {
+          best = candidate
+          bestType = candidateType
+        }
+      }
+
+      for (const controller of this.controllers) {
+        const ac = this.findBestWireAnchorForController(controller)
+        const ep = this.findBestWireEndpointForController(controller)
+
+        let candidate = null
+        let candidateType = null
+
+        if (ac && ep) {
+          candidate = ep.distance <= ac.distance ? ep : ac
+          candidateType = candidate === ep ? "endpoint" : "anchor"
+        } else if (ep) {
+          candidate = ep
+          candidateType = "endpoint"
+        } else if (ac) {
+          candidate = ac
+          candidateType = "anchor"
+        }
+
+        if (candidate && (!best || candidate.distance < best.distance)) {
+          best = candidate
+          bestType = candidateType
+        }
+      }
+    } else {
+      if (this.wireDraftSourceType === "hand") {
+        const he = this.hands.find((h) => h.index === this.wireDraftSourceIndex)
+        const ac = this.findBestWireAnchorForHand(he)
+        if (ac) { best = ac; bestType = "anchor" }
+      } else if (this.wireDraftSourceType === "controller") {
+        const controller = this.getControllerByIndex(this.wireDraftSourceIndex)
+        const ac = this.findBestWireAnchorForController(controller)
+        if (ac) { best = ac; bestType = "anchor" }
+      }
+    }
+
+    if (!best) {
+      if (this.wireHoverAnchor || this.wireHoverEndpoint) {
+        if (this.wireHoverSourceType === "hand") {
+          const th = this.hands.find((h) => h.index === this.wireHoverSourceIndex)
+          if (th && this.isHandEntryTracked(th)) {
+            this.getGrabPointWorld(th, this._tmpD)
+            const tp = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
+            if (tp && tp.distanceTo(this._tmpD) <= this.wireHoverReleaseDist) {
+              const m = this.ensureWireHoverMarker()
+              m.position.copy(tp)
+              m.visible = true
+              return
+            }
+          }
+        } else if (this.wireHoverSourceType === "controller") {
+          const controller = this.getControllerByIndex(this.wireHoverSourceIndex)
+          if (controller) {
+            const tp = this.wireHoverAnchor?.worldPos || this.wireHoverEndpoint?.worldPos
+            if (tp) {
+              const { perp, along } = this.projectPointToControllerRay(controller, tp, this._tmpG)
+              if (along > 0.03 && along <= this.wireControllerRayMaxDist && perp <= this.wireControllerEndpointPerpMaxDist * 1.6) {
+                const m = this.ensureWireHoverMarker()
+                m.position.copy(tp)
+                m.visible = true
+                return
+              }
+            }
+          }
+        }
+      }
+
+      this.clearWireHoverAnchor()
+      return
+    }
+
+    this.wireHoverSourceType = best.sourceType ?? null
+    this.wireHoverSourceIndex = best.sourceIndex ?? null
+    this.wireHoverHandIndex = best.sourceType === "hand" ? best.sourceIndex : null
+
+    if (bestType === "anchor") {
+      this.wireHoverAnchor = best
+      this.wireHoverEndpoint = null
+    } else {
+      this.wireHoverAnchor = null
+      this.wireHoverEndpoint = best
+    }
+
+    const m = this.ensureWireHoverMarker()
+    m.position.copy(best.worldPos)
+    m.visible = true
+  }
+
+  ensureWireDraftMesh(index = 0) {
+    if (this._wireDraftMeshes[index]) {
+      const m = this._wireDraftMeshes[index]
+      if (m.material?.color) m.material.color.setHex(this.wireDraftColor ?? 0x111111)
+      return m
+    }
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(this.wireDraftRadius, this.wireDraftRadius, 1, 18),
+      new THREE.MeshStandardMaterial({ color: this.wireDraftColor ?? 0x111111, roughness: 0.65, metalness: 0.0, emissive: 0x181818 })
+    )
+    mesh.name = `WireDraftMesh_${index}`
+    mesh.visible = false
+    this.scene.add(mesh)
+    this._wireDraftMeshes[index] = mesh
+    return mesh
+  }
+
+  clearWireDraft() {
+    this.wireDraftStartAnchor = null
+    this.wireDraftHandIndex = null
+    this.wireDraftSourceType = null
+    this.wireDraftSourceIndex = null
+    this.wireDraftWaypoints = []
+    this.wireDraftColor = 0x111111
+    for (const m of this._wireDraftMeshes) {
+      if (m) m.visible = false
+    }
+  }
+
+  startWireDraftFromAnchor(anchor, sourceType, sourceIndex) {
+    if (!anchor) return
+    this.wireDraftStartAnchor = { ...anchor, worldPos: anchor.worldPos.clone() }
+    this.wireDraftSourceType = sourceType
+    this.wireDraftSourceIndex = sourceIndex
+    this.wireDraftHandIndex = sourceType === "hand" ? sourceIndex : null
+    this.wireDraftWaypoints = []
+    this.wireDraftColor = this.getWireColorFromAnchors(anchor, null)
+    const mesh = this.ensureWireDraftMesh(0)
+    if (mesh.material?.color) mesh.material.color.setHex(this.wireDraftColor)
+    if (mesh.material?.emissive) mesh.material.emissive.setHex(0x181818)
+    mesh.visible = true
+  }
+
+  canRunWireAction() {
+    const now = performance.now()
+    if (now - this._lastWireActionMs < this.wireActionCooldownMs) return false
+    this._lastWireActionMs = now
+    return true
+  }
+
+  getWireSourcePointerWorld(sourceType, sourceIndex, out) {
+    if (sourceType === "hand") {
+      const he = this.hands.find((h) => h.index === sourceIndex)
+      if (!he || !this.isHandEntryTracked(he)) return null
+      return this.getGrabPointWorld(he, out)
+    }
+
+    if (sourceType === "controller") {
+      const controller = this.getControllerByIndex(sourceIndex)
+      if (!controller) return null
+      return this.getControllerWirePointerWorld(controller, out)
+    }
+
+    return null
+  }
+
+  addWireWaypointFromSource(sourceType, sourceIndex) {
+    if (!this.wireDraftStartAnchor || this.wireDraftSourceType !== sourceType || this.wireDraftSourceIndex !== sourceIndex || !this.canRunWireAction()) return false
+    const wp = this.getWireSourcePointerWorld(sourceType, sourceIndex, this._tmpA)
+    if (!wp) return false
+    const np = wp.clone()
+    const pts = [this.wireDraftStartAnchor.worldPos, ...this.wireDraftWaypoints]
+    if (pts[pts.length - 1].distanceTo(np) < 0.015) return false
+    this.wireDraftWaypoints.push(np)
+    return true
+  }
+
+  getWireDraftPoints(end = null) {
+    const pts = []
+    if (!this.wireDraftStartAnchor) return pts
+    pts.push(this.wireDraftStartAnchor.worldPos.clone())
+    for (const p of this.wireDraftWaypoints) pts.push(p.clone())
+    if (end) pts.push(end.clone())
+    return pts
+  }
+
+  updateWireDraftSegment(mesh, start, end) {
+    const dir = this._tmpB.copy(end).sub(start)
+    const len = dir.length()
+    if (len < 0.001) { mesh.visible = false; return }
+    mesh.visible = true
+    const mid = this._tmpC.copy(start).add(end).multiplyScalar(0.5)
+    mesh.position.copy(mid)
+    dir.normalize()
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir)
+    mesh.scale.set(1, len, 1)
+  }
+
+  generateComponentId(prefix = "cmp") {
+    return globalThis.crypto?.randomUUID
+      ? `${prefix}_${globalThis.crypto.randomUUID()}`
+      : `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+  }
+
+  serializeWireAnchor(a) {
+    if (!a) return null
+    return {
+      kind: a.kind ?? null,
+      id: a.id ?? null,
+      label: a.label ?? null,
+      componentId: a.componentId ?? null,
+      componentType: a.componentType ?? null,
+      holeId: a.holeId ?? null,
+      groupKey: a.groupKey ?? null,
+      worldPos: a.worldPos ? { x: a.worldPos.x, y: a.worldPos.y, z: a.worldPos.z } : null,
+    }
+  }
+
+  isSameWireAnchor(a, b) {
+    if (!a || !b || a.kind !== b.kind) return false
+    if (a.kind === "hole") return a.holeId === b.holeId
+    return a.componentId === b.componentId && a.id === b.id
+  }
+
+  getWireColorFromAnchors(s, e) {
+    const pick = (a) => {
+      if (!a) return null
+      if (a.componentType === "battery5v" && a.id === "positive") return 0xff2a2a
+      if (a.componentType === "battery5v" && a.id === "negative") return 0x5bc0de
+      return null
+    }
+    return pick(s) ?? pick(e) ?? 0x111111
+  }
+
+  finalizeWireDraftToAnchor(endAnchor, sourceType, sourceIndex) {
+    if (!endAnchor || !this.wireDraftStartAnchor || !this.stateSyncSystem || !this.canRunWireAction()) return false
+    if (this.wireDraftSourceType !== sourceType || this.wireDraftSourceIndex !== sourceIndex) return false
+    const sa = this.wireDraftStartAnchor
+    if (this.isSameWireAnchor(sa, endAnchor)) return false
+    const pts = [sa.worldPos.clone(), ...this.wireDraftWaypoints.map((p) => p.clone()), endAnchor.worldPos.clone()]
+    if (pts.length < 2) return false
+
+    const id = this.generateComponentId("wire")
+    const wc = this.getWireColorFromAnchors(sa, endAnchor)
+    const data = {
+      id,
+      type: "wire",
+      transform: { x:0, y:0, z:0, qx:0, qy:0, qz:0, qw:1 },
+      meta: {
+        color: wc,
+        points: pts.map((p) => ({ x:p.x, y:p.y, z:p.z })),
+        startAnchor: this.serializeWireAnchor(sa),
+        endAnchor: this.serializeWireAnchor(endAnchor),
+      },
+    }
+
+    this.appState.addComponent(data)
+    this.stateSyncSystem.addMeshFromComponent(data)
+    this.clearWireDraft()
+    this.clearWireHoverAnchor()
+
+    if (sourceType === "hand") {
+      const he = this.hands.find((h) => h.index === sourceIndex)
+      if (he) {
+        he.isPinching = true
+        he.pinchArmed = false
+        he.wirePinchCloseMs = 0
+      }
+    }
+
+    console.log("✅ Cable cerrado")
+    return true
+  }
+
+  findComponentMeshById(id) { return this.stateSyncSystem?.getMeshById(id) ?? null }
+
+  resolveAnchorWorldPosition(anchor) {
+    if (!anchor) return null
+    if (anchor.kind === "hole") {
+      if (!this.holeSystem) return null
+      this.holeSystem.updateWorldPositions()
+      const h = this.holeSystem.holes.find((h) => h.id === anchor.holeId || h.id === anchor.id)
+      return h ? h.worldPos.clone() : null
+    }
+    if (anchor.componentId) {
+      const mesh = this.findComponentMeshById(anchor.componentId)
+      if (!mesh) return null
+      if (anchor.kind === "terminal" && typeof mesh.userData?.getTerminalWorldPositions === "function") {
+        const f = mesh.userData.getTerminalWorldPositions().find((t) => t.id === anchor.id)
+        return f ? f.worldPos.clone() : null
+      }
+      if (anchor.kind === "pin" && typeof mesh.userData?.getPinWorldPositions === "function") {
+        const f = mesh.userData.getPinWorldPositions().find((p) => p.id === anchor.id)
+        return f ? f.worldPos.clone() : null
+      }
+    }
+    if (anchor.worldPos) return new THREE.Vector3(anchor.worldPos.x, anchor.worldPos.y, anchor.worldPos.z)
+    return null
+  }
+
+  getWireEndpointWorldPosition(wireMesh, type) {
+    if (!wireMesh?.userData?.isWire) return null
+    const anchor = type === "start" ? wireMesh.userData.startAnchor : wireMesh.userData.endAnchor
+    const r = this.resolveAnchorWorldPosition(anchor)
+    if (r) return r
+    const fp = Array.isArray(wireMesh.userData.fixedPoints) ? wireMesh.userData.fixedPoints : null
+    if (!fp || fp.length < 2) return null
+    return type === "start" ? fp[0].clone() : fp[fp.length-1].clone()
+  }
+
+  deleteWireById(id) {
+    if (!id || !this.stateSyncSystem) return false
+    this.appState.removeComponent(id)
+    this.stateSyncSystem.removeMeshById(id)
+    return true
+  }
+
+  reopenWireFromEndEndpoint(ep, sourceType, sourceIndex) {
+    if (!ep || ep.endpointType !== "end" || !this.stateSyncSystem) return false
+    const wm = this.stateSyncSystem.getMeshById(ep.wireId)
+    if (!wm?.userData?.isWire) return false
+
+    const sa = wm.userData.startAnchor
+    const fp = Array.isArray(wm.userData.fixedPoints) ? wm.userData.fixedPoints.map((p) => p.clone()) : []
     if (!sa || fp.length < 2) return false
+
     this.deleteWireById(ep.wireId)
     this.wireDraftStartAnchor = { ...sa, worldPos: this.resolveAnchorWorldPosition(sa) || fp[0].clone() }
-    this.wireDraftHandIndex = he.index; this.wireDraftWaypoints = fp.slice(1,-1); this.wireDraftColor = wm.userData.wireColor ?? 0x111111
-    const mesh = this.ensureWireDraftMesh(0); if (mesh.material?.color) mesh.material.color.setHex(this.wireDraftColor); mesh.visible = true
-    this.clearWireHoverAnchor(); he.isPinching = true; he.pinchArmed = false; he.wirePinchCloseMs = 0; return true
+    this.wireDraftSourceType = sourceType
+    this.wireDraftSourceIndex = sourceIndex
+    this.wireDraftHandIndex = sourceType === "hand" ? sourceIndex : null
+    this.wireDraftWaypoints = fp.slice(1, -1)
+    this.wireDraftColor = wm.userData.wireColor ?? 0x111111
+
+    const mesh = this.ensureWireDraftMesh(0)
+    if (mesh.material?.color) mesh.material.color.setHex(this.wireDraftColor)
+    mesh.visible = true
+
+    this.clearWireHoverAnchor()
+
+    if (sourceType === "hand") {
+      const he = this.hands.find((h) => h.index === sourceIndex)
+      if (he) {
+        he.isPinching = true
+        he.pinchArmed = false
+        he.wirePinchCloseMs = 0
+      }
+    }
+
+    return true
   }
 
   updateDynamicWires() {
     if (!this.stateSyncSystem) return
     for (const mesh of this.stateSyncSystem.meshById.values()) {
       if (!mesh?.userData?.isWire || typeof mesh.userData?.rebuildWireGeometry !== "function") continue
-      const fp = Array.isArray(mesh.userData.fixedPoints) ? mesh.userData.fixedPoints.map((p) => p.clone()) : []; if (fp.length < 2) continue
-      const sw = this.resolveAnchorWorldPosition(mesh.userData.startAnchor); const ew = this.resolveAnchorWorldPosition(mesh.userData.endAnchor)
-      if (sw) fp[0] = sw; if (ew) fp[fp.length-1] = ew
+      const fp = Array.isArray(mesh.userData.fixedPoints) ? mesh.userData.fixedPoints.map((p) => p.clone()) : []
+      if (fp.length < 2) continue
+      const sw = this.resolveAnchorWorldPosition(mesh.userData.startAnchor)
+      const ew = this.resolveAnchorWorldPosition(mesh.userData.endAnchor)
+      if (sw) fp[0] = sw
+      if (ew) fp[fp.length-1] = ew
       mesh.userData.rebuildWireGeometry(fp)
     }
   }
 
   updateWireDraftPreview() {
-    if (this.toolMode !== "wire") { this.clearWireDraft(); return }
-    if (!this.wireDraftStartAnchor) { for (const m of this._wireDraftMeshes) { if (m) m.visible = false }; return }
-    const he = this.hands.find((h) => h.index === this.wireDraftHandIndex)
-    if (!he || !this.isHandEntryTracked(he)) { for (const m of this._wireDraftMeshes) { if (m) m.visible = false }; return }
-    this.getGrabPointWorld(he, this._tmpA)
-    const pts = this.getWireDraftPoints(this._tmpA.clone()); if (pts.length < 2) { for (const m of this._wireDraftMeshes) { if (m) m.visible = false }; return }
+    if (this.toolMode !== "wire") {
+      this.clearWireDraft()
+      return
+    }
+
+    if (!this.wireDraftStartAnchor) {
+      for (const m of this._wireDraftMeshes) {
+        if (m) m.visible = false
+      }
+      return
+    }
+
+    const end = this.getWireSourcePointerWorld(this.wireDraftSourceType, this.wireDraftSourceIndex, this._tmpA)
+    if (!end) {
+      for (const m of this._wireDraftMeshes) {
+        if (m) m.visible = false
+      }
+      return
+    }
+
+    const pts = this.getWireDraftPoints(end.clone())
+    if (pts.length < 2) {
+      for (const m of this._wireDraftMeshes) {
+        if (m) m.visible = false
+      }
+      return
+    }
+
     const needed = pts.length - 1
-    for (let i = 0; i < needed; i++) { this.updateWireDraftSegment(this.ensureWireDraftMesh(i), pts[i], pts[i+1]) }
-    for (let i = needed; i < this._wireDraftMeshes.length; i++) { const m = this._wireDraftMeshes[i]; if (m) m.visible = false }
+    for (let i = 0; i < needed; i++) {
+      this.updateWireDraftSegment(this.ensureWireDraftMesh(i), pts[i], pts[i+1])
+    }
+    for (let i = needed; i < this._wireDraftMeshes.length; i++) {
+      const m = this._wireDraftMeshes[i]
+      if (m) m.visible = false
+    }
   }
 
   // ---------------------------
@@ -624,12 +1068,18 @@ export class InteractionSystem {
     // Cooldown para botones UI
     if (this._lastPokedButton) {
       let minDist = Infinity
-      for (const h of this.hands) { if (!this.isHandEntryTracked(h)) continue; this.getIndexTipWorld(h, this._tmpA); minDist = Math.min(minDist, this.distanceToObjectSurface(this._lastPokedButton, this._tmpA)) }
+      for (const h of this.hands) {
+        if (!this.isHandEntryTracked(h)) continue
+        this.getIndexTipWorld(h, this._tmpA)
+        minDist = Math.min(minDist, this.distanceToObjectSurface(this._lastPokedButton, this._tmpA))
+      }
       if (minDist > this.uiReleaseRadius) this._lastPokedButton = null
       return
     }
 
-    let bestObj = null, bestDist = this.uiPokeRadius, bestHand = null
+    let bestObj = null
+    let bestDist = this.uiPokeRadius
+    let bestHand = null
 
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h) || h.heldObject) continue
@@ -668,9 +1118,16 @@ export class InteractionSystem {
   }
 
   computePinchDistance(hand) {
-    const tt = this.getJointWorld(hand, "thumb-tip", this._tmpA); if (!tt) return null
+    const tt = this.getJointWorld(hand, "thumb-tip", this._tmpA)
+    if (!tt) return null
     let best = Infinity
-    for (const name of ["index-finger-tip","index-finger-phalanx-distal","index-finger-phalanx-intermediate"]) { const p = this.getJointWorld(hand, name, this._tmpB); if (p) { const d = tt.distanceTo(p); if (d < best) best = d } }
+    for (const name of ["index-finger-tip","index-finger-phalanx-distal","index-finger-phalanx-intermediate"]) {
+      const p = this.getJointWorld(hand, name, this._tmpB)
+      if (p) {
+        const d = tt.distanceTo(p)
+        if (d < best) best = d
+      }
+    }
     return isFinite(best) ? best : null
   }
 
@@ -698,22 +1155,36 @@ export class InteractionSystem {
   }
 
   persistMeshTransform(mesh) {
-    const id = mesh?.userData?.componentId; if (!id) return
+    const id = mesh?.userData?.componentId
+    if (!id) return
     const p = mesh.position, q = mesh.quaternion
     this.appState.updateComponent(id, { transform: { x:p.x, y:p.y, z:p.z, qx:q.x, qy:q.y, qz:q.z, qw:q.w } })
   }
 
   startHoldTracking(hs, sourceType, source) {
-    hs.active = true; hs.sourceType = sourceType; hs.source = source; hs.lastT = performance.now(); hs.vel.set(0,0,0); hs.samples.length = 0
+    hs.active = true
+    hs.sourceType = sourceType
+    hs.source = source
+    hs.lastT = performance.now()
+    hs.vel.set(0,0,0)
+    hs.samples.length = 0
     if (sourceType === "controller") source.getWorldPosition(hs.lastPos)
     else this.getGrabPointWorld(source, hs.lastPos)
   }
 
-  stopHoldTracking(hs) { hs.active = false; hs.sourceType = null; hs.source = null; hs.lastT = 0; hs.vel.set(0,0,0); hs.samples.length = 0 }
+  stopHoldTracking(hs) {
+    hs.active = false
+    hs.sourceType = null
+    hs.source = null
+    hs.lastT = 0
+    hs.vel.set(0,0,0)
+    hs.samples.length = 0
+  }
 
   updateHoldVelocity(hs) {
     if (!hs?.active || !hs.sourceType || !hs.source) return
-    const now = performance.now(), dt = (now - hs.lastT) / 1000; if (dt <= 0.0001) return
+    const now = performance.now(), dt = (now - hs.lastT) / 1000
+    if (dt <= 0.0001) return
     if (hs.sourceType === "controller") hs.source.getWorldPosition(this._tmpA)
     else this.getGrabPointWorld(hs.source, this._tmpA)
     const v = this._tmpA.clone().sub(hs.lastPos).multiplyScalar(1 / dt)
@@ -721,8 +1192,13 @@ export class InteractionSystem {
     while (hs.samples.length > hs.maxSamples) hs.samples.shift()
     const minT = now - hs.sampleWindowMs
     while (hs.samples.length && hs.samples[0].t < minT) hs.samples.shift()
-    if (hs.samples.length) { hs.vel.set(0,0,0); for (const s of hs.samples) hs.vel.add(s.v); hs.vel.multiplyScalar(1/hs.samples.length) } else hs.vel.copy(v)
-    hs.lastPos.copy(this._tmpA); hs.lastT = now
+    if (hs.samples.length) {
+      hs.vel.set(0,0,0)
+      for (const s of hs.samples) hs.vel.add(s.v)
+      hs.vel.multiplyScalar(1/hs.samples.length)
+    } else hs.vel.copy(v)
+    hs.lastPos.copy(this._tmpA)
+    hs.lastT = now
   }
 
   getReleaseVelocity(hs, forceZero = false) {
@@ -734,7 +1210,8 @@ export class InteractionSystem {
 
   getBestSurfaceBelow(object) {
     if (!object || this.surfaces.length === 0) return null
-    const origin = object.position.clone(); origin.y += 2
+    const origin = object.position.clone()
+    origin.y += 2
     this.downRaycaster.set(origin, new THREE.Vector3(0,-1,0))
     const disallowed = Array.isArray(object.userData?.surfaceDisallowedTypes) ? object.userData.surfaceDisallowedTypes : []
     const entries    = this.surfaces.filter((s) => !disallowed.includes(s.type))
@@ -745,10 +1222,13 @@ export class InteractionSystem {
 
   resolveSurfacePenetration(object) {
     if (!object || !this.surfaces.length) return false
-    const best = this.getBestSurfaceBelow(object); if (!best) return false
+    const best = this.getBestSurfaceBelow(object)
+    if (!best) return false
     const co = object.userData?.surfaceContactObject || object
-    this._box.setFromObject(co); this._box.getSize(this._tmpSize)
-    const center = new THREE.Vector3(); this._box.getCenter(center)
+    this._box.setFromObject(co)
+    this._box.getSize(this._tmpSize)
+    const center = new THREE.Vector3()
+    this._box.getCenter(center)
     const halfY = this._tmpSize.y * 0.5
     if (center.y - halfY < best.point.y) {
       object.position.y += (best.point.y + halfY - center.y) + 0.001
@@ -756,7 +1236,8 @@ export class InteractionSystem {
         const fwd = new THREE.Vector3(0,0,1).applyQuaternion(object.quaternion).setY(0)
         let yaw = object.rotation.y
         if (fwd.lengthSq() > 1e-8) { fwd.normalize(); yaw = Math.atan2(fwd.x, fwd.z) }
-        object.rotation.set(0, yaw, 0); object.updateMatrixWorld(true)
+        object.rotation.set(0, yaw, 0)
+        object.updateMatrixWorld(true)
       }
       return true
     }
@@ -778,60 +1259,119 @@ export class InteractionSystem {
     object.userData.pinConnections = { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
     const dir = new THREE.Vector3().subVectors(mB.hole.worldPos, mA.hole.worldPos).setY(0)
     if (dir.lengthSq() < 1e-8) return false
-    dir.normalize(); object.rotation.set(0, Math.atan2(-dir.z, dir.x), 0); object.updateMatrixWorld(true)
-    const rpAW = new THREE.Vector3().copy(pinA.localPos); object.localToWorld(rpAW)
-    object.position.add(new THREE.Vector3().subVectors(mA.hole.worldPos, rpAW)); object.position.y -= 0.02; object.updateMatrixWorld(true)
+    dir.normalize()
+    object.rotation.set(0, Math.atan2(-dir.z, dir.x), 0)
+    object.updateMatrixWorld(true)
+    const rpAW = new THREE.Vector3().copy(pinA.localPos)
+    object.localToWorld(rpAW)
+    object.position.add(new THREE.Vector3().subVectors(mA.hole.worldPos, rpAW))
+    object.position.y -= 0.02
+    object.updateMatrixWorld(true)
     const id = object.userData?.componentId
     if (id) this.appState.updateComponent(id, { inserted: true, pinConnections: { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id } })
-    this.persistMeshTransform(object); return true
+    this.persistMeshTransform(object)
+    return true
   }
 
   tryPlaceObjectDirectly(object) {
     if (!object) return false
-    const best = this.getBestSurfaceBelow(object); if (!best) return false
+    const best = this.getBestSurfaceBelow(object)
+    if (!best) return false
     if (object.userData?.surfaceUpright) {
       const fwd = new THREE.Vector3(0,0,1).applyQuaternion(object.quaternion).setY(0)
-      let yaw = object.rotation.y; if (fwd.lengthSq() > 1e-8) { fwd.normalize(); yaw = Math.atan2(fwd.x, fwd.z) }
-      object.rotation.set(0, yaw, 0); object.updateMatrixWorld(true)
+      let yaw = object.rotation.y
+      if (fwd.lengthSq() > 1e-8) { fwd.normalize(); yaw = Math.atan2(fwd.x, fwd.z) }
+      object.rotation.set(0, yaw, 0)
+      object.updateMatrixWorld(true)
     }
     const co = object.userData?.surfaceContactObject || object
-    const bbox = new THREE.Box3().setFromObject(co); const size = new THREE.Vector3(), center = new THREE.Vector3()
-    bbox.getSize(size); bbox.getCenter(center)
+    const bbox = new THREE.Box3().setFromObject(co)
+    const size = new THREE.Vector3(), center = new THREE.Vector3()
+    bbox.getSize(size)
+    bbox.getCenter(center)
     const halfY = size.y * 0.5, drop = (center.y - halfY) - best.point.y
     if (drop < -0.03 || drop > this.directPlaceMaxDrop) return false
     object.position.y += (best.point.y + halfY - center.y)
     if (this.holeSystem && Array.isArray(object.userData?.pins)) this.holeSystem.trySnapObject(object, 0.03)
-    this.persistMeshTransform(object); return true
+    this.persistMeshTransform(object)
+    return true
   }
 
   releaseHeldObject(object, hs, clearOwner, options = {}) {
     if (!object) return
-    this.updateHoldVelocity(hs); const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? false)
-    this.scene.attach(object); this.clearObjectOwner(object); this.resolveSurfacePenetration(object)
-    if (this.trySnapComponentPinsToHoles(object, 0.05)) { object.userData.physics = null; clearOwner(); this.stopHoldTracking(hs); this.clearActivePinHoleMarkers(); return }
-    if (vel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) { clearOwner(); this.stopHoldTracking(hs); this.clearActivePinHoleMarkers(); return }
-    object.userData.physics = { active: true, vel }; clearOwner(); this.stopHoldTracking(hs); this.clearActivePinHoleMarkers()
+    this.updateHoldVelocity(hs)
+    const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? false)
+    this.scene.attach(object)
+    this.clearObjectOwner(object)
+    this.resolveSurfacePenetration(object)
+    if (this.trySnapComponentPinsToHoles(object, 0.05)) {
+      object.userData.physics = null
+      clearOwner()
+      this.stopHoldTracking(hs)
+      this.clearActivePinHoleMarkers()
+      return
+    }
+    if (vel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
+      clearOwner()
+      this.stopHoldTracking(hs)
+      this.clearActivePinHoleMarkers()
+      return
+    }
+    object.userData.physics = { active: true, vel }
+    clearOwner()
+    this.stopHoldTracking(hs)
+    this.clearActivePinHoleMarkers()
   }
 
   onHandPinchStart(he) {
     if (!this.isHandEntryTracked(he) || he.heldObject || !he.pinchArmed) return
-    he.isPinching = true; he.pinchArmed = false; he.lostTrackingMs = 0; he.openPinchMs = 0
+    he.isPinching = true
+    he.pinchArmed = false
+    he.lostTrackingMs = 0
+    he.openPinchMs = 0
 
     if (this.toolMode === "wire") {
-      const hA = !!this.wireHoverAnchor   && this.wireHoverHandIndex === he.index
-      const hE = !!this.wireHoverEndpoint && this.wireHoverHandIndex === he.index
+      const hoverMatchesThisHand =
+        this.wireHoverSourceType === "hand" &&
+        this.wireHoverSourceIndex === he.index
+
+      const hA = !!this.wireHoverAnchor && hoverMatchesThisHand
+      const hE = !!this.wireHoverEndpoint && hoverMatchesThisHand
+
       if (!this.wireDraftStartAnchor) {
         if (hE) {
           if (!this.canRunWireAction()) return
-          if (this.wireHoverEndpoint.endpointType === "start") { const d = this.deleteWireById(this.wireHoverEndpoint.wireId); if (d) { he.isPinching = true; he.pinchArmed = false; he.wirePinchCloseMs = 0; this.clearWireHoverAnchor() } return }
-          if (this.wireHoverEndpoint.endpointType === "end")   { this.reopenWireFromEndEndpoint(this.wireHoverEndpoint, he); return }
+          if (this.wireHoverEndpoint.endpointType === "start") {
+            const d = this.deleteWireById(this.wireHoverEndpoint.wireId)
+            if (d) {
+              he.isPinching = true
+              he.pinchArmed = false
+              he.wirePinchCloseMs = 0
+              this.clearWireHoverAnchor()
+            }
+            return
+          }
+          if (this.wireHoverEndpoint.endpointType === "end") {
+            this.reopenWireFromEndEndpoint(this.wireHoverEndpoint, "hand", he.index)
+            return
+          }
         }
-        if (hA && this.canRunWireAction()) { this.startWireDraftFromAnchor(this.wireHoverAnchor, he.index); console.log("🟢 Punto A:", this.wireHoverAnchor) }
+        if (hA && this.canRunWireAction()) {
+          this.startWireDraftFromAnchor(this.wireHoverAnchor, "hand", he.index)
+          console.log("🟢 Punto A:", this.wireHoverAnchor)
+        }
         return
       }
-      if (this.wireDraftHandIndex !== he.index) return
-      if (hA) { const c = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, he); if (c) console.log("🔌 Punto B:", this.wireHoverAnchor) }
-      else    { const a = this.addWireWaypointFromHand(he); if (a) console.log("〰️ Waypoint") }
+
+      if (this.wireDraftSourceType !== "hand" || this.wireDraftSourceIndex !== he.index) return
+
+      if (hA) {
+        const c = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, "hand", he.index)
+        if (c) console.log("🔌 Punto B:", this.wireHoverAnchor)
+      } else {
+        const a = this.addWireWaypointFromSource("hand", he.index)
+        if (a) console.log("〰️ Waypoint")
+      }
       return
     }
 
@@ -842,7 +1382,8 @@ export class InteractionSystem {
     const target = this.findNearestComponentToHand(he, this.nearRadius)
     if (!target || !this.canHandGrabObject(he, target)) return
     if (target.userData?.inserted || target.userData?.pinConnections) {
-      target.userData.inserted = false; target.userData.pinConnections = null
+      target.userData.inserted = false
+      target.userData.pinConnections = null
       const id = target.userData?.componentId
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
@@ -856,16 +1397,26 @@ export class InteractionSystem {
 
   onHandPinchEnd(he, options = {}) {
     if (!he) return
-    he.isPinching = false; he.openPinchMs = 0; he.lostTrackingMs = 0
+    he.isPinching = false
+    he.openPinchMs = 0
+    he.lostTrackingMs = 0
     if (this.toolMode === "wire" || !he.heldObject) return
     this.releaseHeldObject(he.heldObject, he.hold, () => { he.heldObject = null }, options)
   }
 
   forceReleaseHand(he, forceZero = true) {
     if (!he) return
-    he.isPinching = false; he.openPinchMs = 0; he.lostTrackingMs = 0
-    if (this.toolMode === "wire") { this.stopHoldTracking(he.hold); return }
-    if (!he.heldObject) { this.stopHoldTracking(he.hold); return }
+    he.isPinching = false
+    he.openPinchMs = 0
+    he.lostTrackingMs = 0
+    if (this.toolMode === "wire") {
+      this.stopHoldTracking(he.hold)
+      return
+    }
+    if (!he.heldObject) {
+      this.stopHoldTracking(he.hold)
+      return
+    }
     this.onHandPinchEnd(he, { forceZeroVelocity: forceZero })
   }
 
@@ -873,24 +1424,70 @@ export class InteractionSystem {
   // Controlador: selectstart
   // ---------------------------
   onControllerSelectStart(event) {
-    const ctrl = event.target; if (!ctrl || ctrl.userData?.heldObject) return
-    if (this.toolMode === "wire") return
+    const ctrl = event.target
+    if (!ctrl || ctrl.userData?.heldObject) return
+
+    if (this.toolMode === "wire") {
+      const ctrlIndex = ctrl.userData?.sourceIndex ?? 0
+      const hoverMatchesThisController =
+        this.wireHoverSourceType === "controller" &&
+        this.wireHoverSourceIndex === ctrlIndex
+
+      const hA = !!this.wireHoverAnchor && hoverMatchesThisController
+      const hE = !!this.wireHoverEndpoint && hoverMatchesThisController
+
+      if (!this.wireDraftStartAnchor) {
+        if (hE) {
+          if (!this.canRunWireAction()) return
+          if (this.wireHoverEndpoint.endpointType === "start") {
+            const d = this.deleteWireById(this.wireHoverEndpoint.wireId)
+            if (d) this.clearWireHoverAnchor()
+            return
+          }
+          if (this.wireHoverEndpoint.endpointType === "end") {
+            this.reopenWireFromEndEndpoint(this.wireHoverEndpoint, "controller", ctrlIndex)
+            return
+          }
+        }
+
+        if (hA && this.canRunWireAction()) {
+          this.startWireDraftFromAnchor(this.wireHoverAnchor, "controller", ctrlIndex)
+          console.log("🟢 Punto A:", this.wireHoverAnchor)
+        }
+        return
+      }
+
+      if (this.wireDraftSourceType !== "controller" || this.wireDraftSourceIndex !== ctrlIndex) return
+
+      if (hA) {
+        const c = this.finalizeWireDraftToAnchor(this.wireHoverAnchor, "controller", ctrlIndex)
+        if (c) console.log("🔌 Punto B:", this.wireHoverAnchor)
+      } else {
+        const a = this.addWireWaypointFromSource("controller", ctrlIndex)
+        if (a) console.log("〰️ Waypoint")
+      }
+      return
+    }
 
     const target = this.computeControllerHoverFor(ctrl)
     if (!target || target.userData?.isSurface) return
 
     // Botón UI del panel — siempre
     if (target.userData?.isUI && typeof target.userData?.onPress === "function") {
-      target.userData.onPress(); return
+      target.userData.onPress()
+      return
     }
 
     // Modo simulación: activar botón/switch
     if (this.isSimMode()) {
       if (target.userData?.isButtonComponent && typeof target.userData?.pressButton === "function") {
-        target.userData.pressButton(); ctrl.userData._pressedComponent = target; return
+        target.userData.pressButton()
+        ctrl.userData._pressedComponent = target
+        return
       }
       if (target.userData?.isSwitchComponent && typeof target.userData?.onPress === "function") {
-        target.userData.onPress(); return
+        target.userData.onPress()
+        return
       }
       return   // en sim no agarramos nada más
     }
@@ -898,7 +1495,8 @@ export class InteractionSystem {
     // Modo edición: grab normal
     if (!target.userData?.componentId || !this.isObjectFreeForGrab(target)) return
     if (target.userData?.inserted || target.userData?.pinConnections) {
-      target.userData.inserted = false; target.userData.pinConnections = null
+      target.userData.inserted = false
+      target.userData.pinConnections = null
       const id = target.userData?.componentId
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
@@ -912,21 +1510,39 @@ export class InteractionSystem {
   // Controlador: selectend
   // ---------------------------
   onControllerSelectEnd(event) {
-    const ctrl = event?.target; if (!ctrl) return
+    const ctrl = event?.target
+    if (!ctrl) return
     if (ctrl.userData?._pressedComponent) {
       if (typeof ctrl.userData._pressedComponent.userData?.releaseButton === "function") ctrl.userData._pressedComponent.userData.releaseButton()
-      ctrl.userData._pressedComponent = null; return
+      ctrl.userData._pressedComponent = null
+      return
     }
     if (!ctrl.userData?.heldObject) return
     this.releaseHeldObject(ctrl.userData.heldObject, ctrl.userData.hold, () => { ctrl.userData.heldObject = null })
   }
 
   pickBestSurfaceHit(hits, object = null) {
-    const getEntry = (hitObj) => { for (const s of this.surfaces) { let cur = hitObj; while (cur) { if (cur === s.mesh) return s; cur = cur.parent } }; return null }
+    const getEntry = (hitObj) => {
+      for (const s of this.surfaces) {
+        let cur = hitObj
+        while (cur) {
+          if (cur === s.mesh) return s
+          cur = cur.parent
+        }
+      }
+      return null
+    }
     const disallowed = Array.isArray(object?.userData?.surfaceDisallowedTypes) ? object.userData.surfaceDisallowedTypes : []
-    const filtered   = hits.filter((h) => { const s = getEntry(h.object); return s && !disallowed.includes(s.type) })
-    for (const priority of ["protoboard","table","floor"]) { const h = filtered.find((h) => getEntry(h.object)?.type === priority); if (h) return { ...h, surface: getEntry(h.object) } }
-    const h = filtered[0]; return h ? { ...h, surface: getEntry(h.object) } : null
+    const filtered   = hits.filter((h) => {
+      const s = getEntry(h.object)
+      return s && !disallowed.includes(s.type)
+    })
+    for (const priority of ["protoboard","table","floor"]) {
+      const h = filtered.find((h) => getEntry(h.object)?.type === priority)
+      if (h) return { ...h, surface: getEntry(h.object) }
+    }
+    const h = filtered[0]
+    return h ? { ...h, surface: getEntry(h.object) } : null
   }
 
   computeHandHover() {
@@ -938,10 +1554,15 @@ export class InteractionSystem {
       for (const obj of this.interactables) {
         if (!obj || obj.userData?.isSurface) continue
         if (obj.userData?.componentId && !this.isObjectFreeForGrab(obj)) continue
-        if (obj.userData?.isUI) { const d = this.distanceToObjectSurface(obj, this._tmpA); if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }; continue }
+        if (obj.userData?.isUI) {
+          const d = this.distanceToObjectSurface(obj, this._tmpA)
+          if (d < bestScore && d < this.uiPokeRadius * 2) { bestScore = d; best = obj }
+          continue
+        }
         const sd = this.distanceToObjectSurface(obj, this._tmpA), cd = this.getObjectCenterDistance(obj, this._tmpA), ed = this.getExpandedBoxDistance(obj, this._tmpA, this.handHoverExpandedBoxMargin)
         if (cd > this.nearRadius || (sd > this.handHoverSurfaceMaxDist && ed > 0.0001)) continue
-        const score = ed*6 + sd*2.4 + cd; if (score < bestScore) { bestScore = score; best = obj }
+        const score = ed*6 + sd*2.4 + cd
+        if (score < bestScore) { bestScore = score; best = obj }
       }
     }
     return best
@@ -949,43 +1570,95 @@ export class InteractionSystem {
 
   updateHeldObjects() {
     let active = null
-    for (const h of this.hands) { if (h.heldObject) { this.updateHoldVelocity(h.hold); active = h.heldObject } }
-    for (const c of this.controllers) { if (c.userData?.heldObject) { this.updateHoldVelocity(c.userData.hold); active = c.userData.heldObject } }
+    for (const h of this.hands) {
+      if (h.heldObject) { this.updateHoldVelocity(h.hold); active = h.heldObject }
+    }
+    for (const c of this.controllers) {
+      if (c.userData?.heldObject) { this.updateHoldVelocity(c.userData.hold); active = c.userData.heldObject }
+    }
     if (active) this.updatePinHoleMarkersForHeldObject(active)
     else this.clearActivePinHoleMarkers()
   }
 
   cleanupDetachedHolds() {
-    for (const h of this.hands) { if (h.heldObject && h.heldObject.parent === this.scene) { this.clearObjectOwner(h.heldObject); h.heldObject = null; h.isPinching = false; h.openPinchMs = 0; h.lostTrackingMs = 0; this.stopHoldTracking(h.hold) } }
-    for (const c of this.controllers) { if (c.userData?.heldObject && c.userData.heldObject.parent === this.scene) { this.clearObjectOwner(c.userData.heldObject); c.userData.heldObject = null; this.stopHoldTracking(c.userData.hold) } }
+    for (const h of this.hands) {
+      if (h.heldObject && h.heldObject.parent === this.scene) {
+        this.clearObjectOwner(h.heldObject)
+        h.heldObject = null
+        h.isPinching = false
+        h.openPinchMs = 0
+        h.lostTrackingMs = 0
+        this.stopHoldTracking(h.hold)
+      }
+    }
+    for (const c of this.controllers) {
+      if (c.userData?.heldObject && c.userData.heldObject.parent === this.scene) {
+        this.clearObjectOwner(c.userData.heldObject)
+        c.userData.heldObject = null
+        this.stopHoldTracking(c.userData.hold)
+      }
+    }
   }
 
   updateHandPinchState(dtMs) {
     for (const h of this.hands) {
-      const tracked = this.isHandEntryTracked(h); const dist = tracked ? this.computePinchDistance(h.hand) : null
+      const tracked = this.isHandEntryTracked(h)
+      const dist = tracked ? this.computePinchDistance(h.hand) : null
       if (!tracked || dist == null) {
-        if (h.heldObject) { h.lostTrackingMs += dtMs; if (h.lostTrackingMs >= this.handTrackingReleaseGraceMs) { this.forceReleaseHand(h, true); h.pinchArmed = true } }
-        else { h.isPinching = false; h.pinchArmed = true; h.openPinchMs = 0; h.lostTrackingMs = 0; this.stopHoldTracking(h.hold) }
+        if (h.heldObject) {
+          h.lostTrackingMs += dtMs
+          if (h.lostTrackingMs >= this.handTrackingReleaseGraceMs) {
+            this.forceReleaseHand(h, true)
+            h.pinchArmed = true
+          }
+        } else {
+          h.isPinching = false
+          h.pinchArmed = true
+          h.openPinchMs = 0
+          h.lostTrackingMs = 0
+          this.stopHoldTracking(h.hold)
+        }
         continue
       }
-      h.lostTrackingMs = 0; if (dist >= this.pinchReleaseResetDist) h.pinchArmed = true
+      h.lostTrackingMs = 0
+      if (dist >= this.pinchReleaseResetDist) h.pinchArmed = true
 
       if (this.toolMode === "wire") {
-        const hAH = !!this.wireHoverAnchor, hEH = !!this.wireHoverEndpoint, isSH = this.wireHoverHandIndex === h.index
-        const hasDH = !!this.wireDraftStartAnchor && this.wireDraftHandIndex === h.index
-        const tt = this.getJointWorld(h.hand, "thumb-tip", this._tmpE); const it = this.getJointWorld(h.hand, "index-finger-tip", this._tmpF)
-        let wd = Infinity; if (tt && it) wd = tt.distanceTo(it)
+        const hoveringThisHand =
+          this.wireHoverSourceType === "hand" &&
+          this.wireHoverSourceIndex === h.index
+
+        const hAH = !!this.wireHoverAnchor && hoveringThisHand
+        const hEH = !!this.wireHoverEndpoint && hoveringThisHand
+        const hasDH = !!this.wireDraftStartAnchor && this.wireDraftSourceType === "hand" && this.wireDraftSourceIndex === h.index
+
+        const tt = this.getJointWorld(h.hand, "thumb-tip", this._tmpE)
+        const it = this.getJointWorld(h.hand, "index-finger-tip", this._tmpF)
+        let wd = Infinity
+        if (tt && it) wd = tt.distanceTo(it)
         const close = wd <= this.wirePinchStartDist, open = wd >= this.wirePinchEndDist
-        if (open) { h.isPinching = false; h.pinchArmed = true; h.wirePinchCloseMs = 0 }
-        const canAcc = close && h.pinchArmed && !h.isPinching && ((hAH || hEH) && isSH || hasDH)
+        if (open) {
+          h.isPinching = false
+          h.pinchArmed = true
+          h.wirePinchCloseMs = 0
+        }
+        const canAcc = close && h.pinchArmed && !h.isPinching && (((hAH || hEH) && hoveringThisHand) || hasDH)
         h.wirePinchCloseMs = canAcc ? h.wirePinchCloseMs + dtMs : 0
-        if (h.pinchArmed && !h.isPinching && canAcc) { h.wirePinchCloseMs = 0; this.onHandPinchStart(h) }
+        if (h.pinchArmed && !h.isPinching && canAcc) {
+          h.wirePinchCloseMs = 0
+          this.onHandPinchStart(h)
+        }
         continue
       }
 
       if (h.heldObject) {
-        if (dist >= this.pinchEndDist) { h.openPinchMs += dtMs; if (h.openPinchMs >= this.handOpenReleaseGraceMs) this.onHandPinchEnd(h) }
-        else { h.openPinchMs = 0; h.isPinching = true }
+        if (dist >= this.pinchEndDist) {
+          h.openPinchMs += dtMs
+          if (h.openPinchMs >= this.handOpenReleaseGraceMs) this.onHandPinchEnd(h)
+        } else {
+          h.openPinchMs = 0
+          h.isPinching = true
+        }
         continue
       }
 
@@ -997,7 +1670,12 @@ export class InteractionSystem {
     }
   }
 
-  clearActivePinHoleMarkers() { for (const m of this._activePinHoleMarkers) { if (m?.parent) m.parent.remove(m) }; this._activePinHoleMarkers.length = 0 }
+  clearActivePinHoleMarkers() {
+    for (const m of this._activePinHoleMarkers) {
+      if (m?.parent) m.parent.remove(m)
+    }
+    this._activePinHoleMarkers.length = 0
+  }
 
   updatePinHoleMarkersForHeldObject(object) {
     this.clearActivePinHoleMarkers()
@@ -1005,16 +1683,21 @@ export class InteractionSystem {
     for (const match of this.holeSystem.getNearestHolesForPins(object.userData.getPinWorldPositions(), 0.05)) {
       if (!match.hole) continue
       const m = new THREE.Mesh(new THREE.SphereGeometry(0.0075, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }))
-      m.position.copy(match.hole.worldPos); this.scene.add(m); this._activePinHoleMarkers.push(m)
+      m.position.copy(match.hole.worldPos)
+      this.scene.add(m)
+      this._activePinHoleMarkers.push(m)
     }
   }
 
   update() {
     if (!this.renderer.xr.isPresenting) return
+
     const now = performance.now(), dtMs = Math.min(50, now - this._lastUpdateTime)
     this._lastUpdateTime = now
+
     const handsActive = this.isHandTrackingActive()
-    this.updateControllerRays(!handsActive)
+    const showControllerRays = this.toolMode === "wire" ? true : !handsActive
+    this.updateControllerRays(showControllerRays)
 
     if (handsActive) {
       this.updateUIPoke()
@@ -1022,17 +1705,29 @@ export class InteractionSystem {
       this.updateWireHover()
       this.updateWireDraftPreview()
     } else {
-      this.clearWireHoverAnchor(); this.clearWireDraft()
-      for (const h of this.hands) { this.forceReleaseHand(h, true); h.pinchArmed = true }
+      this.updateWireHover()
+      this.updateWireDraftPreview()
+      for (const h of this.hands) {
+        this.forceReleaseHand(h, true)
+        h.pinchArmed = true
+      }
     }
 
     this.cleanupDetachedHolds()
     this.updateHeldObjects()
     this.updateDynamicWires()
 
-    if (this.toolMode === "wire") { this.setHover(null); return }
+    if (this.toolMode === "wire") {
+      this.setHover(null)
+      return
+    }
+
     const anyHeld = this.hands.some((h) => !!h.heldObject) || this.controllers.some((c) => !!c.userData?.heldObject)
-    if (anyHeld) { this.setHover(null); return }
+    if (anyHeld) {
+      this.setHover(null)
+      return
+    }
+
     this.setHover(handsActive ? this.computeHandHover() : this.computeControllerHover())
   }
 }
