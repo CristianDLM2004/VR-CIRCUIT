@@ -60,9 +60,6 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
-      // ---------------------------
-      // BATERÍA 5V
-      // ---------------------------
       case "battery5v": {
         const group = new THREE.Group()
 
@@ -99,9 +96,13 @@ export class ComponentFactory {
           grabCenter: new THREE.Vector3(0, 0.012, 0),
           grabPoints: [
             { id: "body_center", localPos: new THREE.Vector3(0, 0.012, 0), weight: 1.0 },
-            { id: "body_upper", localPos: new THREE.Vector3(0, 0.04, 0), weight: 0.9 },
+            { id: "body_upper", localPos: new THREE.Vector3(0, 0.040, 0), weight: 0.95 },
+            { id: "body_front", localPos: new THREE.Vector3(0, 0.012, 0.014), weight: 0.92 },
+            { id: "body_back", localPos: new THREE.Vector3(0, 0.012, -0.014), weight: 0.92 },
+            { id: "body_left", localPos: new THREE.Vector3(-0.018, 0.012, 0), weight: 0.9 },
+            { id: "body_right", localPos: new THREE.Vector3(0.018, 0.012, 0), weight: 0.9 },
           ],
-          grabRadius: 0.042,
+          grabRadius: 0.055,
           grabTarget: body,
           surfaceContactObject: body,
           surfaceUpright: true,
@@ -111,9 +112,6 @@ export class ComponentFactory {
         break
       }
 
-      // ---------------------------
-      // LED
-      // ---------------------------
       case "led": {
         const group = new THREE.Group()
 
@@ -160,12 +158,17 @@ export class ComponentFactory {
         group.add(body, dome, anodeLeg, cathodeLeg)
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.032, 0),
+          grabCenter: new THREE.Vector3(0, 0.030, 0),
           grabPoints: [
-            { id: "led_body", localPos: new THREE.Vector3(0, 0.026, 0), weight: 1.0 },
-            { id: "led_dome", localPos: new THREE.Vector3(0, 0.041, 0), weight: 0.92 },
+            { id: "led_body_center", localPos: new THREE.Vector3(0, 0.026, 0), weight: 1.0 },
+            { id: "led_dome", localPos: new THREE.Vector3(0, 0.041, 0), weight: 0.95 },
+            { id: "led_front", localPos: new THREE.Vector3(0, 0.030, 0.010), weight: 0.92 },
+            { id: "led_back", localPos: new THREE.Vector3(0, 0.030, -0.010), weight: 0.92 },
+            { id: "led_left", localPos: new THREE.Vector3(-0.008, 0.028, 0), weight: 0.9 },
+            { id: "led_right", localPos: new THREE.Vector3(0.008, 0.028, 0), weight: 0.9 },
+            { id: "led_lower_body", localPos: new THREE.Vector3(0, 0.018, 0), weight: 0.88 },
           ],
-          grabRadius: 0.024,
+          grabRadius: 0.038,
           grabTarget: body,
           surfaceContactObject: body,
           surfaceUpright: true,
@@ -175,9 +178,6 @@ export class ComponentFactory {
         break
       }
 
-      // ---------------------------
-      // RESISTENCIA
-      // ---------------------------
       case "resistor": {
         const group = new THREE.Group()
 
@@ -224,11 +224,14 @@ export class ComponentFactory {
         setGrabMetadata(group, {
           grabCenter: new THREE.Vector3(0, 0.006, 0),
           grabPoints: [
-            { id: "resistor_body_center", localPos: new THREE.Vector3(0, 0.006, 0), weight: 1.0 },
-            { id: "resistor_body_left", localPos: new THREE.Vector3(-0.005, 0.006, 0), weight: 0.88 },
-            { id: "resistor_body_right", localPos: new THREE.Vector3(0.005, 0.006, 0), weight: 0.88 },
+            { id: "res_body_center", localPos: new THREE.Vector3(0, 0.006, 0), weight: 1.0 },
+            { id: "res_body_left", localPos: new THREE.Vector3(-0.006, 0.006, 0), weight: 0.95 },
+            { id: "res_body_right", localPos: new THREE.Vector3(0.006, 0.006, 0), weight: 0.95 },
+            { id: "res_body_front", localPos: new THREE.Vector3(0, 0.006, 0.008), weight: 0.9 },
+            { id: "res_body_back", localPos: new THREE.Vector3(0, 0.006, -0.008), weight: 0.9 },
+            { id: "res_body_lower", localPos: new THREE.Vector3(0, 0.0015, 0), weight: 0.92 },
           ],
-          grabRadius: 0.022,
+          grabRadius: 0.040,
           grabTarget: body,
           surfaceContactObject: body,
           surfaceUpright: true,
@@ -238,9 +241,6 @@ export class ComponentFactory {
         break
       }
 
-      // ---------------------------
-      // BOTÓN MOMENTÁNEO
-      // ---------------------------
       case "button": {
         const group = new THREE.Group()
 
@@ -338,12 +338,17 @@ export class ComponentFactory {
         }
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.016, 0),
+          grabCenter: new THREE.Vector3(0, 0.017, 0),
           grabPoints: [
-            { id: "button_base", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
-            { id: "button_cap", localPos: new THREE.Vector3(0, 0.027, 0), weight: 0.9 },
+            { id: "btn_base_center", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
+            { id: "btn_cap", localPos: new THREE.Vector3(0, 0.027, 0), weight: 0.95 },
+            { id: "btn_front", localPos: new THREE.Vector3(0, 0.016, 0.010), weight: 0.92 },
+            { id: "btn_back", localPos: new THREE.Vector3(0, 0.016, -0.010), weight: 0.92 },
+            { id: "btn_left", localPos: new THREE.Vector3(-0.010, 0.014, 0), weight: 0.9 },
+            { id: "btn_right", localPos: new THREE.Vector3(0.010, 0.014, 0), weight: 0.9 },
+            { id: "btn_lower_body", localPos: new THREE.Vector3(0, 0.006, 0), weight: 0.9 },
           ],
-          grabRadius: 0.026,
+          grabRadius: 0.044,
           grabTarget: base,
           surfaceContactObject: base,
           surfaceUpright: true,
@@ -353,9 +358,6 @@ export class ComponentFactory {
         break
       }
 
-      // ---------------------------
-      // SWITCH ROCKER (tipo tecla KCD1)
-      // ---------------------------
       case "switch": {
         const group = new THREE.Group()
 
@@ -464,12 +466,17 @@ export class ComponentFactory {
         }
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.014, 0),
+          grabCenter: new THREE.Vector3(0, 0.015, 0),
           grabPoints: [
-            { id: "switch_housing", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
-            { id: "switch_rocker", localPos: new THREE.Vector3(0, 0.022, 0), weight: 0.9 },
+            { id: "sw_housing_center", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
+            { id: "sw_rocker", localPos: new THREE.Vector3(0, 0.022, 0), weight: 0.95 },
+            { id: "sw_front", localPos: new THREE.Vector3(0, 0.015, 0.010), weight: 0.92 },
+            { id: "sw_back", localPos: new THREE.Vector3(0, 0.015, -0.010), weight: 0.92 },
+            { id: "sw_left", localPos: new THREE.Vector3(-0.011, 0.012, 0), weight: 0.9 },
+            { id: "sw_right", localPos: new THREE.Vector3(0.011, 0.012, 0), weight: 0.9 },
+            { id: "sw_lower_body", localPos: new THREE.Vector3(0, 0.007, 0), weight: 0.9 },
           ],
-          grabRadius: 0.028,
+          grabRadius: 0.046,
           grabTarget: housing,
           surfaceContactObject: housing,
           surfaceUpright: true,
@@ -479,9 +486,6 @@ export class ComponentFactory {
         break
       }
 
-      // ---------------------------
-      // CABLE
-      // ---------------------------
       case "wire": {
         const group = new THREE.Group()
         const rawPoints = Array.isArray(data.meta?.points) ? data.meta.points : []
