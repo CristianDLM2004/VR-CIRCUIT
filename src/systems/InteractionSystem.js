@@ -46,6 +46,8 @@ export class InteractionSystem {
     this.insertedGrabBonusSphereMargin = 0.016
     this.insertedGrabBonusRadius = 0.016
 
+    this.surfaceAssistMaxGap = 0.028
+
     this.pinchStartDist = 0.070
     this.pinchEndDist = 0.100
     this.pinchReleaseResetDist = 0.115
@@ -467,15 +469,64 @@ export class InteractionSystem {
     return best
   }
 
+  getObjectSurfaceGap(object) {
+    if (!object || !this.surfaces.length) return Infinity
+    const best = this.getBestSurfaceBelow(object)
+    if (!best) return Infinity
+
+    const contactObject = object.userData?.surfaceContactObject || object
+    this._box.setFromObject(contactObject)
+    this._box.getCenter(this._tmpK)
+    this._box.getSize(this._tmpSize)
+
+    const halfY = this._tmpSize.y * 0.5
+    const bottomY = this._tmpK.y - halfY
+    return Math.abs(bottomY - best.point.y)
+  }
+
+  getSurfaceGrabAssist(object) {
+    const gap = this.getObjectSurfaceGap(object)
+    if (!isFinite(gap) || gap > this.surfaceAssistMaxGap) {
+      return {
+        gap,
+        active: false,
+        scoreBonus: 0,
+        distBonus: 0,
+        radiusBonus: 0,
+      }
+    }
+
+    const t = 1 - THREE.MathUtils.clamp(gap / this.surfaceAssistMaxGap, 0, 1)
+
+    let scoreBonus = 0.020 + t * 0.045
+    let distBonus = 0.012 + t * 0.018
+    let radiusBonus = 0.008 + t * 0.010
+
+    if (object?.userData?.componentType === "resistor") {
+      scoreBonus += 0.040
+      distBonus += 0.020
+      radiusBonus += 0.016
+    }
+
+    return {
+      gap,
+      active: true,
+      scoreBonus,
+      distBonus,
+      radiusBonus,
+    }
+  }
+
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
     const inserted = !!obj?.userData?.inserted || !!obj?.userData?.pinConnections
+    const surfaceAssist = this.getSurfaceGrabAssist(obj)
 
     const adaptiveBoxMargin =
-      this.getAdaptiveExpandedMargin(obj, baseBoxMargin) +
+      this.getAdaptiveExpandedMargin(obj, baseBoxMargin + surfaceAssist.radiusBonus) +
       (inserted ? this.insertedGrabBonusBoxMargin : 0)
 
     const adaptiveSphereMargin =
-      this.getAdaptiveExpandedMargin(obj, baseSphereMargin) +
+      this.getAdaptiveExpandedMargin(obj, baseSphereMargin + surfaceAssist.radiusBonus) +
       (inserted ? this.insertedGrabBonusSphereMargin : 0)
 
     const target = obj?.userData?.grabTarget || obj
@@ -486,6 +537,9 @@ export class InteractionSystem {
     const ed = this.getExpandedBoxDistance(target, pt, adaptiveBoxMargin)
     const sphereD = this.getExpandedSphereDistance(target, pt, adaptiveSphereMargin)
 
+    let score = grabD * 8.0 + sd * 2.1 + sphereD * 1.3 + ed * 0.8 + cd * 0.035
+    score -= surfaceAssist.scoreBonus
+
     return {
       grabD,
       sd,
@@ -495,7 +549,8 @@ export class InteractionSystem {
       adaptiveBoxMargin,
       adaptiveSphereMargin,
       inserted,
-      score: grabD * 8.0 + sd * 2.1 + sphereD * 1.3 + ed * 0.8 + cd * 0.035,
+      surfaceAssist,
+      score,
     }
   }
 
@@ -1507,11 +1562,15 @@ export class InteractionSystem {
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     this.getBestHandProbePointWorld(he, obj, this._tmpC)
-    const { grabD, sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
+    const { grabD, sd, cd, ed, sphereD, adaptiveBoxMargin, surfaceAssist } =
+      this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
+    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
+    const surfaceLimit = this.handGrabSurfaceMaxDist + surfaceAssist.distBonus
+    const slackLimit = this.handGrabSurfaceSlack + surfaceAssist.distBonus * 0.55
+
     if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) return false
-    if (grabD > this.handGrabSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001 && sd > this.handGrabSurfaceMaxDist + this.handGrabSurfaceSlack) return false
+    if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001 && sd > surfaceLimit + slackLimit) return false
 
     return true
   }
@@ -1530,11 +1589,14 @@ export class InteractionSystem {
       this.getBestHandProbePointWorld(he, obj, this._tmpC)
 
       const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
-      const { grabD, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
-      const centerLimit = maxDist + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
+      const { grabD, cd, ed, sphereD, adaptiveBoxMargin, score, surfaceAssist } =
+        this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
+
+      const centerLimit = maxDist + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
+      const surfaceLimit = this.handGrabSurfaceMaxDist + surfaceAssist.distBonus
 
       if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-      if (grabD > this.handGrabSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
+      if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001) continue
 
       if (score < bestScore) {
         bestScore = score
@@ -1990,16 +2052,14 @@ export class InteractionSystem {
         }
 
         this.getBestHandProbePointWorld(h, obj, this._tmpA)
-        const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
-          obj,
-          this._tmpA,
-          this.handHoverExpandedBoxMargin,
-          this.handHoverExpandedSphereMargin
-        )
+        const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score, surfaceAssist } =
+          this.getGrabCandidateScore(obj, this._tmpA, this.handHoverExpandedBoxMargin, this.handHoverExpandedSphereMargin)
 
-        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
+        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
+        const surfaceLimit = this.handHoverSurfaceMaxDist + surfaceAssist.distBonus
+
         if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-        if (grabD > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
+        if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001) continue
 
         if (score < bestScore) {
           bestScore = score
