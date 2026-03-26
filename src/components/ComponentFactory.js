@@ -4,6 +4,39 @@ function cloneVec3(v) {
   return v ? new THREE.Vector3(v.x, v.y, v.z) : new THREE.Vector3()
 }
 
+function createGrabProxyBox(width, height, depth, position) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(width, height, depth),
+    new THREE.MeshBasicMaterial({
+      visible: false,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      colorWrite: false,
+    })
+  )
+  mesh.position.copy(position)
+  mesh.name = "GrabProxyBox"
+  return mesh
+}
+
+function createGrabProxyCylinder(radiusTop, radiusBottom, height, radialSegments, position, rotation = null) {
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments),
+    new THREE.MeshBasicMaterial({
+      visible: false,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      colorWrite: false,
+    })
+  )
+  mesh.position.copy(position)
+  if (rotation) mesh.rotation.copy(rotation)
+  mesh.name = "GrabProxyCylinder"
+  return mesh
+}
+
 function setGrabMetadata(mesh, config = {}) {
   mesh.userData.grabCenter = cloneVec3(config.grabCenter)
 
@@ -90,20 +123,22 @@ export class ComponentFactory {
         minusTerminal.name = "BatteryNegativeTerminal"
         minusTerminal.position.set(0.018, 0.071, 0)
 
-        group.add(body, top, plusTerminal, minusTerminal)
+        const grabProxy = createGrabProxyBox(0.092, 0.118, 0.062, new THREE.Vector3(0, 0.008, 0))
+
+        group.add(body, top, plusTerminal, minusTerminal, grabProxy)
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.012, 0),
+          grabCenter: new THREE.Vector3(0, 0.014, 0),
           grabPoints: [
-            { id: "body_center", localPos: new THREE.Vector3(0, 0.012, 0), weight: 1.0 },
-            { id: "body_upper", localPos: new THREE.Vector3(0, 0.040, 0), weight: 0.95 },
-            { id: "body_front", localPos: new THREE.Vector3(0, 0.012, 0.014), weight: 0.92 },
-            { id: "body_back", localPos: new THREE.Vector3(0, 0.012, -0.014), weight: 0.92 },
-            { id: "body_left", localPos: new THREE.Vector3(-0.018, 0.012, 0), weight: 0.9 },
-            { id: "body_right", localPos: new THREE.Vector3(0.018, 0.012, 0), weight: 0.9 },
+            { id: "body_center", localPos: new THREE.Vector3(0, 0.014, 0), weight: 1.0 },
+            { id: "body_upper", localPos: new THREE.Vector3(0, 0.042, 0), weight: 0.95 },
+            { id: "body_front", localPos: new THREE.Vector3(0, 0.014, 0.016), weight: 0.92 },
+            { id: "body_back", localPos: new THREE.Vector3(0, 0.014, -0.016), weight: 0.92 },
+            { id: "body_left", localPos: new THREE.Vector3(-0.020, 0.014, 0), weight: 0.9 },
+            { id: "body_right", localPos: new THREE.Vector3(0.020, 0.014, 0), weight: 0.9 },
           ],
-          grabRadius: 0.055,
-          grabTarget: body,
+          grabRadius: 0.060,
+          grabTarget: grabProxy,
           surfaceContactObject: body,
           surfaceUpright: true,
         })
@@ -155,21 +190,23 @@ export class ComponentFactory {
         cathodeLeg.name = "LEDCathodeLeg"
         cathodeLeg.position.set(0.0065, -0.008, 0)
 
-        group.add(body, dome, anodeLeg, cathodeLeg)
+        const grabProxy = createGrabProxyBox(0.050, 0.052, 0.050, new THREE.Vector3(0, 0.030, 0))
+
+        group.add(body, dome, anodeLeg, cathodeLeg, grabProxy)
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.030, 0),
+          grabCenter: new THREE.Vector3(0, 0.031, 0),
           grabPoints: [
-            { id: "led_body_center", localPos: new THREE.Vector3(0, 0.026, 0), weight: 1.0 },
-            { id: "led_dome", localPos: new THREE.Vector3(0, 0.041, 0), weight: 0.95 },
-            { id: "led_front", localPos: new THREE.Vector3(0, 0.030, 0.010), weight: 0.92 },
-            { id: "led_back", localPos: new THREE.Vector3(0, 0.030, -0.010), weight: 0.92 },
-            { id: "led_left", localPos: new THREE.Vector3(-0.008, 0.028, 0), weight: 0.9 },
-            { id: "led_right", localPos: new THREE.Vector3(0.008, 0.028, 0), weight: 0.9 },
-            { id: "led_lower_body", localPos: new THREE.Vector3(0, 0.018, 0), weight: 0.88 },
+            { id: "led_body_center", localPos: new THREE.Vector3(0, 0.028, 0), weight: 1.0 },
+            { id: "led_dome", localPos: new THREE.Vector3(0, 0.041, 0), weight: 0.96 },
+            { id: "led_front", localPos: new THREE.Vector3(0, 0.031, 0.011), weight: 0.93 },
+            { id: "led_back", localPos: new THREE.Vector3(0, 0.031, -0.011), weight: 0.93 },
+            { id: "led_left", localPos: new THREE.Vector3(-0.009, 0.029, 0), weight: 0.91 },
+            { id: "led_right", localPos: new THREE.Vector3(0.009, 0.029, 0), weight: 0.91 },
+            { id: "led_lower_body", localPos: new THREE.Vector3(0, 0.020, 0), weight: 0.9 },
           ],
-          grabRadius: 0.038,
-          grabTarget: body,
+          grabRadius: 0.045,
+          grabTarget: grabProxy,
           surfaceContactObject: body,
           surfaceUpright: true,
         })
@@ -219,20 +256,22 @@ export class ComponentFactory {
         rightLeg.name = "ResistorRightLeg"
         rightLeg.position.set(0.015, -0.007, 0)
 
-        group.add(body, leftLead, rightLead, leftLeg, rightLeg)
+        const grabProxy = createGrabProxyBox(0.050, 0.026, 0.030, new THREE.Vector3(0, 0.006, 0))
+
+        group.add(body, leftLead, rightLead, leftLeg, rightLeg, grabProxy)
 
         setGrabMetadata(group, {
           grabCenter: new THREE.Vector3(0, 0.006, 0),
           grabPoints: [
             { id: "res_body_center", localPos: new THREE.Vector3(0, 0.006, 0), weight: 1.0 },
-            { id: "res_body_left", localPos: new THREE.Vector3(-0.006, 0.006, 0), weight: 0.95 },
-            { id: "res_body_right", localPos: new THREE.Vector3(0.006, 0.006, 0), weight: 0.95 },
-            { id: "res_body_front", localPos: new THREE.Vector3(0, 0.006, 0.008), weight: 0.9 },
-            { id: "res_body_back", localPos: new THREE.Vector3(0, 0.006, -0.008), weight: 0.9 },
-            { id: "res_body_lower", localPos: new THREE.Vector3(0, 0.0015, 0), weight: 0.92 },
+            { id: "res_body_left", localPos: new THREE.Vector3(-0.008, 0.006, 0), weight: 0.96 },
+            { id: "res_body_right", localPos: new THREE.Vector3(0.008, 0.006, 0), weight: 0.96 },
+            { id: "res_body_front", localPos: new THREE.Vector3(0, 0.006, 0.010), weight: 0.92 },
+            { id: "res_body_back", localPos: new THREE.Vector3(0, 0.006, -0.010), weight: 0.92 },
+            { id: "res_body_upper", localPos: new THREE.Vector3(0, 0.011, 0), weight: 0.9 },
           ],
-          grabRadius: 0.040,
-          grabTarget: body,
+          grabRadius: 0.050,
+          grabTarget: grabProxy,
           surfaceContactObject: body,
           surfaceUpright: true,
         })
@@ -295,7 +334,9 @@ export class ComponentFactory {
         rightLeg.name = "ButtonRightLeg"
         rightLeg.position.set(0.0225, -0.009, 0)
 
-        group.add(base, rim, cap, leftLeg, rightLeg)
+        const grabProxy = createGrabProxyBox(0.046, 0.036, 0.046, new THREE.Vector3(0, 0.018, 0))
+
+        group.add(base, rim, cap, leftLeg, rightLeg, grabProxy)
 
         const CAP_BASE_Y = 0.027
         const CAP_PRESSED_Y = 0.021
@@ -338,18 +379,18 @@ export class ComponentFactory {
         }
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.017, 0),
+          grabCenter: new THREE.Vector3(0, 0.018, 0),
           grabPoints: [
-            { id: "btn_base_center", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
-            { id: "btn_cap", localPos: new THREE.Vector3(0, 0.027, 0), weight: 0.95 },
-            { id: "btn_front", localPos: new THREE.Vector3(0, 0.016, 0.010), weight: 0.92 },
-            { id: "btn_back", localPos: new THREE.Vector3(0, 0.016, -0.010), weight: 0.92 },
-            { id: "btn_left", localPos: new THREE.Vector3(-0.010, 0.014, 0), weight: 0.9 },
-            { id: "btn_right", localPos: new THREE.Vector3(0.010, 0.014, 0), weight: 0.9 },
-            { id: "btn_lower_body", localPos: new THREE.Vector3(0, 0.006, 0), weight: 0.9 },
+            { id: "btn_body_center", localPos: new THREE.Vector3(0, 0.016, 0), weight: 1.0 },
+            { id: "btn_cap", localPos: new THREE.Vector3(0, 0.027, 0), weight: 0.96 },
+            { id: "btn_front", localPos: new THREE.Vector3(0, 0.017, 0.012), weight: 0.93 },
+            { id: "btn_back", localPos: new THREE.Vector3(0, 0.017, -0.012), weight: 0.93 },
+            { id: "btn_left", localPos: new THREE.Vector3(-0.012, 0.016, 0), weight: 0.91 },
+            { id: "btn_right", localPos: new THREE.Vector3(0.012, 0.016, 0), weight: 0.91 },
+            { id: "btn_lower_body", localPos: new THREE.Vector3(0, 0.010, 0), weight: 0.9 },
           ],
-          grabRadius: 0.044,
-          grabTarget: base,
+          grabRadius: 0.052,
+          grabTarget: grabProxy,
           surfaceContactObject: base,
           surfaceUpright: true,
         })
@@ -414,7 +455,9 @@ export class ComponentFactory {
         rightLeg.name = "SwitchRightLeg"
         rightLeg.position.set(0.0225, -0.009, 0)
 
-        group.add(housing, frameInner, rocker, leftLeg, rightLeg)
+        const grabProxy = createGrabProxyBox(0.052, 0.040, 0.042, new THREE.Vector3(0, 0.016, 0))
+
+        group.add(housing, frameInner, rocker, leftLeg, rightLeg, grabProxy)
 
         const ROCKER_OFF_Z = -Math.PI / 10
         const ROCKER_ON_Z = Math.PI / 10
@@ -466,18 +509,18 @@ export class ComponentFactory {
         }
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.015, 0),
+          grabCenter: new THREE.Vector3(0, 0.016, 0),
           grabPoints: [
-            { id: "sw_housing_center", localPos: new THREE.Vector3(0, 0.010, 0), weight: 1.0 },
-            { id: "sw_rocker", localPos: new THREE.Vector3(0, 0.022, 0), weight: 0.95 },
-            { id: "sw_front", localPos: new THREE.Vector3(0, 0.015, 0.010), weight: 0.92 },
-            { id: "sw_back", localPos: new THREE.Vector3(0, 0.015, -0.010), weight: 0.92 },
-            { id: "sw_left", localPos: new THREE.Vector3(-0.011, 0.012, 0), weight: 0.9 },
-            { id: "sw_right", localPos: new THREE.Vector3(0.011, 0.012, 0), weight: 0.9 },
-            { id: "sw_lower_body", localPos: new THREE.Vector3(0, 0.007, 0), weight: 0.9 },
+            { id: "sw_body_center", localPos: new THREE.Vector3(0, 0.014, 0), weight: 1.0 },
+            { id: "sw_rocker", localPos: new THREE.Vector3(0, 0.022, 0), weight: 0.96 },
+            { id: "sw_front", localPos: new THREE.Vector3(0, 0.016, 0.012), weight: 0.93 },
+            { id: "sw_back", localPos: new THREE.Vector3(0, 0.016, -0.012), weight: 0.93 },
+            { id: "sw_left", localPos: new THREE.Vector3(-0.013, 0.014, 0), weight: 0.91 },
+            { id: "sw_right", localPos: new THREE.Vector3(0.013, 0.014, 0), weight: 0.91 },
+            { id: "sw_lower_body", localPos: new THREE.Vector3(0, 0.009, 0), weight: 0.9 },
           ],
-          grabRadius: 0.046,
-          grabTarget: housing,
+          grabRadius: 0.055,
+          grabTarget: grabProxy,
           surfaceContactObject: housing,
           surfaceUpright: true,
         })
