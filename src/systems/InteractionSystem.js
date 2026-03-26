@@ -48,9 +48,9 @@ export class InteractionSystem {
 
     this.surfaceAssistMaxGap = 0.028
 
-    this.pinchStartDist = 0.070
-    this.pinchEndDist = 0.100
-    this.pinchReleaseResetDist = 0.115
+    this.pinchStartDist = 0.078
+    this.pinchEndDist = 0.115
+    this.pinchReleaseResetDist = 0.130
 
     this.uiPokeRadius = 0.028
     this.uiReleaseRadius = 0.048
@@ -59,8 +59,8 @@ export class InteractionSystem {
     this.throwMinSpeed = 0.22
     this.directPlaceMaxDrop = 0.12
 
-    this.handTrackingReleaseGraceMs = 280
-    this.handOpenReleaseGraceMs = 80
+    this.handTrackingReleaseGraceMs = 520
+    this.handOpenReleaseGraceMs = 180
 
     this.appMode = "edit"
 
@@ -374,6 +374,11 @@ export class InteractionSystem {
     return this.isJointTracked(he.hand.joints["thumb-tip"]) && this.isJointTracked(he.hand.joints["index-finger-tip"])
   }
 
+  isHandTrackedForHold(he) {
+    if (!he?.hand?.joints) return false
+    return this.isJointTracked(he.hand.joints["thumb-tip"]) || this.isJointTracked(he.hand.joints["index-finger-tip"])
+  }
+
   setHover(newH) {
     if (this.hovered === newH) return
     if (this.hovered) {
@@ -609,6 +614,27 @@ export class InteractionSystem {
     }
 
     return this.getGrabPointWorld(he, out)
+  }
+
+  getHoldReferenceWorld(he, obj, out) {
+    if (this.isHandEntryTracked(he)) {
+      return this.getBestHandProbePointWorld(he, obj, out)
+    }
+
+    const index = this.getIndexTipWorld(he, this._tmpL)
+    if (index) {
+      out.copy(index)
+      return out
+    }
+
+    const thumb = this.getThumbTipWorld(he, this._tmpL)
+    if (thumb) {
+      out.copy(thumb)
+      return out
+    }
+
+    he.pinchPoint.getWorldPosition(out)
+    return out
   }
 
   pickInteractableFromHitObject(hit) {
@@ -1404,11 +1430,11 @@ export class InteractionSystem {
 
   updateHandHeldObjectPose(he) {
     if (!he?.heldObject) return
-    if (!this.isHandEntryTracked(he)) return
+    if (!this.isHandTrackedForHold(he)) return
 
     const obj = he.heldObject
 
-    this.getBestHandProbePointWorld(he, obj, this._tmpA)
+    this.getHoldReferenceWorld(he, obj, this._tmpA)
 
     obj.localToWorld(this._tmpB.copy(he.hold.grabLocalPoint))
     this._tmpC.copy(this._tmpA).sub(this._tmpB)
@@ -1628,8 +1654,11 @@ export class InteractionSystem {
     hs.grabLocalPoint.set(0, 0, 0)
     hs.holdDistance = 0
 
-    if (sourceType === "controller") source.getWorldPosition(hs.lastPos)
-    else this.getGrabPointWorld(source, hs.lastPos)
+    if (sourceType === "controller") {
+      source.getWorldPosition(hs.lastPos)
+    } else {
+      this.getHoldReferenceWorld(source, source.heldObject || null, hs.lastPos)
+    }
   }
 
   stopHoldTracking(hs) {
@@ -1649,8 +1678,13 @@ export class InteractionSystem {
     const now = performance.now()
     const dt = (now - hs.lastT) / 1000
     if (dt <= 0.0001) return
-    if (hs.sourceType === "controller") hs.source.getWorldPosition(this._tmpA)
-    else this.getGrabPointWorld(hs.source, this._tmpA)
+
+    if (hs.sourceType === "controller") {
+      hs.source.getWorldPosition(this._tmpA)
+    } else {
+      this.getHoldReferenceWorld(hs.source, hs.source.heldObject || null, this._tmpA)
+    }
+
     const v = this._tmpA.clone().sub(hs.lastPos).multiplyScalar(1 / dt)
     hs.samples.push({ v, t: now })
     while (hs.samples.length > hs.maxSamples) hs.samples.shift()
@@ -2115,20 +2149,43 @@ export class InteractionSystem {
   updateHandPinchState(dtMs) {
     for (const h of this.hands) {
       const tracked = this.isHandEntryTracked(h)
+      const holdTracked = this.isHandTrackedForHold(h)
       const dist = tracked ? this.computePinchDistance(h.hand) : null
-      if (!tracked || dist == null) {
-        if (h.heldObject) {
-          h.lostTrackingMs += dtMs
-          if (h.lostTrackingMs >= this.handTrackingReleaseGraceMs) {
-            this.forceReleaseHand(h, true)
-            h.pinchArmed = true
-          }
-        } else {
-          h.isPinching = false
-          h.pinchArmed = true
-          h.openPinchMs = 0
+
+      if ((!tracked || dist == null) && !h.heldObject) {
+        h.isPinching = false
+        h.pinchArmed = true
+        h.openPinchMs = 0
+        h.lostTrackingMs = 0
+        this.stopHoldTracking(h.hold)
+        continue
+      }
+
+      if (h.heldObject) {
+        if (tracked && dist != null) {
           h.lostTrackingMs = 0
-          this.stopHoldTracking(h.hold)
+
+          if (dist >= this.pinchEndDist) {
+            h.openPinchMs += dtMs
+            if (h.openPinchMs >= this.handOpenReleaseGraceMs) this.onHandPinchEnd(h)
+          } else {
+            h.openPinchMs = 0
+            h.isPinching = true
+          }
+          continue
+        }
+
+        if (holdTracked) {
+          h.lostTrackingMs = 0
+          h.openPinchMs = 0
+          h.isPinching = true
+          continue
+        }
+
+        h.lostTrackingMs += dtMs
+        if (h.lostTrackingMs >= this.handTrackingReleaseGraceMs) {
+          this.forceReleaseHand(h, true)
+          h.pinchArmed = true
         }
         continue
       }
@@ -2161,17 +2218,6 @@ export class InteractionSystem {
         if (h.pinchArmed && !h.isPinching && canAcc) {
           h.wirePinchCloseMs = 0
           this.onHandPinchStart(h)
-        }
-        continue
-      }
-
-      if (h.heldObject) {
-        if (dist >= this.pinchEndDist) {
-          h.openPinchMs += dtMs
-          if (h.openPinchMs >= this.handOpenReleaseGraceMs) this.onHandPinchEnd(h)
-        } else {
-          h.openPinchMs = 0
-          h.isPinching = true
         }
         continue
       }
