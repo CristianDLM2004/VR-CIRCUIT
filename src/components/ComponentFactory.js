@@ -256,21 +256,22 @@ export class ComponentFactory {
         rightLeg.name = "ResistorRightLeg"
         rightLeg.position.set(0.015, -0.007, 0)
 
-        const grabProxy = createGrabProxyBox(0.050, 0.026, 0.030, new THREE.Vector3(0, 0.006, 0))
+        // Proxy elevado para que al estar insertada o apoyada siga “mandando” el cuerpo
+        const grabProxy = createGrabProxyBox(0.060, 0.036, 0.036, new THREE.Vector3(0, 0.012, 0))
 
         group.add(body, leftLead, rightLead, leftLeg, rightLeg, grabProxy)
 
         setGrabMetadata(group, {
-          grabCenter: new THREE.Vector3(0, 0.006, 0),
+          grabCenter: new THREE.Vector3(0, 0.012, 0),
           grabPoints: [
-            { id: "res_body_center", localPos: new THREE.Vector3(0, 0.006, 0), weight: 1.0 },
-            { id: "res_body_left", localPos: new THREE.Vector3(-0.008, 0.006, 0), weight: 0.96 },
-            { id: "res_body_right", localPos: new THREE.Vector3(0.008, 0.006, 0), weight: 0.96 },
-            { id: "res_body_front", localPos: new THREE.Vector3(0, 0.006, 0.010), weight: 0.92 },
-            { id: "res_body_back", localPos: new THREE.Vector3(0, 0.006, -0.010), weight: 0.92 },
-            { id: "res_body_upper", localPos: new THREE.Vector3(0, 0.011, 0), weight: 0.9 },
+            { id: "res_body_center", localPos: new THREE.Vector3(0, 0.012, 0), weight: 1.0 },
+            { id: "res_body_left", localPos: new THREE.Vector3(-0.010, 0.012, 0), weight: 0.97 },
+            { id: "res_body_right", localPos: new THREE.Vector3(0.010, 0.012, 0), weight: 0.97 },
+            { id: "res_body_front", localPos: new THREE.Vector3(0, 0.012, 0.012), weight: 0.94 },
+            { id: "res_body_back", localPos: new THREE.Vector3(0, 0.012, -0.012), weight: 0.94 },
+            { id: "res_body_upper", localPos: new THREE.Vector3(0, 0.017, 0), weight: 0.93 },
           ],
-          grabRadius: 0.050,
+          grabRadius: 0.062,
           grabTarget: grabProxy,
           surfaceContactObject: body,
           surfaceUpright: true,
