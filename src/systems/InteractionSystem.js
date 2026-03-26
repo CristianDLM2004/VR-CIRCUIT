@@ -29,18 +29,18 @@ export class InteractionSystem {
     this.controllerRayMinLength = 0.08
 
     this.nearEnabled = true
-    this.nearRadius = 0.22
+    this.nearRadius = 0.24
 
-    this.handGrabSurfaceMaxDist = 0.11
-    this.handGrabSurfaceSlack = 0.06
-    this.handHoverSurfaceMaxDist = 0.12
+    this.handGrabSurfaceMaxDist = 0.115
+    this.handGrabSurfaceSlack = 0.065
+    this.handHoverSurfaceMaxDist = 0.125
 
-    this.handGrabExpandedBoxMargin = 0.040
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.050
-    this.handHoverExpandedBoxMargin = 0.032
+    this.handGrabExpandedBoxMargin = 0.042
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.052
+    this.handHoverExpandedBoxMargin = 0.034
 
-    this.handGrabExpandedSphereMargin = 0.045
-    this.handHoverExpandedSphereMargin = 0.035
+    this.handGrabExpandedSphereMargin = 0.048
+    this.handHoverExpandedSphereMargin = 0.038
 
     this.insertedGrabBonusBoxMargin = 0.012
     this.insertedGrabBonusSphereMargin = 0.016
@@ -107,6 +107,8 @@ export class InteractionSystem {
     this._tmpH = new THREE.Vector3()
     this._tmpI = new THREE.Vector3()
     this._tmpJ = new THREE.Vector3()
+    this._tmpK = new THREE.Vector3()
+    this._tmpL = new THREE.Vector3()
     this._tmpSize = new THREE.Vector3()
     this._box = new THREE.Box3()
     this._box2 = new THREE.Box3()
@@ -443,11 +445,10 @@ export class InteractionSystem {
   }
 
   getGrabDistanceToObject(obj, worldPoint) {
-    const radius = obj?.userData?.grabRadius ?? 0.018
+    const radius = obj?.userData?.grabRadius ?? 0.020
     const target = obj?.userData?.grabTarget || obj
 
     this._box.setFromObject(target)
-
     const bodyDistance = Math.max(0, this._box.distanceToPoint(worldPoint) - radius)
 
     let best = bodyDistance
@@ -494,8 +495,65 @@ export class InteractionSystem {
       adaptiveBoxMargin,
       adaptiveSphereMargin,
       inserted,
-      score: grabD * 8.0 + sd * 2.4 + sphereD * 1.4 + ed * 0.9 + cd * 0.04,
+      score: grabD * 8.0 + sd * 2.1 + sphereD * 1.3 + ed * 0.8 + cd * 0.035,
     }
+  }
+
+  getHandProbeWorldPoints(he) {
+    const probes = []
+
+    const thumb = this.getThumbTipWorld(he, this._tmpI)
+    if (thumb) probes.push({ id: "thumb", worldPos: thumb.clone() })
+
+    const index = this.getIndexTipWorld(he, this._tmpJ)
+    if (index) probes.push({ id: "index", worldPos: index.clone() })
+
+    if (thumb && index) {
+      probes.push({
+        id: "mid",
+        worldPos: thumb.clone().add(index).multiplyScalar(0.5),
+      })
+
+      probes.push({
+        id: "index_biased",
+        worldPos: thumb.clone().lerp(index, 0.72),
+      })
+
+      probes.push({
+        id: "thumb_biased",
+        worldPos: index.clone().lerp(thumb, 0.72),
+      })
+    }
+
+    he.pinchPoint.getWorldPosition(this._tmpK)
+    probes.push({ id: "pinchPoint", worldPos: this._tmpK.clone() })
+
+    return probes
+  }
+
+  getBestHandProbePointWorld(he, obj, out) {
+    const probes = this.getHandProbeWorldPoints(he)
+    let best = null
+    let bestScore = Infinity
+
+    for (const probe of probes) {
+      const grabD = this.getGrabDistanceToObject(obj, probe.worldPos)
+      const target = obj?.userData?.grabTarget || obj
+      const sd = this.distanceToObjectSurface(target, probe.worldPos)
+      const score = grabD * 3.5 + sd * 1.2
+
+      if (score < bestScore) {
+        bestScore = score
+        best = probe
+      }
+    }
+
+    if (best) {
+      out.copy(best.worldPos)
+      return out
+    }
+
+    return this.getGrabPointWorld(he, out)
   }
 
   pickInteractableFromHitObject(hit) {
@@ -671,8 +729,9 @@ export class InteractionSystem {
   getGrabPointWorld(he, out) {
     const thumb = this.getThumbTipWorld(he, this._tmpA)
     const index = this.getIndexTipWorld(he, this._tmpB)
+
     if (thumb && index) {
-      out.copy(thumb).add(index).multiplyScalar(0.5)
+      out.copy(thumb).lerp(index, 0.72)
       return out
     }
     if (index) {
@@ -1293,9 +1352,13 @@ export class InteractionSystem {
     if (!this.isHandEntryTracked(he)) return
 
     const obj = he.heldObject
-    this.getGrabPointWorld(he, this._tmpA)
 
-    obj.position.copy(this._tmpA).add(he.hold.grabOffset)
+    this.getBestHandProbePointWorld(he, obj, this._tmpA)
+
+    obj.localToWorld(this._tmpB.copy(he.hold.grabLocalPoint))
+    this._tmpC.copy(this._tmpA).sub(this._tmpB)
+
+    obj.position.add(this._tmpC)
     obj.updateMatrixWorld(true)
   }
 
@@ -1443,7 +1506,7 @@ export class InteractionSystem {
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
-    this.getGrabPointWorld(he, this._tmpC)
+    this.getBestHandProbePointWorld(he, obj, this._tmpC)
     const { grabD, sd, cd, ed, sphereD, adaptiveBoxMargin } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
     const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
@@ -1454,7 +1517,6 @@ export class InteractionSystem {
   }
 
   findNearestComponentToHand(he, maxDist) {
-    this.getGrabPointWorld(he, this._tmpC)
     let best = null
     let bestScore = Infinity
 
@@ -1464,6 +1526,8 @@ export class InteractionSystem {
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
+
+      this.getBestHandProbePointWorld(he, obj, this._tmpC)
 
       const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
       const { grabD, cd, ed, sphereD, adaptiveBoxMargin, score } = this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
@@ -1744,15 +1808,17 @@ export class InteractionSystem {
     this.setObjectOwner(target, this.makeOwnerToken("hand", he.index))
     this.startHoldTracking(he.hold, "hand", he)
 
-    this.getGrabPointWorld(he, this._tmpA)
+    this.getBestHandProbePointWorld(he, target, this._tmpA)
+    this.getClosestGrabPointWorld(target, this._tmpA, this._tmpB)
 
-    target.getWorldPosition(this._tmpB)
-    he.hold.grabOffset.copy(this._tmpB).sub(this._tmpA)
+    target.worldToLocal(this._tmpC.copy(this._tmpB))
+    he.hold.grabLocalPoint.copy(this._tmpC)
 
-    this.getObjectGrabCenterWorld(target, this._tmpC)
-    target.worldToLocal(this._tmpD.copy(this._tmpC))
-    he.hold.grabLocalPoint.copy(this._tmpD)
-    he.hold.holdDistance = this._tmpC.distanceTo(this._tmpA)
+    target.localToWorld(this._tmpD.copy(he.hold.grabLocalPoint))
+    he.hold.grabOffset.copy(this._tmpD).sub(this._tmpA)
+
+    this.getObjectGrabCenterWorld(target, this._tmpE)
+    he.hold.holdDistance = this._tmpE.distanceTo(this._tmpA)
   }
 
   onHandPinchEnd(he, options = {}) {
@@ -1905,13 +1971,16 @@ export class InteractionSystem {
     if (!this.nearEnabled) return null
     let best = null
     let bestScore = Infinity
+
     for (const h of this.hands) {
       if (!this.isHandEntryTracked(h) || h.heldObject) continue
-      this.getGrabPointWorld(h, this._tmpA)
+
       for (const obj of this.interactables) {
         if (!obj || obj.userData?.isSurface) continue
         if (obj.userData?.componentId && !this.isObjectFreeForGrab(obj)) continue
+
         if (obj.userData?.isUI) {
+          this.getIndexTipWorld(h, this._tmpA)
           const d = this.distanceToObjectSurface(obj, this._tmpA)
           if (d < bestScore && d < this.uiPokeRadius * 2) {
             bestScore = d
@@ -1919,21 +1988,26 @@ export class InteractionSystem {
           }
           continue
         }
+
+        this.getBestHandProbePointWorld(h, obj, this._tmpA)
         const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score } = this.getGrabCandidateScore(
           obj,
           this._tmpA,
           this.handHoverExpandedBoxMargin,
           this.handHoverExpandedSphereMargin
         )
+
         const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0)
         if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
         if (grabD > this.handHoverSurfaceMaxDist && ed > 0.0001 && sphereD > 0.0001) continue
+
         if (score < bestScore) {
           bestScore = score
           best = obj
         }
       }
     }
+
     return best
   }
 
