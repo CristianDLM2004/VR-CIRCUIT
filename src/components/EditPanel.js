@@ -82,6 +82,7 @@ export function createEditPanel({
   onClearSelection = () => {},
   onResistanceDelta = () => {},
   onColorPicked = () => {},
+  onAcceptChanges = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "EditPanel"
@@ -196,7 +197,7 @@ export function createEditPanel({
   const actionButtons = {
     selectHeld: makeButton({
       name: "BtnEditSelectHeld",
-      x: -0.10,
+      x: -0.18,
       y: 0.10,
       w: 0.18,
       h: 0.05,
@@ -206,7 +207,7 @@ export function createEditPanel({
     }),
     selectLastWire: makeButton({
       name: "BtnEditSelectLastWire",
-      x: 0.10,
+      x: 0.02,
       y: 0.10,
       w: 0.16,
       h: 0.05,
@@ -216,7 +217,7 @@ export function createEditPanel({
     }),
     clearSelection: makeButton({
       name: "BtnEditClearSelection",
-      x: 0.27,
+      x: 0.20,
       y: 0.10,
       w: 0.16,
       h: 0.05,
@@ -230,7 +231,7 @@ export function createEditPanel({
     minus100: makeButton({
       name: "BtnResMinus100",
       x: -0.18,
-      y: 0.01,
+      y: -0.18,
       color: 0x7f8c8d,
       label: "-100",
       onPress: () => onResistanceDelta(-100),
@@ -238,7 +239,7 @@ export function createEditPanel({
     minus10: makeButton({
       name: "BtnResMinus10",
       x: -0.06,
-      y: 0.01,
+      y: -0.18,
       color: 0x95a5a6,
       label: "-10",
       onPress: () => onResistanceDelta(-10),
@@ -246,7 +247,7 @@ export function createEditPanel({
     plus10: makeButton({
       name: "BtnResPlus10",
       x: 0.06,
-      y: 0.01,
+      y: -0.18,
       color: 0x27ae60,
       label: "+10",
       onPress: () => onResistanceDelta(10),
@@ -254,12 +255,23 @@ export function createEditPanel({
     plus100: makeButton({
       name: "BtnResPlus100",
       x: 0.18,
-      y: 0.01,
+      y: -0.18,
       color: 0x2ecc71,
       label: "+100",
       onPress: () => onResistanceDelta(100),
     }),
   }
+
+  const acceptButton = makeButton({
+    name: "BtnEditAccept",
+    x: 0.23,
+    y: -0.25,
+    w: 0.18,
+    h: 0.055,
+    color: 0x16a085,
+    label: "Aceptar",
+    onPress: onAcceptChanges,
+  })
 
   const colorButtons = []
   const hueButtons = []
@@ -270,7 +282,7 @@ export function createEditPanel({
   const cellH = 0.030
   const cellGap = 0.003
   const boardOriginX = -0.265
-  const boardOriginY = 0.01
+  const boardOriginY = -0.03
 
   function rebuildSVBoard() {
     for (let row = 0; row < boardRows; row++) {
@@ -307,7 +319,7 @@ export function createEditPanel({
   }
 
   const hueX = 0.26
-  const hueStartY = 0.02
+  const hueStartY = -0.02
   for (let i = 0; i < 8; i++) {
     const hue = i / 8
     const hex = hsvToHex(hue, 1, 1)
@@ -343,15 +355,23 @@ export function createEditPanel({
     const type = selection?.type ?? null
     const canEditResistance = type === "resistor"
     const canEditColor = type === "led" || type === "wire"
+    const canAccept = !!selection && (canEditResistance || canEditColor)
 
     setResistorControlsVisible(canEditResistance)
     setColorControlsVisible(canEditColor)
+    acceptButton.visible = canAccept
 
-    if (canEditColor && typeof selection.color === "number") {
-      setPreviewColor(selection.color)
-      const hsv = rgbToHsv(selection.color)
-      currentHue = hsv.h
-      rebuildSVBoard()
+    if (canEditColor) {
+      const shownColor = typeof selection.pendingColor === "number"
+        ? selection.pendingColor
+        : selection.color
+
+      if (typeof shownColor === "number") {
+        setPreviewColor(shownColor)
+        const hsv = rgbToHsv(shownColor)
+        currentHue = hsv.h
+        rebuildSVBoard()
+      }
     }
 
     if (!selection) {
@@ -364,10 +384,11 @@ export function createEditPanel({
     }
 
     if (type === "resistor") {
+      const shownResistance = selection.pendingResistance ?? selection.resistance ?? 220
       drawStatus([
         "Tipo: resistencia",
         `Valor actual: ${selection.resistance ?? 220} ohms`,
-        "Ajusta con los botones inferiores",
+        `Nuevo valor: ${shownResistance} ohms`,
       ])
       return
     }
@@ -375,8 +396,8 @@ export function createEditPanel({
     if (type === "led") {
       drawStatus([
         "Tipo: LED",
-        "Color editable",
-        "Elige un color de la paleta",
+        selection.hasPendingChanges ? "Hay cambios pendientes" : "Sin cambios pendientes",
+        "Elige color y presiona Aceptar",
       ])
       return
     }
@@ -384,8 +405,8 @@ export function createEditPanel({
     if (type === "wire") {
       drawStatus([
         "Tipo: cable",
-        "Color editable",
-        "Elige un color de la paleta",
+        selection.hasPendingChanges ? "Hay cambios pendientes" : "Sin cambios pendientes",
+        "Elige color y presiona Aceptar",
       ])
       return
     }
@@ -408,5 +429,6 @@ export function createEditPanel({
     resistorButtons,
     colorButtons,
     hueButtons,
+    acceptButton,
   }
 }

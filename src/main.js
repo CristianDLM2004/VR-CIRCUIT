@@ -109,6 +109,9 @@ function namedColorToHex(name, fallback = 0xffffff) {
     cyan: 0x00d8ff,
     white: 0xffffff,
     black: 0x111111,
+    brown: 0x8b4513,
+    gray: 0x95a5a6,
+    gold: 0xd4af37,
   }
 
   if (n in map) return map[n]
@@ -194,121 +197,266 @@ function getHeldComponentId() {
   return null
 }
 
+function getHeldComponent() {
+  const id = getHeldComponentId()
+  return id ? getComponentById(id) : null
+}
+
+function getHeldMesh() {
+  const heldId = getHeldComponentId()
+  return heldId ? stateSyncSystem.getMeshById(heldId) : null
+}
+
+function getEditingTargetComponent() {
+  const held = getHeldComponent()
+  if (held && (held.type === "led" || held.type === "wire" || held.type === "resistor")) {
+    return held
+  }
+  return getSelectedComponent()
+}
+
+function getEditingTargetMesh() {
+  const heldComp = getHeldComponent()
+  if (heldComp && (heldComp.type === "led" || heldComp.type === "wire" || heldComp.type === "resistor")) {
+    return getHeldMesh()
+  }
+
+  const selected = getSelectedComponent()
+  if (!selected) return null
+  return stateSyncSystem.getMeshById(selected.id)
+}
+
+function applyLedColorToMesh(mesh, hex) {
+  if (!mesh) return
+  const safeHex = normalizeColorValue(hex, 0xff3b3b)
+
+  mesh.userData.meta = { ...(mesh.userData.meta || {}), color: safeHex }
+  mesh.userData.baseLedColor = safeHex
+
+  mesh.traverse((child) => {
+    if (!child.isMesh) return
+    if (child.name !== "LEDBody" && child.name !== "LEDDome") return
+
+    if (child.material?.color) child.material.color.setHex(safeHex)
+    if ("emissive" in child.material) {
+      child.material.emissive.setHex(0x000000)
+      child.material.emissiveIntensity = 0
+    }
+  })
+}
+
+function applyWireColorToMesh(mesh, hex) {
+  if (!mesh?.userData?.rebuildWireGeometry) return
+  const safeHex = normalizeColorValue(hex, 0x111111)
+
+  mesh.userData.wireColor = safeHex
+  mesh.userData.meta = { ...(mesh.userData.meta || {}), color: safeHex }
+
+  const points = Array.isArray(mesh.userData.fixedPoints)
+    ? mesh.userData.fixedPoints.map((p) => p.clone())
+    : []
+
+  if (points.length >= 2) {
+    mesh.userData.rebuildWireGeometry(points)
+  }
+}
+
+function applyResistorBandsToMesh(mesh, resistance) {
+  if (!mesh) return
+
+  const safeResistance = Math.max(10, Math.round(Number(resistance) || 220))
+  const bands = resistanceToBands(safeResistance).map((c) => namedColorToHex(c, 0x000000))
+
+  mesh.userData.meta = {
+    ...(mesh.userData.meta || {}),
+    resistance: safeResistance,
+    bands: resistanceToBands(safeResistance),
+  }
+
+  for (let i = 0; i < 4; i++) {
+    const bandMesh = mesh.children.find((c) => c.name === `ResistorBand_${i}`)
+    if (bandMesh?.material?.color) {
+      bandMesh.material.color.setHex(bands[i] ?? 0x000000)
+    }
+  }
+}
+
+// ---------------------------
+// Selección y edición
+// ---------------------------
 let selectedComponentId = null
+let pendingColorHex = null
+let pendingResistanceValue = null
 
 function getSelectedComponent() {
   return selectedComponentId ? getComponentById(selectedComponentId) : null
 }
 
+function clearPendingChanges() {
+  pendingColorHex = null
+  pendingResistanceValue = null
+}
+
 function selectComponent(id) {
   selectedComponentId = id || null
+  clearPendingChanges()
   refreshEditPanel()
 }
 
 function clearSelection() {
   selectedComponentId = null
+  clearPendingChanges()
   refreshEditPanel()
 }
 
 function selectHeldComponent() {
   const heldId = getHeldComponentId()
   if (!heldId) return
-  selectComponent(heldId)
+  selectedComponentId = heldId
+  clearPendingChanges()
+  refreshEditPanel()
 }
 
 function selectLastWire() {
   const wire = getLatestComponentByType("wire")
   if (!wire) return
-  selectComponent(wire.id)
+  selectedComponentId = wire.id
+  clearPendingChanges()
+  refreshEditPanel()
 }
 
 function refreshEditPanel() {
-  const comp = getSelectedComponent()
+  const comp = getEditingTargetComponent()
   if (!comp) {
     editPanelApi.updateForSelection(null)
     return
   }
 
   if (comp.type === "resistor") {
+    const currentResistance = Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
     editPanelApi.updateForSelection({
-      id: comp.id,
       type: comp.type,
-      resistance: Math.max(10, Math.round(Number(comp.meta?.resistance) || 220)),
+      resistance: currentResistance,
+      pendingResistance: pendingResistanceValue,
+      hasPendingChanges: pendingResistanceValue !== null,
     })
     return
   }
 
   if (comp.type === "led") {
     editPanelApi.updateForSelection({
-      id: comp.id,
       type: comp.type,
       color: normalizeColorValue(comp.meta?.color, 0xff3b3b),
+      pendingColor: pendingColorHex,
+      hasPendingChanges: pendingColorHex !== null,
     })
     return
   }
 
   if (comp.type === "wire") {
     editPanelApi.updateForSelection({
-      id: comp.id,
       type: comp.type,
       color: normalizeColorValue(comp.meta?.color, 0x111111),
+      pendingColor: pendingColorHex,
+      hasPendingChanges: pendingColorHex !== null,
     })
     return
   }
 
   editPanelApi.updateForSelection({
-    id: comp.id,
     type: comp.type,
+    hasPendingChanges: false,
   })
 }
 
-function applyResistanceDelta(delta) {
-  const comp = getSelectedComponent()
+function queueResistanceDelta(delta) {
+  let comp = getEditingTargetComponent()
+
+  if (!comp) {
+    const held = getHeldComponent()
+    if (held?.type === "resistor") {
+      selectedComponentId = held.id
+      comp = held
+    }
+  }
+
   if (!comp || comp.type !== "resistor") return
 
-  const current = Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
-  const next = Math.max(10, current + delta)
-
-  appState.updateComponent(comp.id, {
-    meta: {
-      ...comp.meta,
-      resistance: next,
-      bands: resistanceToBands(next),
-    },
-  })
-
-  refreshComponentMeshById(comp.id)
+  const base = pendingResistanceValue ?? Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
+  pendingResistanceValue = Math.max(10, base + delta)
   refreshEditPanel()
 }
 
-function applyColorToSelected(hex) {
-  const comp = getSelectedComponent()
-  if (!comp) return
+function queueColorPicked(hex) {
+  let comp = getEditingTargetComponent()
 
-  if (comp.type === "led") {
+  if (!comp) {
+    const held = getHeldComponent()
+    if (held && (held.type === "led" || held.type === "wire")) {
+      selectedComponentId = held.id
+      comp = held
+    }
+  }
+
+  if (!comp) return
+  if (comp.type !== "led" && comp.type !== "wire") return
+
+  pendingColorHex = normalizeColorValue(hex, comp.type === "led" ? 0xff3b3b : 0x111111)
+  refreshEditPanel()
+}
+
+function applyPendingChanges() {
+  const comp = getEditingTargetComponent()
+  const mesh = getEditingTargetMesh()
+  if (!comp || !mesh) return
+
+  if (comp.type === "led" && pendingColorHex !== null) {
     appState.updateComponent(comp.id, {
       meta: {
         ...comp.meta,
-        color: hex >>> 0,
+        color: pendingColorHex,
       },
     })
-    refreshComponentMeshById(comp.id)
+    applyLedColorToMesh(mesh, pendingColorHex)
+    pendingColorHex = null
     refreshEditPanel()
     return
   }
 
-  if (comp.type === "wire") {
+  if (comp.type === "wire" && pendingColorHex !== null) {
     appState.updateComponent(comp.id, {
       meta: {
         ...comp.meta,
-        color: hex >>> 0,
+        color: pendingColorHex,
       },
     })
-    refreshComponentMeshById(comp.id)
+    applyWireColorToMesh(mesh, pendingColorHex)
+    pendingColorHex = null
+    refreshEditPanel()
+    return
+  }
+
+  if (comp.type === "resistor" && pendingResistanceValue !== null) {
+    const next = Math.max(10, Math.round(Number(pendingResistanceValue) || 220))
+    const nextBands = resistanceToBands(next)
+
+    appState.updateComponent(comp.id, {
+      meta: {
+        ...comp.meta,
+        resistance: next,
+        bands: nextBands,
+      },
+    })
+
+    applyResistorBandsToMesh(mesh, next)
+    pendingResistanceValue = null
     refreshEditPanel()
   }
 }
 
+// ---------------------------
+// Crear componentes
+// ---------------------------
 function addBattery5V() {
   const id = genId("battery5v")
   const p = protoboard.position.clone(); p.y += 0.15; p.z += 0.12
@@ -505,8 +653,9 @@ const editPanelApi = createEditPanel({
   onSelectHeld: selectHeldComponent,
   onSelectLastWire: selectLastWire,
   onClearSelection: clearSelection,
-  onResistanceDelta: applyResistanceDelta,
-  onColorPicked: applyColorToSelected,
+  onResistanceDelta: queueResistanceDelta,
+  onColorPicked: queueColorPicked,
+  onAcceptChanges: applyPendingChanges,
 })
 
 scene.add(editPanelApi.group)
@@ -619,6 +768,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "x") clearScene()
   if (k === "h") selectHeldComponent()
   if (k === "j") selectLastWire()
+  if (k === "enter") applyPendingChanges()
 })
 
 // ---------------------------
@@ -638,7 +788,9 @@ function detectNewComponents() {
     nextIds.add(comp.id)
     if (!knownComponentIds.has(comp.id)) {
       if (comp.type === "wire") {
-        selectComponent(comp.id)
+        selectedComponentId = comp.id
+        clearPendingChanges()
+        refreshEditPanel()
       }
     }
   }
@@ -664,6 +816,7 @@ renderer.setAnimationLoop(() => {
 
   detectNewComponents()
   validateSelection()
+  refreshEditPanel()
 
   sceneManager.render()
 })
