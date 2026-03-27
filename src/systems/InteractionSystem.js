@@ -77,8 +77,10 @@ export class InteractionSystem {
     this.wireHoverMaxDist = 0.055
     this.wireHoverReleaseDist = 0.085
     this.wireEndpointHoverMaxDist = 0.020
-    this.wirePinchStartDist = 0.016
-    this.wirePinchEndDist = 0.030
+    this.wirePinchStartDist = 0.014
+    this.wirePinchEndDist = 0.028
+    this.wirePinchConfirmMs = 95
+    this.wireEndpointHoverBias = 0.010
 
     this.wireControllerHoverPerpMaxDist = 0.022
     this.wireControllerEndpointPerpMaxDist = 0.026
@@ -1025,6 +1027,30 @@ export class InteractionSystem {
       : null
   }
 
+  getWireHoverEffectiveDistance(candidate, type) {
+    if (!candidate) return Infinity
+    const bias = type === "endpoint" ? this.wireEndpointHoverBias : 0
+    return candidate.distance - bias
+  }
+
+  pickBetterWireHoverCandidate(best, bestType, candidate, candidateType) {
+    if (!candidate) return { best, bestType }
+    if (!best) return { best: candidate, bestType: candidateType }
+
+    const nextScore = this.getWireHoverEffectiveDistance(candidate, candidateType)
+    const prevScore = this.getWireHoverEffectiveDistance(best, bestType)
+
+    if (nextScore < prevScore - 0.0005) {
+      return { best: candidate, bestType: candidateType }
+    }
+
+    if (Math.abs(nextScore - prevScore) <= 0.0005 && candidate.distance < best.distance) {
+      return { best: candidate, bestType: candidateType }
+    }
+
+    return { best, bestType }
+  }
+
   updateWireHover() {
     if (this.toolMode !== "wire") {
       this.clearWireHoverAnchor()
@@ -1043,8 +1069,9 @@ export class InteractionSystem {
         let candidateType = null
 
         if (ac && ep) {
-          candidate = ep.distance <= ac.distance ? ep : ac
-          candidateType = candidate === ep ? "endpoint" : "anchor"
+          const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
+          candidate = scored.best
+          candidateType = scored.bestType
         } else if (ep) {
           candidate = ep
           candidateType = "endpoint"
@@ -1053,9 +1080,10 @@ export class InteractionSystem {
           candidateType = "anchor"
         }
 
-        if (candidate && (!best || candidate.distance < best.distance)) {
-          best = candidate
-          bestType = candidateType
+        if (candidate) {
+          const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
+          best = scored.best
+          bestType = scored.bestType
         }
       }
 
@@ -1067,8 +1095,9 @@ export class InteractionSystem {
         let candidateType = null
 
         if (ac && ep) {
-          candidate = ep.distance <= ac.distance ? ep : ac
-          candidateType = candidate === ep ? "endpoint" : "anchor"
+          const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
+          candidate = scored.best
+          candidateType = scored.bestType
         } else if (ep) {
           candidate = ep
           candidateType = "endpoint"
@@ -1077,9 +1106,10 @@ export class InteractionSystem {
           candidateType = "anchor"
         }
 
-        if (candidate && (!best || candidate.distance < best.distance)) {
-          best = candidate
-          bestType = candidateType
+        if (candidate) {
+          const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
+          best = scored.best
+          bestType = scored.bestType
         }
       }
     } else {
@@ -2157,6 +2187,7 @@ export class InteractionSystem {
         h.pinchArmed = true
         h.openPinchMs = 0
         h.lostTrackingMs = 0
+        h.wirePinchCloseMs = 0
         this.stopHoldTracking(h.hold)
         continue
       }
@@ -2208,14 +2239,27 @@ export class InteractionSystem {
         if (tt && it) wd = tt.distanceTo(it)
         const close = wd <= this.wirePinchStartDist
         const open = wd >= this.wirePinchEndDist
+
         if (open) {
           h.isPinching = false
           h.pinchArmed = true
           h.wirePinchCloseMs = 0
         }
-        const canAcc = close && h.pinchArmed && !h.isPinching && (((hAH || hEH) && hoveringThisHand) || hasDH)
+
+        const canAcc =
+          close &&
+          h.pinchArmed &&
+          !h.isPinching &&
+          (((hAH || hEH) && hoveringThisHand) || hasDH)
+
         h.wirePinchCloseMs = canAcc ? h.wirePinchCloseMs + dtMs : 0
-        if (h.pinchArmed && !h.isPinching && canAcc) {
+
+        if (
+          h.pinchArmed &&
+          !h.isPinching &&
+          canAcc &&
+          h.wirePinchCloseMs >= this.wirePinchConfirmMs
+        ) {
           h.wirePinchCloseMs = 0
           this.onHandPinchStart(h)
         }
