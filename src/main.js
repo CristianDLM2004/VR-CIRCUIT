@@ -9,6 +9,7 @@ import { ElectricalSystem } from "./systems/ElectricalSystem.js"
 import { createProtoboard } from "./components/Protoboard.js"
 import { HoleSystem } from "./systems/HoleSystem.js"
 import { createVRPanel } from "./components/VRPanel.js"
+import { createEditPanel } from "./components/EditPanel.js"
 
 import { TrashSystem } from "./systems/TrashSystem.js"
 import { PhysicsSystem } from "./systems/PhysicsSystem.js"
@@ -18,9 +19,9 @@ const { scene, camera, renderer } = sceneManager
 
 new VRManager(renderer)
 
-const appState          = new AppState()
+const appState = new AppState()
 const interactionSystem = new InteractionSystem(sceneManager, appState)
-const stateSyncSystem   = new StateSyncSystem(scene, appState, interactionSystem)
+const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem)
 interactionSystem.setStateSyncSystem(stateSyncSystem)
 
 // ---------------------------
@@ -86,50 +87,295 @@ for (const hole of holeSystem.holes) {
 const electricalSystem = new ElectricalSystem(appState, stateSyncSystem, holeSystem)
 
 // ---------------------------
-// Helpers: IDs y acciones
+// Helpers base
 // ---------------------------
 function genId(prefix = "cmp") {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
 }
 
+function namedColorToHex(name, fallback = 0xffffff) {
+  if (typeof name !== "string") return fallback
+  const n = name.trim().toLowerCase()
+
+  const map = {
+    red: 0xff3b3b,
+    green: 0x2ecc71,
+    blue: 0x3498db,
+    yellow: 0xf1c40f,
+    orange: 0xe67e22,
+    purple: 0x9b59b6,
+    magenta: 0xff00ff,
+    cyan: 0x00d8ff,
+    white: 0xffffff,
+    black: 0x111111,
+  }
+
+  if (n in map) return map[n]
+  if (n.startsWith("#")) {
+    const parsed = Number.parseInt(n.slice(1), 16)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return fallback
+}
+
+function normalizeColorValue(value, fallback = 0xffffff) {
+  if (typeof value === "number" && Number.isFinite(value)) return value >>> 0
+  if (typeof value === "string") return namedColorToHex(value, fallback)
+  return fallback
+}
+
+function resistanceToBands(value) {
+  let ohms = Math.max(10, Math.round(Number(value) || 220))
+  const colorDigits = [
+    "black",
+    "brown",
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "blue",
+    "purple",
+    "gray",
+    "white",
+  ]
+  const s = String(ohms)
+  const d1 = Number(s[0] || 2)
+  const d2 = Number(s[1] || 2)
+  const mult = Math.max(0, s.length - 2)
+  return [colorDigits[d1], colorDigits[d2], colorDigits[mult] || "black", "gold"]
+}
+
+function getComponentById(id) {
+  return appState.components.find((c) => c.id === id) || null
+}
+
+function getLatestComponentByType(type) {
+  for (let i = appState.components.length - 1; i >= 0; i--) {
+    if (appState.components[i].type === type) return appState.components[i]
+  }
+  return null
+}
+
+function syncSpecialRefs(mesh) {
+  if (!mesh) return
+  if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent) {
+    mesh.userData._appStateRef = appState
+  }
+}
+
+function refreshComponentMeshById(id) {
+  const data = getComponentById(id)
+  if (!data) return null
+  stateSyncSystem.removeMeshById(id)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh)
+  return mesh
+}
+
+let selectedComponentId = null
+
+function getSelectedComponent() {
+  return selectedComponentId ? getComponentById(selectedComponentId) : null
+}
+
+function selectComponent(id) {
+  selectedComponentId = id || null
+  refreshEditPanel()
+}
+
+function clearSelection() {
+  selectedComponentId = null
+  refreshEditPanel()
+}
+
+function selectHoveredComponent() {
+  const hovered = interactionSystem.hovered
+  if (!hovered?.userData?.componentId) return
+  selectComponent(hovered.userData.componentId)
+}
+
+function selectLastWire() {
+  const wire = getLatestComponentByType("wire")
+  if (!wire) return
+  selectComponent(wire.id)
+}
+
+function refreshEditPanel() {
+  const comp = getSelectedComponent()
+  if (!comp) {
+    editPanelApi.updateForSelection(null)
+    return
+  }
+
+  if (comp.type === "resistor") {
+    editPanelApi.updateForSelection({
+      id: comp.id,
+      type: comp.type,
+      resistance: Math.max(10, Math.round(Number(comp.meta?.resistance) || 220)),
+    })
+    return
+  }
+
+  if (comp.type === "led") {
+    editPanelApi.updateForSelection({
+      id: comp.id,
+      type: comp.type,
+      color: normalizeColorValue(comp.meta?.color, 0xff3b3b),
+    })
+    return
+  }
+
+  if (comp.type === "wire") {
+    editPanelApi.updateForSelection({
+      id: comp.id,
+      type: comp.type,
+      color: normalizeColorValue(comp.meta?.color, 0x111111),
+    })
+    return
+  }
+
+  editPanelApi.updateForSelection({
+    id: comp.id,
+    type: comp.type,
+  })
+}
+
+function applyResistanceDelta(delta) {
+  const comp = getSelectedComponent()
+  if (!comp || comp.type !== "resistor") return
+
+  const current = Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
+  const next = Math.max(10, current + delta)
+
+  appState.updateComponent(comp.id, {
+    meta: {
+      ...comp.meta,
+      resistance: next,
+      bands: resistanceToBands(next),
+    },
+  })
+
+  refreshComponentMeshById(comp.id)
+  refreshEditPanel()
+}
+
+function applyColorToSelected(hex) {
+  const comp = getSelectedComponent()
+  if (!comp) return
+
+  if (comp.type === "led") {
+    appState.updateComponent(comp.id, {
+      meta: {
+        ...comp.meta,
+        color: hex >>> 0,
+      },
+    })
+    refreshComponentMeshById(comp.id)
+    refreshEditPanel()
+    return
+  }
+
+  if (comp.type === "wire") {
+    appState.updateComponent(comp.id, {
+      meta: {
+        ...comp.meta,
+        color: hex >>> 0,
+      },
+    })
+    refreshComponentMeshById(comp.id)
+    refreshEditPanel()
+  }
+}
+
 function addBattery5V() {
   const id = genId("battery5v")
-  const p  = protoboard.position.clone(); p.y += 0.15; p.z += 0.12
-  appState.addComponent({ id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { voltage: 5 } })
-  stateSyncSystem.addMeshFromComponent({ id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { voltage: 5 } })
+  const p = protoboard.position.clone(); p.y += 0.15; p.z += 0.12
+
+  const data = {
+    id,
+    type: "battery5v",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: { voltage: 5 },
+  }
+
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh)
+  selectComponent(id)
 }
 
 function addLed() {
   const id = genId("led")
-  const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.12
-  const data = { id, type: "led", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { color: "red" } }
-  appState.addComponent(data); stateSyncSystem.addMeshFromComponent(data)
+  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.12
+
+  const data = {
+    id,
+    type: "led",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: { color: 0xff3b3b },
+  }
+
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh)
+  selectComponent(id)
 }
 
 function addResistor() {
   const id = genId("resistor")
-  const p  = protoboard.position.clone(); p.y += 0.32; p.z += 0.12
-  const data = { id, type: "resistor", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { resistance: 220, bands: ["red","red","brown","gold"] } }
-  appState.addComponent(data); stateSyncSystem.addMeshFromComponent(data)
+  const p = protoboard.position.clone(); p.y += 0.32; p.z += 0.12
+
+  const resistance = 220
+  const data = {
+    id,
+    type: "resistor",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {
+      resistance,
+      bands: resistanceToBands(resistance),
+    },
+  }
+
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh)
+  selectComponent(id)
 }
 
 function addButton() {
   const id = genId("button")
-  const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.20
-  const data = { id, type: "button", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: {} }
+  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.20
+
+  const data = {
+    id,
+    type: "button",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: {},
+  }
+
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
-  if (mesh) mesh.userData._appStateRef = appState
+  syncSpecialRefs(mesh)
+  selectComponent(id)
 }
 
 function addSwitch() {
   const id = genId("switch")
-  const p  = protoboard.position.clone(); p.y += 0.25; p.z += 0.28
-  const data = { id, type: "switch", transform: { x: p.x, y: p.y, z: p.z, qx:0, qy:0, qz:0, qw:1 }, meta: { switchState: false } }
+  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.28
+
+  const data = {
+    id,
+    type: "switch",
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta: { switchState: false },
+  }
+
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
-  if (mesh) mesh.userData._appStateRef = appState
+  syncSpecialRefs(mesh)
+  selectComponent(id)
 }
 
 function saveState() {
@@ -140,14 +386,17 @@ function saveState() {
 function loadState() {
   const raw = localStorage.getItem("vr_circuit_state")
   if (!raw) return console.log("⚠️ No hay estado guardado")
+
   appState.loadFromObject(JSON.parse(raw))
   physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
+
   for (const mesh of stateSyncSystem.meshById.values()) {
-    if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent) {
-      mesh.userData._appStateRef = appState
-    }
+    syncSpecialRefs(mesh)
   }
+
+  clearSelection()
+  knownComponentIds = new Set(appState.components.map((c) => c.id))
   console.log("✅ Estado cargado y reconstruido")
 }
 
@@ -156,6 +405,8 @@ function clearScene() {
   appState.connections = []
   physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
+  clearSelection()
+  knownComponentIds = new Set()
   console.log("🧹 Escena limpiada")
 }
 
@@ -183,7 +434,6 @@ function toggleAppMode() {
   interactionSystem.setAppMode(isSimMode ? "sim" : "edit")
   setSimModeVisualFn?.(isSimMode)
 
-  // En modo simulación desactivar el cable si estaba activo
   if (isSimMode && wireModeActive) {
     wireModeActive = false
     interactionSystem.setToolMode("grab")
@@ -194,27 +444,27 @@ function toggleAppMode() {
 }
 
 // ---------------------------
-// Panel 3D (VR UI)
+// Panel 3D principal
 // ---------------------------
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
-const panelRotY     = -Math.PI / 6
+const panelRotY = -Math.PI / 6
 
 const { group: vrPanel, buttons: panelButtons, setWireModeVisual, setSimModeVisual } = createVRPanel({
-  position:   panelWorldPos,
-  rotationY:  panelRotY,
-  onAdd:      addBattery5V,
-  onLed:      addLed,
+  position: panelWorldPos,
+  rotationY: panelRotY,
+  onAdd: addBattery5V,
+  onLed: addLed,
   onResistor: addResistor,
-  onButton:   addButton,
-  onSwitch:   addSwitch,
-  onWire:     toggleWireMode,
-  onSave:     saveState,
-  onLoad:     loadState,
-  onMode:     toggleAppMode,
+  onButton: addButton,
+  onSwitch: addSwitch,
+  onWire: toggleWireMode,
+  onSave: saveState,
+  onLoad: loadState,
+  onMode: toggleAppMode,
 })
 
 setWireModeVisualFn = setWireModeVisual
-setSimModeVisualFn  = setSimModeVisual
+setSimModeVisualFn = setSimModeVisual
 
 scene.add(vrPanel)
 for (const b of panelButtons) interactionSystem.register(b)
@@ -223,6 +473,29 @@ vrPanel.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
     if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
+  }
+})
+
+// ---------------------------
+// Panel de edición
+// ---------------------------
+const editPanelApi = createEditPanel({
+  position: new THREE.Vector3(-0.62, 1.15, -0.48),
+  rotationY: Math.PI / 6,
+  onSelectHovered: selectHoveredComponent,
+  onSelectLastWire: selectLastWire,
+  onClearSelection: clearSelection,
+  onResistanceDelta: applyResistanceDelta,
+  onColorPicked: applyColorToSelected,
+})
+
+scene.add(editPanelApi.group)
+for (const b of editPanelApi.buttons) interactionSystem.register(b)
+
+editPanelApi.group.traverse((o) => {
+  if (o.isMesh && o.material) {
+    o.material = o.material.clone()
+    if ("emissive" in o.material) o.material.emissive.setHex(0x202020)
   }
 })
 
@@ -239,20 +512,25 @@ function createClearSceneButton({ position, rotationY, onPress }) {
     new THREE.CylinderGeometry(0.09, 0.11, 0.08, 20),
     new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
   )
-  base.position.y = 0.04; group.add(base)
+  base.position.y = 0.04
+  group.add(base)
 
   const button = new THREE.Mesh(
     new THREE.CylinderGeometry(0.07, 0.07, 0.035, 24),
     new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.55 })
   )
-  button.name = "BtnClearScene"; button.position.y = 0.095
-  button.userData.isUI = true; button.userData.uiAction = "clear-scene"
-  button.userData._lastPressMs = 0; button.userData._cooldownMs = 500
+  button.name = "BtnClearScene"
+  button.position.y = 0.095
+  button.userData.isUI = true
+  button.userData.uiAction = "clear-scene"
+  button.userData._lastPressMs = 0
+  button.userData._cooldownMs = 500
   button.userData.onPress = () => {
     const now = performance.now()
     if (now - button.userData._lastPressMs < button.userData._cooldownMs) return
     button.userData._lastPressMs = now
-    button.scale.set(0.9, 0.9, 0.9); setTimeout(() => button.scale.set(1,1,1), 100)
+    button.scale.set(0.9, 0.9, 0.9)
+    setTimeout(() => button.scale.set(1, 1, 1), 100)
     onPress()
   }
   group.add(button)
@@ -260,17 +538,19 @@ function createClearSceneButton({ position, rotationY, onPress }) {
   const iconMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
   const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
   const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
-  bar1.rotation.z = Math.PI / 4; bar1.position.y = 0.02
-  bar2.rotation.z = -Math.PI / 4; bar2.position.y = 0.02
+  bar1.rotation.z = Math.PI / 4
+  bar1.position.y = 0.02
+  bar2.rotation.z = -Math.PI / 4
+  bar2.position.y = 0.02
   button.add(bar1, bar2)
 
   return { group, button }
 }
 
 const { group: clearSceneButtonGroup, button: clearSceneButton } = createClearSceneButton({
-  position:  new THREE.Vector3(0.95, 0.82, -0.25),
+  position: new THREE.Vector3(0.95, 0.82, -0.25),
   rotationY: -Math.PI / 5,
-  onPress:   clearScene,
+  onPress: clearScene,
 })
 scene.add(clearSceneButtonGroup)
 interactionSystem.register(clearSceneButton)
@@ -286,7 +566,7 @@ clearSceneButtonGroup.traverse((o) => {
 // Trash System
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
-const trashBin    = trashSystem.createTrashBin({ parent: scene, position: new THREE.Vector3(-0.55, 0.0, -0.10) })
+const trashBin = trashSystem.createTrashBin({ parent: scene, position: new THREE.Vector3(-0.55, 0.0, -0.10) })
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -317,12 +597,40 @@ window.addEventListener("keydown", (e) => {
   if (k === "s") saveState()
   if (k === "l") loadState()
   if (k === "x") clearScene()
+  if (k === "h") selectHoveredComponent()
+  if (k === "j") selectLastWire()
 })
 
 // ---------------------------
 // Init
 // ---------------------------
 stateSyncSystem.rebuildFromState()
+for (const mesh of stateSyncSystem.meshById.values()) {
+  syncSpecialRefs(mesh)
+}
+refreshEditPanel()
+
+let knownComponentIds = new Set(appState.components.map((c) => c.id))
+
+function detectNewComponents() {
+  const nextIds = new Set()
+  for (const comp of appState.components) {
+    nextIds.add(comp.id)
+    if (!knownComponentIds.has(comp.id)) {
+      if (comp.type === "wire") {
+        selectComponent(comp.id)
+      }
+    }
+  }
+  knownComponentIds = nextIds
+}
+
+function validateSelection() {
+  if (!selectedComponentId) return
+  if (!getComponentById(selectedComponentId)) {
+    clearSelection()
+  }
+}
 
 // ---------------------------
 // Loop
@@ -333,5 +641,9 @@ renderer.setAnimationLoop(() => {
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
   electricalSystem.update(dt)
+
+  detectNewComponents()
+  validateSelection()
+
   sceneManager.render()
 })

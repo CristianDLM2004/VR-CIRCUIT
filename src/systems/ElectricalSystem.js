@@ -2,24 +2,72 @@
  * ElectricalSystem.js
  *
  * Simulación eléctrica de nivel medio para VR-CIRCUIT.
- *
- * Corrección principal de circuitos aislados:
- * - El LED NO crea arista en el grafo general.
- *   Esto evita que el BFS "cruce" el LED como conductor y mezcle circuitos.
- * - El BFS bloquea explícitamente los nodos del otro extremo del LED
- *   y de la batería contraria, forzando que cada camino sea independiente.
- * - Dos circuitos con LEDs distintos no se influyen mutuamente.
  */
+
+function namedColorToHex(name, fallback = 0xff3b3b) {
+  if (typeof name !== "string") return fallback
+  const n = name.trim().toLowerCase()
+
+  const map = {
+    red: 0xff3b3b,
+    green: 0x2ecc71,
+    blue: 0x3498db,
+    yellow: 0xf1c40f,
+    orange: 0xe67e22,
+    purple: 0x9b59b6,
+    magenta: 0xff00ff,
+    cyan: 0x00d8ff,
+    white: 0xffffff,
+    black: 0x111111,
+  }
+
+  if (n in map) return map[n]
+  if (n.startsWith("#")) {
+    const parsed = Number.parseInt(n.slice(1), 16)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return fallback
+}
+
+function normalizeColorValue(value, fallback = 0xff3b3b) {
+  if (typeof value === "number" && Number.isFinite(value)) return value >>> 0
+  if (typeof value === "string") return namedColorToHex(value, fallback)
+  return fallback
+}
+
+function mixHex(a, b, t) {
+  const ar = (a >> 16) & 255
+  const ag = (a >> 8) & 255
+  const ab = a & 255
+
+  const br = (b >> 16) & 255
+  const bg = (b >> 8) & 255
+  const bb = b & 255
+
+  const rr = Math.round(ar + (br - ar) * t)
+  const rg = Math.round(ag + (bg - ag) * t)
+  const rb = Math.round(ab + (bb - ab) * t)
+
+  return ((rr & 255) << 16) | ((rg & 255) << 8) | (rb & 255)
+}
+
+function boostHex(hex, factor = 1.0) {
+  const r = Math.min(255, Math.round(((hex >> 16) & 255) * factor))
+  const g = Math.min(255, Math.round(((hex >> 8) & 255) * factor))
+  const b = Math.min(255, Math.round((hex & 255) * factor))
+  return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
+}
 
 export class ElectricalSystem {
   constructor(appState, stateSyncSystem, holeSystem) {
-    this.appState        = appState
+    this.appState = appState
     this.stateSyncSystem = stateSyncSystem
-    this.holeSystem      = holeSystem
+    this.holeSystem = holeSystem
 
     this._blinkIntervalMs = 400
-    this._blinkAccumMs    = 0
-    this._blinkOn         = false
+    this._blinkAccumMs = 0
+    this._blinkOn = false
   }
 
   update(dt) {
@@ -34,9 +82,9 @@ export class ElectricalSystem {
   }
 
   _buildGraph() {
-    const edges     = new Map()
+    const edges = new Map()
     const batteries = []
-    const leds      = []
+    const leds = []
     const resistors = []
 
     const addEdge = (a, b) => {
@@ -67,15 +115,18 @@ export class ElectricalSystem {
 
     const anchorToNode = (anchor) => {
       if (!anchor) return null
+
       if (anchor.kind === "hole" && anchor.holeId) {
         const gk = holeGroupMap.get(anchor.holeId)
         return gk ? `group:${gk}` : `hole:${anchor.holeId}`
       }
+
       if (anchor.kind === "terminal" && anchor.componentId) {
         return `terminal:${anchor.componentId}:${anchor.id}`
       }
+
       if (anchor.kind === "pin" && anchor.componentId) {
-        const comp = this.appState.components.find(c => c.id === anchor.componentId)
+        const comp = this.appState.components.find((c) => c.id === anchor.componentId)
         if (comp?.inserted && comp?.pinConnections) {
           const holeId = comp.pinConnections[anchor.id]
           if (holeId) {
@@ -85,11 +136,11 @@ export class ElectricalSystem {
         }
         return `pin:${anchor.componentId}:${anchor.id}`
       }
+
       return null
     }
 
     for (const comp of this.appState.components) {
-
       if (comp.type === "battery5v") {
         const posNode = `terminal:${comp.id}:positive`
         const negNode = `terminal:${comp.id}:negative`
@@ -99,17 +150,15 @@ export class ElectricalSystem {
       }
 
       if (comp.type === "led" && comp.inserted && comp.pinConnections) {
-        const anodeNode   = pinToNode(comp, "anode")
+        const anodeNode = pinToNode(comp, "anode")
         const cathodeNode = pinToNode(comp, "cathode")
         if (anodeNode && cathodeNode) {
-          // ✅ LED NO crea arista — solo se registra para evaluación
-          // Si creara arista, el BFS cruzaría el LED y conectaría circuitos distintos
           leds.push({ anodeNode, cathodeNode, componentId: comp.id })
         }
       }
 
       if (comp.type === "resistor" && comp.inserted && comp.pinConnections) {
-        const leftNode  = pinToNode(comp, "left")
+        const leftNode = pinToNode(comp, "left")
         const rightNode = pinToNode(comp, "right")
         if (leftNode && rightNode) {
           resistors.push({ leftNode, rightNode, componentId: comp.id })
@@ -118,7 +167,7 @@ export class ElectricalSystem {
       }
 
       if (comp.type === "button" && comp.inserted && comp.pinConnections) {
-        const mesh      = this.stateSyncSystem?.getMeshById(comp.id)
+        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
         const isPressed = mesh?.userData?.buttonState === true
         if (isPressed) {
           const nA = pinToNode(comp, "pin_a")
@@ -128,7 +177,7 @@ export class ElectricalSystem {
       }
 
       if (comp.type === "switch" && comp.inserted && comp.pinConnections) {
-        const mesh     = this.stateSyncSystem?.getMeshById(comp.id)
+        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
         const isClosed = mesh?.userData?.switchState === true
         if (isClosed) {
           const nA = pinToNode(comp, "pin_a")
@@ -153,18 +202,6 @@ export class ElectricalSystem {
     }
   }
 
-  /**
-   * Evalúa si UN LED específico debe encenderse.
-   *
-   * Camino 1: batería(+) → LED(ánodo)
-   *   Bloqueamos: LED(cátodo) y batería(-) para no cruzar el LED ni cerrar el loop prematuramente
-   *
-   * Camino 2: LED(cátodo) → batería(-)
-   *   Bloqueamos: LED(ánodo) y batería(+) por la misma razón
-   *
-   * Si ambos caminos existen → circuito cerrado para ESTE LED específico.
-   * Otro LED en otro circuito tiene sus propios nodos de ánodo/cátodo → no se mezcla.
-   */
   _evaluateLED(led, graph) {
     const { edges, batteries, resistors } = graph
 
@@ -194,11 +231,6 @@ export class ElectricalSystem {
     return "off"
   }
 
-  /**
-   * BFS desde startNode hasta targetNode.
-   * blockedNodes: Set — no se puede pasar por ellos (excepto el propio targetNode).
-   * Registra si el camino pasó por algún nodo de resistencia.
-   */
   _bfsWithResistorCheck(startNode, targetNode, blockedNodes, edges, resistors) {
     if (startNode === targetNode) return { reached: true, passedResistor: false }
     if (blockedNodes.has(startNode)) return { reached: false, passedResistor: false }
@@ -210,7 +242,7 @@ export class ElectricalSystem {
     }
 
     const visited = new Set([startNode])
-    const queue   = [[startNode, false]]
+    const queue = [[startNode, false]]
 
     while (queue.length > 0) {
       const [current, passedR] = queue.shift()
@@ -223,7 +255,9 @@ export class ElectricalSystem {
 
         const nowPassedR = passedR || resistorNodes.has(neighbor)
 
-        if (neighbor === targetNode) return { reached: true, passedResistor: nowPassedR }
+        if (neighbor === targetNode) {
+          return { reached: true, passedResistor: nowPassedR }
+        }
 
         visited.add(neighbor)
         queue.push([neighbor, nowPassedR])
@@ -237,34 +271,43 @@ export class ElectricalSystem {
     const mesh = this.stateSyncSystem?.getMeshById(componentId)
     if (!mesh) return
 
+    const baseColor = normalizeColorValue(mesh.userData?.meta?.color, mesh.userData?.baseLedColor ?? 0xff3b3b)
+    const onColor = boostHex(baseColor, 1.15)
+    const onEmissive = boostHex(baseColor, 0.95)
+    const warningColor = mixHex(baseColor, 0xffa000, 0.45)
+    const warningEmissive = mixHex(baseColor, 0xff6600, 0.65)
+
     mesh.traverse((child) => {
       if (!child.isMesh) return
       if (child.name !== "LEDBody" && child.name !== "LEDDome") return
+
       const mat = child.material
       if (!mat || !("emissive" in mat)) return
 
       if (state === "on") {
-        mat.color.setHex(0xff2222)
-        mat.emissive.setHex(0xff1111)
+        mat.color.setHex(onColor)
+        mat.emissive.setHex(onEmissive)
         mat.emissiveIntensity = 1.8
         mat.transparent = false
-        mat.opacity     = 1.0
+        mat.opacity = 1.0
       } else if (state === "no_resistor") {
         if (this._blinkOn) {
-          mat.color.setHex(0xff6600)
-          mat.emissive.setHex(0xff3300)
+          mat.color.setHex(warningColor)
+          mat.emissive.setHex(warningEmissive)
           mat.emissiveIntensity = 1.4
         } else {
-          mat.color.setHex(0xff3b3b)
+          mat.color.setHex(baseColor)
           mat.emissive.setHex(0x000000)
           mat.emissiveIntensity = 0
         }
         mat.transparent = false
+        mat.opacity = 1.0
       } else {
-        mat.color.setHex(0xff3b3b)
+        mat.color.setHex(baseColor)
         mat.emissive.setHex(0x000000)
         mat.emissiveIntensity = 0
         mat.transparent = false
+        mat.opacity = 1.0
       }
     })
   }

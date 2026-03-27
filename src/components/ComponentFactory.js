@@ -37,6 +37,89 @@ function createGrabProxyCylinder(radiusTop, radiusBottom, height, radialSegments
   return mesh
 }
 
+function namedColorToHex(name, fallback = 0xffffff) {
+  if (typeof name !== "string") return fallback
+  const n = name.trim().toLowerCase()
+
+  const map = {
+    red: 0xff3b3b,
+    green: 0x2ecc71,
+    blue: 0x3498db,
+    yellow: 0xf1c40f,
+    orange: 0xe67e22,
+    purple: 0x9b59b6,
+    magenta: 0xff00ff,
+    cyan: 0x00d8ff,
+    white: 0xffffff,
+    black: 0x111111,
+  }
+
+  if (n in map) return map[n]
+  if (n.startsWith("#")) {
+    const parsed = Number.parseInt(n.slice(1), 16)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return fallback
+}
+
+function normalizeColorValue(value, fallback = 0xffffff) {
+  if (typeof value === "number" && Number.isFinite(value)) return value >>> 0
+  if (typeof value === "string") return namedColorToHex(value, fallback)
+  return fallback
+}
+
+function digitToBandColor(d) {
+  const colors = [
+    0x000000, // 0 black
+    0x8b4513, // 1 brown
+    0xff0000, // 2 red
+    0xffa500, // 3 orange
+    0xffff00, // 4 yellow
+    0x2ecc71, // 5 green
+    0x3498db, // 6 blue
+    0x8e44ad, // 7 violet
+    0x95a5a6, // 8 gray
+    0xffffff, // 9 white
+  ]
+  return colors[Math.max(0, Math.min(9, d | 0))]
+}
+
+function multiplierToBandColor(multiplierPow) {
+  const map = {
+    0: 0x000000,
+    1: 0x8b4513,
+    2: 0xff0000,
+    3: 0xffa500,
+    4: 0xffff00,
+    5: 0x2ecc71,
+    6: 0x3498db,
+    7: 0x8e44ad,
+    8: 0x95a5a6,
+    9: 0xffffff,
+  }
+  return map[multiplierPow] ?? 0x000000
+}
+
+function getBandsFromResistance(value) {
+  let ohms = Math.max(0, Math.round(Number(value) || 220))
+
+  if (ohms < 10) ohms = 10
+  if (ohms > 99000000) ohms = 99000000
+
+  const s = String(ohms)
+  const first = Number(s[0] || 2)
+  const second = Number(s[1] || 2)
+  const multiplierPow = Math.max(0, s.length - 2)
+
+  return [
+    digitToBandColor(first),
+    digitToBandColor(second),
+    multiplierToBandColor(multiplierPow),
+    0xd4af37, // gold tolerance
+  ]
+}
+
 function setGrabMetadata(mesh, config = {}) {
   mesh.userData.grabCenter = cloneVec3(config.grabCenter)
 
@@ -149,17 +232,18 @@ export class ComponentFactory {
 
       case "led": {
         const group = new THREE.Group()
+        const ledBaseColor = normalizeColorValue(data.meta?.color, 0xff3b3b)
 
         const legMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })
         const bodyMat = new THREE.MeshStandardMaterial({
-          color: 0xff3b3b,
+          color: ledBaseColor,
           emissive: new THREE.Color(0x000000),
           emissiveIntensity: 0,
           roughness: 0.35,
           metalness: 0.0,
         })
         const domeMat = new THREE.MeshStandardMaterial({
-          color: 0xff3b3b,
+          color: ledBaseColor,
           emissive: new THREE.Color(0x000000),
           emissiveIntensity: 0,
           roughness: 0.25,
@@ -211,6 +295,7 @@ export class ComponentFactory {
           surfaceUpright: true,
         })
 
+        group.userData.baseLedColor = ledBaseColor
         mesh = group
         break
       }
@@ -225,6 +310,22 @@ export class ComponentFactory {
         body.name = "ResistorBody"
         body.rotation.z = Math.PI / 2
         body.position.y = 0.006
+
+        const resistance = Math.max(10, Math.round(Number(data.meta?.resistance) || 220))
+        const bands = Array.isArray(data.meta?.bands) && data.meta.bands.length >= 4
+          ? data.meta.bands.map((b) => normalizeColorValue(b, 0x000000))
+          : getBandsFromResistance(resistance)
+
+        const bandXs = [-0.0055, -0.0018, 0.0018, 0.0055]
+        for (let i = 0; i < 4; i++) {
+          const band = new THREE.Mesh(
+            new THREE.BoxGeometry(0.0022, 0.015, 0.015),
+            new THREE.MeshStandardMaterial({ color: bands[i] ?? 0x000000, roughness: 0.55 })
+          )
+          band.name = `ResistorBand_${i}`
+          band.position.set(bandXs[i], 0.006, 0)
+          group.add(band)
+        }
 
         const leftLead = new THREE.Mesh(
           new THREE.CylinderGeometry(0.0018, 0.0018, 0.009, 12),
@@ -256,7 +357,6 @@ export class ComponentFactory {
         rightLeg.name = "ResistorRightLeg"
         rightLeg.position.set(0.015, -0.007, 0)
 
-        // Proxy más alto y menos invasivo hacia abajo para dejar de “caer” entre patas
         const grabProxy = createGrabProxyBox(0.062, 0.022, 0.034, new THREE.Vector3(0, 0.016, 0))
 
         group.add(body, leftLead, rightLead, leftLeg, rightLeg, grabProxy)
@@ -536,7 +636,7 @@ export class ComponentFactory {
         const points = rawPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z))
         if (points.length < 2) return null
 
-        const wireColor = data.meta?.color ?? 0x111111
+        const wireColor = normalizeColorValue(data.meta?.color, 0x111111)
         const radius = 0.0038
 
         group.userData.interactable = false
@@ -637,6 +737,7 @@ export class ComponentFactory {
         { id: "anode", label: "Ánodo", localPos: new THREE.Vector3(-0.0065, -0.055, 0) },
         { id: "cathode", label: "Cátodo", localPos: new THREE.Vector3(0.0065, -0.038, 0) },
       ]
+      mesh.userData.baseLedColor = normalizeColorValue(data.meta?.color, 0xff3b3b)
     }
 
     if (data.type === "resistor") {
