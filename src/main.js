@@ -177,20 +177,43 @@ function refreshComponentMeshById(id) {
   return mesh
 }
 
+function extractHeldIdFromCandidate(candidate) {
+  if (!candidate) return null
+
+  if (candidate.userData?.componentId) return candidate.userData.componentId
+  if (candidate.userData?.heldObject?.userData?.componentId) {
+    return candidate.userData.heldObject.userData.componentId
+  }
+  if (candidate.heldObject?.userData?.componentId) {
+    return candidate.heldObject.userData.componentId
+  }
+
+  return null
+}
+
 function getHeldComponentId() {
   if (Array.isArray(interactionSystem.hands)) {
-    for (const handEntry of interactionSystem.hands) {
-      const held = handEntry?.heldObject
-      const id = held?.userData?.componentId
-      if (id) return id
+    for (const entry of interactionSystem.hands) {
+      const direct =
+        extractHeldIdFromCandidate(entry) ||
+        extractHeldIdFromCandidate(entry?.hand) ||
+        extractHeldIdFromCandidate(entry?.input) ||
+        extractHeldIdFromCandidate(entry?.object)
+
+      if (direct) return direct
     }
   }
 
   if (Array.isArray(interactionSystem.controllers)) {
-    for (const ctrlEntry of interactionSystem.controllers) {
-      const held = ctrlEntry?.heldObject
-      const id = held?.userData?.componentId
-      if (id) return id
+    for (const entry of interactionSystem.controllers) {
+      const direct =
+        extractHeldIdFromCandidate(entry) ||
+        extractHeldIdFromCandidate(entry?.controller) ||
+        extractHeldIdFromCandidate(entry?.controllerGrip) ||
+        extractHeldIdFromCandidate(entry?.input) ||
+        extractHeldIdFromCandidate(entry?.object)
+
+      if (direct) return direct
     }
   }
 
@@ -335,6 +358,7 @@ function refreshEditPanel() {
   if (comp.type === "resistor") {
     const currentResistance = Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
     editPanelApi.updateForSelection({
+      id: comp.id,
       type: comp.type,
       resistance: currentResistance,
       pendingResistance: pendingResistanceValue,
@@ -345,6 +369,7 @@ function refreshEditPanel() {
 
   if (comp.type === "led") {
     editPanelApi.updateForSelection({
+      id: comp.id,
       type: comp.type,
       color: normalizeColorValue(comp.meta?.color, 0xff3b3b),
       pendingColor: pendingColorHex,
@@ -355,6 +380,7 @@ function refreshEditPanel() {
 
   if (comp.type === "wire") {
     editPanelApi.updateForSelection({
+      id: comp.id,
       type: comp.type,
       color: normalizeColorValue(comp.meta?.color, 0x111111),
       pendingColor: pendingColorHex,
@@ -364,6 +390,7 @@ function refreshEditPanel() {
   }
 
   editPanelApi.updateForSelection({
+    id: comp.id,
     type: comp.type,
     hasPendingChanges: false,
   })

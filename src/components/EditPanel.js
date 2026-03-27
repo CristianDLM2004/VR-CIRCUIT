@@ -100,6 +100,7 @@ export function createEditPanel({
 
   let currentHue = 0
   let previewColor = 0xff3b3b
+  let lastBoundSelectionKey = null
 
   const status = makeTextTexture()
   const statusMat = new THREE.MeshBasicMaterial({ map: status.texture, transparent: false })
@@ -264,8 +265,8 @@ export function createEditPanel({
 
   const acceptButton = makeButton({
     name: "BtnEditAccept",
-    x: 0.23,
-    y: -0.25,
+    x: -0.18,
+    y: -0.255,
     w: 0.18,
     h: 0.055,
     color: 0x16a085,
@@ -318,7 +319,7 @@ export function createEditPanel({
     }
   }
 
-  const hueX = 0.26
+  const hueX = 0.29
   const hueStartY = -0.02
   for (let i = 0; i < 8; i++) {
     const hue = i / 8
@@ -327,7 +328,7 @@ export function createEditPanel({
       name: `BtnHue_${i}`,
       x: hueX,
       y: hueStartY - i * 0.039,
-      w: 0.045,
+      w: 0.040,
       h: 0.031,
       color: hex,
       label: "",
@@ -366,12 +367,17 @@ export function createEditPanel({
         ? selection.pendingColor
         : selection.color
 
-      if (typeof shownColor === "number") {
+      const bindKey = `${selection.id ?? "none"}:${shownColor ?? "none"}:${selection.pendingColor ?? "nopending"}`
+
+      if (bindKey !== lastBoundSelectionKey && typeof shownColor === "number") {
         setPreviewColor(shownColor)
         const hsv = rgbToHsv(shownColor)
         currentHue = hsv.h
         rebuildSVBoard()
+        lastBoundSelectionKey = bindKey
       }
+    } else {
+      lastBoundSelectionKey = null
     }
 
     if (!selection) {
