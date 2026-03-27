@@ -127,7 +127,7 @@ function normalizeColorValue(value, fallback = 0xffffff) {
 }
 
 function resistanceToBands(value) {
-  let ohms = Math.max(10, Math.round(Number(value) || 220))
+  const ohms = Math.max(10, Math.round(Number(value) || 220))
   const colorDigits = [
     "black",
     "brown",
@@ -174,6 +174,26 @@ function refreshComponentMeshById(id) {
   return mesh
 }
 
+function getHeldComponentId() {
+  if (Array.isArray(interactionSystem.hands)) {
+    for (const handEntry of interactionSystem.hands) {
+      const held = handEntry?.heldObject
+      const id = held?.userData?.componentId
+      if (id) return id
+    }
+  }
+
+  if (Array.isArray(interactionSystem.controllers)) {
+    for (const ctrlEntry of interactionSystem.controllers) {
+      const held = ctrlEntry?.heldObject
+      const id = held?.userData?.componentId
+      if (id) return id
+    }
+  }
+
+  return null
+}
+
 let selectedComponentId = null
 
 function getSelectedComponent() {
@@ -190,10 +210,10 @@ function clearSelection() {
   refreshEditPanel()
 }
 
-function selectHoveredComponent() {
-  const hovered = interactionSystem.hovered
-  if (!hovered?.userData?.componentId) return
-  selectComponent(hovered.userData.componentId)
+function selectHeldComponent() {
+  const heldId = getHeldComponentId()
+  if (!heldId) return
+  selectComponent(heldId)
 }
 
 function selectLastWire() {
@@ -482,7 +502,7 @@ vrPanel.traverse((o) => {
 const editPanelApi = createEditPanel({
   position: new THREE.Vector3(-0.62, 1.15, -0.48),
   rotationY: Math.PI / 6,
-  onSelectHovered: selectHoveredComponent,
+  onSelectHeld: selectHeldComponent,
   onSelectLastWire: selectLastWire,
   onClearSelection: clearSelection,
   onResistanceDelta: applyResistanceDelta,
@@ -597,7 +617,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "s") saveState()
   if (k === "l") loadState()
   if (k === "x") clearScene()
-  if (k === "h") selectHoveredComponent()
+  if (k === "h") selectHeldComponent()
   if (k === "j") selectLastWire()
 })
 

@@ -77,7 +77,7 @@ function makeTextTexture(width = 768, height = 256) {
 export function createEditPanel({
   position = new THREE.Vector3(-0.55, 1.15, -0.50),
   rotationY = Math.PI / 6,
-  onSelectHovered = () => {},
+  onSelectHeld = () => {},
   onSelectLastWire = () => {},
   onClearSelection = () => {},
   onResistanceDelta = () => {},
@@ -194,19 +194,19 @@ export function createEditPanel({
   }
 
   const actionButtons = {
-    selectHovered: makeButton({
-      name: "BtnEditSelectHovered",
-      x: -0.23,
+    selectHeld: makeButton({
+      name: "BtnEditSelectHeld",
+      x: -0.10,
       y: 0.10,
-      w: 0.16,
+      w: 0.18,
       h: 0.05,
       color: 0x2980b9,
-      label: "Apuntar",
-      onPress: onSelectHovered,
+      label: "En mano",
+      onPress: onSelectHeld,
     }),
     selectLastWire: makeButton({
       name: "BtnEditSelectLastWire",
-      x: -0.04,
+      x: 0.10,
       y: 0.10,
       w: 0.16,
       h: 0.05,
@@ -216,7 +216,7 @@ export function createEditPanel({
     }),
     clearSelection: makeButton({
       name: "BtnEditClearSelection",
-      x: 0.15,
+      x: 0.27,
       y: 0.10,
       w: 0.16,
       h: 0.05,
@@ -270,7 +270,7 @@ export function createEditPanel({
   const cellH = 0.030
   const cellGap = 0.003
   const boardOriginX = -0.265
-  const boardOriginY = -0.095
+  const boardOriginY = 0.01
 
   function rebuildSVBoard() {
     for (let row = 0; row < boardRows; row++) {
@@ -307,7 +307,7 @@ export function createEditPanel({
   }
 
   const hueX = 0.26
-  const hueStartY = -0.085
+  const hueStartY = 0.02
   for (let i = 0; i < 8; i++) {
     const hue = i / 8
     const hex = hsvToHex(hue, 1, 1)
@@ -357,7 +357,7 @@ export function createEditPanel({
     if (!selection) {
       drawStatus([
         "Seleccionado: ninguno",
-        "Apuntar: toma el componente señalado",
+        "En mano: toma el componente sostenido",
         "Cable: toma el último cable creado",
       ])
       return
