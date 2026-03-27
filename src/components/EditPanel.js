@@ -74,10 +74,6 @@ function makeTextTexture(width = 768, height = 256) {
   return { canvas, ctx, texture }
 }
 
-function hexToLabel(hex) {
-  return `#${hex.toString(16).padStart(6, "0").toUpperCase()}`
-}
-
 export function createEditPanel({
   position = new THREE.Vector3(-0.55, 1.15, -0.50),
   rotationY = Math.PI / 6,
@@ -93,7 +89,7 @@ export function createEditPanel({
   group.rotation.y = rotationY
 
   const panel = new THREE.Mesh(
-    new THREE.BoxGeometry(0.72, 0.56, 0.015),
+    new THREE.BoxGeometry(0.74, 0.58, 0.015),
     new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.92 })
   )
   panel.name = "EditPanelBase"
@@ -106,15 +102,15 @@ export function createEditPanel({
 
   const status = makeTextTexture()
   const statusMat = new THREE.MeshBasicMaterial({ map: status.texture, transparent: false })
-  const statusPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.48, 0.12), statusMat)
-  statusPlane.position.set(-0.08, 0.19, 0.009)
+  const statusPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.50, 0.12), statusMat)
+  statusPlane.position.set(-0.07, 0.205, 0.009)
   group.add(statusPlane)
 
   const preview = new THREE.Mesh(
     new THREE.BoxGeometry(0.08, 0.08, 0.01),
     new THREE.MeshStandardMaterial({ color: previewColor, roughness: 0.35 })
   )
-  preview.position.set(0.25, 0.19, 0.014)
+  preview.position.set(0.26, 0.205, 0.014)
   group.add(preview)
 
   function drawStatus(lines = []) {
@@ -205,7 +201,7 @@ export function createEditPanel({
       w: 0.16,
       h: 0.05,
       color: 0x2980b9,
-      label: "Hover",
+      label: "Apuntar",
       onPress: onSelectHovered,
     }),
     selectLastWire: makeButton({
@@ -215,7 +211,7 @@ export function createEditPanel({
       w: 0.16,
       h: 0.05,
       color: 0x8e44ad,
-      label: "Wire",
+      label: "Cable",
       onPress: onSelectLastWire,
     }),
     clearSelection: makeButton({
@@ -225,7 +221,7 @@ export function createEditPanel({
       w: 0.16,
       h: 0.05,
       color: 0xc0392b,
-      label: "Clear",
+      label: "Limpiar",
       onPress: onClearSelection,
     }),
   }
@@ -270,10 +266,11 @@ export function createEditPanel({
 
   const boardCols = 10
   const boardRows = 6
-  const cellW = 0.038
-  const cellH = 0.034
-  const boardOriginX = -0.23
-  const boardOriginY = -0.10
+  const cellW = 0.034
+  const cellH = 0.030
+  const cellGap = 0.003
+  const boardOriginX = -0.265
+  const boardOriginY = -0.095
 
   function rebuildSVBoard() {
     for (let row = 0; row < boardRows; row++) {
@@ -293,8 +290,8 @@ export function createEditPanel({
     for (let col = 0; col < boardCols; col++) {
       const btn = makeButton({
         name: `BtnColor_${row}_${col}`,
-        x: boardOriginX + col * (cellW + 0.004),
-        y: boardOriginY - row * (cellH + 0.004),
+        x: boardOriginX + col * (cellW + cellGap),
+        y: boardOriginY - row * (cellH + cellGap),
         w: cellW,
         h: cellH,
         color: 0xffffff,
@@ -309,17 +306,17 @@ export function createEditPanel({
     }
   }
 
-  const hueX = 0.25
-  const hueStartY = -0.08
+  const hueX = 0.26
+  const hueStartY = -0.085
   for (let i = 0; i < 8; i++) {
     const hue = i / 8
     const hex = hsvToHex(hue, 1, 1)
     const btn = makeButton({
       name: `BtnHue_${i}`,
       x: hueX,
-      y: hueStartY - i * 0.042,
-      w: 0.05,
-      h: 0.034,
+      y: hueStartY - i * 0.039,
+      w: 0.045,
+      h: 0.031,
       color: hex,
       label: "",
       onPress: () => {
@@ -360,43 +357,43 @@ export function createEditPanel({
     if (!selection) {
       drawStatus([
         "Seleccionado: ninguno",
-        "Hover: toma el componente apuntado",
-        "Wire: selecciona el último cable creado",
+        "Apuntar: toma el componente señalado",
+        "Cable: toma el último cable creado",
       ])
       return
     }
 
     if (type === "resistor") {
       drawStatus([
-        `Tipo: resistencia`,
-        `ID: ${selection.id.slice(0, 18)}`,
-        `Valor: ${selection.resistance ?? 220} ohms`,
+        "Tipo: resistencia",
+        `Valor actual: ${selection.resistance ?? 220} ohms`,
+        "Ajusta con los botones inferiores",
       ])
       return
     }
 
     if (type === "led") {
       drawStatus([
-        `Tipo: LED`,
-        `ID: ${selection.id.slice(0, 18)}`,
-        `Color: ${hexToLabel(selection.color ?? 0xff3b3b)}`,
+        "Tipo: LED",
+        "Color editable",
+        "Elige un color de la paleta",
       ])
       return
     }
 
     if (type === "wire") {
       drawStatus([
-        `Tipo: cable`,
-        `ID: ${selection.id.slice(0, 18)}`,
-        `Color: ${hexToLabel(selection.color ?? 0x111111)}`,
+        "Tipo: cable",
+        "Color editable",
+        "Elige un color de la paleta",
       ])
       return
     }
 
     drawStatus([
       `Tipo: ${type}`,
-      `ID: ${selection.id.slice(0, 18)}`,
-      `Sin edición disponible en este panel`,
+      "Sin edición disponible",
+      "",
     ])
   }
 
