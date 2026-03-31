@@ -8,7 +8,8 @@ import { ElectricalSystem } from "./systems/ElectricalSystem.js"
 
 import { createProtoboard } from "./components/Protoboard.js"
 import { HoleSystem } from "./systems/HoleSystem.js"
-import { createVRPanel } from "./components/VRPanel.js"
+import { createSpawnPanel } from "./components/SpawnPanel.js"
+import { createModePanel } from "./components/ModePanel.js"
 import { createEditPanel } from "./components/EditPanel.js"
 
 import { TrashSystem } from "./systems/TrashSystem.js"
@@ -179,15 +180,9 @@ function refreshComponentMeshById(id) {
 
 function extractHeldIdFromCandidate(candidate) {
   if (!candidate) return null
-
   if (candidate.userData?.componentId) return candidate.userData.componentId
-  if (candidate.userData?.heldObject?.userData?.componentId) {
-    return candidate.userData.heldObject.userData.componentId
-  }
-  if (candidate.heldObject?.userData?.componentId) {
-    return candidate.heldObject.userData.componentId
-  }
-
+  if (candidate.userData?.heldObject?.userData?.componentId) return candidate.userData.heldObject.userData.componentId
+  if (candidate.heldObject?.userData?.componentId) return candidate.heldObject.userData.componentId
   return null
 }
 
@@ -199,7 +194,6 @@ function getHeldComponentId() {
         extractHeldIdFromCandidate(entry?.hand) ||
         extractHeldIdFromCandidate(entry?.input) ||
         extractHeldIdFromCandidate(entry?.object)
-
       if (direct) return direct
     }
   }
@@ -212,7 +206,6 @@ function getHeldComponentId() {
         extractHeldIdFromCandidate(entry?.controllerGrip) ||
         extractHeldIdFromCandidate(entry?.input) ||
         extractHeldIdFromCandidate(entry?.object)
-
       if (direct) return direct
     }
   }
@@ -232,9 +225,7 @@ function getHeldMesh() {
 
 function getEditingTargetComponent() {
   const held = getHeldComponent()
-  if (held && (held.type === "led" || held.type === "wire" || held.type === "resistor")) {
-    return held
-  }
+  if (held && (held.type === "led" || held.type === "wire" || held.type === "resistor")) return held
   return getSelectedComponent()
 }
 
@@ -243,7 +234,6 @@ function getEditingTargetMesh() {
   if (heldComp && (heldComp.type === "led" || heldComp.type === "wire" || heldComp.type === "resistor")) {
     return getHeldMesh()
   }
-
   const selected = getSelectedComponent()
   if (!selected) return null
   return stateSyncSystem.getMeshById(selected.id)
@@ -259,7 +249,6 @@ function applyLedColorToMesh(mesh, hex) {
   mesh.traverse((child) => {
     if (!child.isMesh) return
     if (child.name !== "LEDBody" && child.name !== "LEDDome") return
-
     if (child.material?.color) child.material.color.setHex(safeHex)
     if ("emissive" in child.material) {
       child.material.emissive.setHex(0x000000)
@@ -439,10 +428,7 @@ function applyPendingChanges() {
 
   if (comp.type === "led" && pendingColorHex !== null) {
     appState.updateComponent(comp.id, {
-      meta: {
-        ...comp.meta,
-        color: pendingColorHex,
-      },
+      meta: { ...comp.meta, color: pendingColorHex },
     })
     applyLedColorToMesh(mesh, pendingColorHex)
     pendingColorHex = null
@@ -452,10 +438,7 @@ function applyPendingChanges() {
 
   if (comp.type === "wire" && pendingColorHex !== null) {
     appState.updateComponent(comp.id, {
-      meta: {
-        ...comp.meta,
-        color: pendingColorHex,
-      },
+      meta: { ...comp.meta, color: pendingColorHex },
     })
     applyWireColorToMesh(mesh, pendingColorHex)
     pendingColorHex = null
@@ -468,11 +451,7 @@ function applyPendingChanges() {
     const nextBands = resistanceToBands(next)
 
     appState.updateComponent(comp.id, {
-      meta: {
-        ...comp.meta,
-        resistance: next,
-        bands: nextBands,
-      },
+      meta: { ...comp.meta, resistance: next, bands: nextBands },
     })
 
     applyResistorBandsToMesh(mesh, next)
@@ -527,10 +506,7 @@ function addResistor() {
     id,
     type: "resistor",
     transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-    meta: {
-      resistance,
-      bands: resistanceToBands(resistance),
-    },
+    meta: { resistance, bands: resistanceToBands(resistance) },
   }
 
   appState.addComponent(data)
@@ -639,12 +615,12 @@ function toggleAppMode() {
 }
 
 // ---------------------------
-// Panel 3D principal
+// Paneles separados
 // ---------------------------
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY = -Math.PI / 6
 
-const { group: vrPanel, buttons: panelButtons, setWireModeVisual, setSimModeVisual } = createVRPanel({
+const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos,
   rotationY: panelRotY,
   onAdd: addBattery5V,
@@ -652,28 +628,21 @@ const { group: vrPanel, buttons: panelButtons, setWireModeVisual, setSimModeVisu
   onResistor: addResistor,
   onButton: addButton,
   onSwitch: addSwitch,
+})
+
+const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
+  position: panelWorldPos,
+  rotationY: panelRotY,
   onWire: toggleWireMode,
   onSave: saveState,
   onLoad: loadState,
   onMode: toggleAppMode,
+  onClear: clearScene,
 })
 
 setWireModeVisualFn = setWireModeVisual
 setSimModeVisualFn = setSimModeVisual
 
-scene.add(vrPanel)
-for (const b of panelButtons) interactionSystem.register(b)
-
-vrPanel.traverse((o) => {
-  if (o.isMesh && o.material) {
-    o.material = o.material.clone()
-    if ("emissive" in o.material) o.material.emissive.setHex(0x333333)
-  }
-})
-
-// ---------------------------
-// Panel de edición
-// ---------------------------
 const editPanelApi = createEditPanel({
   position: new THREE.Vector3(-0.62, 1.15, -0.48),
   rotationY: Math.PI / 6,
@@ -685,78 +654,155 @@ const editPanelApi = createEditPanel({
   onAcceptChanges: applyPendingChanges,
 })
 
-scene.add(editPanelApi.group)
-for (const b of editPanelApi.buttons) interactionSystem.register(b)
+scene.add(spawnPanel, modePanel, editPanelApi.group)
 
-editPanelApi.group.traverse((o) => {
-  if (o.isMesh && o.material) {
-    o.material = o.material.clone()
-    if ("emissive" in o.material) o.material.emissive.setHex(0x202020)
+function clonePanelMaterials(group) {
+  group.traverse((o) => {
+    if (o.isMesh && o.material) {
+      o.material = o.material.clone()
+      if ("emissive" in o.material) o.material.emissive.setHex(0x202020)
+    }
+  })
+}
+
+clonePanelMaterials(spawnPanel)
+clonePanelMaterials(modePanel)
+clonePanelMaterials(editPanelApi.group)
+
+function setPanelEnabled(group, buttons, enabled) {
+  group.visible = enabled
+  for (const b of buttons) {
+    if (enabled) interactionSystem.register(b)
+    else interactionSystem.unregister(b)
   }
-})
+}
+
+setPanelEnabled(spawnPanel, spawnButtons, false)
+setPanelEnabled(modePanel, modeButtons, false)
+setPanelEnabled(editPanelApi.group, editPanelApi.buttons, false)
+
+let openPanelKey = null
+
+function closeAllPanels() {
+  setPanelEnabled(spawnPanel, spawnButtons, false)
+  setPanelEnabled(modePanel, modeButtons, false)
+  setPanelEnabled(editPanelApi.group, editPanelApi.buttons, false)
+  openPanelKey = null
+}
+
+function togglePanel(panelKey) {
+  if (openPanelKey === panelKey) {
+    closeAllPanels()
+    return
+  }
+
+  closeAllPanels()
+
+  if (panelKey === "spawn") {
+    setPanelEnabled(spawnPanel, spawnButtons, true)
+    openPanelKey = "spawn"
+    return
+  }
+
+  if (panelKey === "mode") {
+    setPanelEnabled(modePanel, modeButtons, true)
+    openPanelKey = "mode"
+    return
+  }
+
+  if (panelKey === "edit") {
+    setPanelEnabled(editPanelApi.group, editPanelApi.buttons, true)
+    openPanelKey = "edit"
+  }
+}
 
 // ---------------------------
-// Botón 3D de limpiar escena
+// Botones físicos en mesa para abrir paneles
 // ---------------------------
-function createClearSceneButton({ position, rotationY, onPress }) {
+function createTableToggleButton({ name, label, color, position, onPress }) {
   const group = new THREE.Group()
-  group.name = "ClearSceneButton"
+  group.name = name
   group.position.copy(position)
-  group.rotation.y = rotationY
 
   const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.09, 0.11, 0.08, 20),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
+    new THREE.CylinderGeometry(0.055, 0.060, 0.028, 18),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.88 })
   )
-  base.position.y = 0.04
+  base.position.y = 0.014
   group.add(base)
 
   const button = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.07, 0.035, 24),
-    new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.55 })
+    new THREE.CylinderGeometry(0.046, 0.046, 0.020, 20),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.55 })
   )
-  button.name = "BtnClearScene"
-  button.position.y = 0.095
+  button.position.y = 0.034
   button.userData.isUI = true
-  button.userData.uiAction = "clear-scene"
   button.userData._lastPressMs = 0
-  button.userData._cooldownMs = 500
+  button.userData._cooldownMs = 250
   button.userData.onPress = () => {
     const now = performance.now()
     if (now - button.userData._lastPressMs < button.userData._cooldownMs) return
     button.userData._lastPressMs = now
-    button.scale.set(0.9, 0.9, 0.9)
-    setTimeout(() => button.scale.set(1, 1, 1), 100)
+    button.scale.set(0.92, 0.92, 0.92)
+    setTimeout(() => button.scale.set(1, 1, 1), 80)
     onPress()
   }
   group.add(button)
 
-  const iconMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
-  const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
-  const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.008, 0.008), iconMat)
-  bar1.rotation.z = Math.PI / 4
-  bar1.position.y = 0.02
-  bar2.rotation.z = -Math.PI / 4
-  bar2.position.y = 0.02
-  button.add(bar1, bar2)
+  const texCanvas = document.createElement("canvas")
+  texCanvas.width = 256
+  texCanvas.height = 128
+  const ctx = texCanvas.getContext("2d")
+  ctx.fillStyle = "#000000"
+  ctx.fillRect(0, 0, 256, 128)
+  ctx.fillStyle = "#ffffff"
+  ctx.font = "bold 38px Arial"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(label, 128, 64)
+  const tex = new THREE.CanvasTexture(texCanvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+
+  const labelPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.085, 0.040),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+  )
+  labelPlane.position.set(0, 0.035, 0.047)
+  button.add(labelPlane)
 
   return { group, button }
 }
 
-const { group: clearSceneButtonGroup, button: clearSceneButton } = createClearSceneButton({
-  position: new THREE.Vector3(0.95, 0.82, -0.25),
-  rotationY: -Math.PI / 5,
-  onPress: clearScene,
-})
-scene.add(clearSceneButtonGroup)
-interactionSystem.register(clearSceneButton)
+const tableButtonY = 0.80
 
-clearSceneButtonGroup.traverse((o) => {
-  if (o.isMesh && o.material) {
-    o.material = o.material.clone()
-    if ("emissive" in o.material) o.material.emissive.setHex(0x222222)
-  }
+const { group: btnSpawnGroup, button: btnSpawn } = createTableToggleButton({
+  name: "BtnTableSpawn",
+  label: "Comp.",
+  color: 0x2ecc71,
+  position: new THREE.Vector3(0.18, tableButtonY, -0.33),
+  onPress: () => togglePanel("spawn"),
 })
+
+const { group: btnModeGroup, button: btnMode } = createTableToggleButton({
+  name: "BtnTableMode",
+  label: "Modos",
+  color: 0x3498db,
+  position: new THREE.Vector3(0.34, tableButtonY, -0.33),
+  onPress: () => togglePanel("mode"),
+})
+
+const { group: btnEditGroup, button: btnEdit } = createTableToggleButton({
+  name: "BtnTableEdit",
+  label: "Editor",
+  color: 0x9b59b6,
+  position: new THREE.Vector3(0.50, tableButtonY, -0.33),
+  onPress: () => togglePanel("edit"),
+})
+
+scene.add(btnSpawnGroup, btnModeGroup, btnEditGroup)
+interactionSystem.register(btnSpawn)
+interactionSystem.register(btnMode)
+interactionSystem.register(btnEdit)
 
 // ---------------------------
 // Trash System
@@ -796,6 +842,9 @@ window.addEventListener("keydown", (e) => {
   if (k === "h") selectHeldComponent()
   if (k === "j") selectLastWire()
   if (k === "enter") applyPendingChanges()
+  if (k === "1") togglePanel("spawn")
+  if (k === "2") togglePanel("mode")
+  if (k === "3") togglePanel("edit")
 })
 
 // ---------------------------
