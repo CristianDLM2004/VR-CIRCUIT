@@ -611,7 +611,7 @@ function toggleAppMode() {
     setWireModeVisualFn?.(false)
   }
 
-  console.log(isSimMode ? "⚡ Modo SIMULACIÓN" : "🔧 Modo EDICIÓN")
+  console.log(isSimMode ? "⚡ Modo SIMULACIÓN." : "🔧 Modo EDICIÓN")
 }
 
 // ---------------------------
