@@ -630,7 +630,7 @@ export class ComponentFactory {
         break
       }
 
-      case "wire": {
+            case "wire": {
         const group = new THREE.Group()
         const rawPoints = Array.isArray(data.meta?.points) ? data.meta.points : []
         const points = rawPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z))
@@ -647,59 +647,110 @@ export class ComponentFactory {
         group.userData.endAnchor = data.meta?.endAnchor ?? null
         group.userData.fixedPoints = points.map((p) => p.clone())
 
+        group.userData._wireJointPool = []
+        group.userData._wireSegmentPool = []
+
+        group.userData._wireJointGeometry = new THREE.SphereGeometry(radius * 1.15, 10, 10)
+        group.userData._wireSegmentGeometry = new THREE.CylinderGeometry(radius, radius, 1, 12)
+
+        group.userData._wireJointMaterial = new THREE.MeshStandardMaterial({
+          color: wireColor,
+          roughness: 0.7,
+          metalness: 0.0,
+        })
+
+        group.userData._wireSegmentMaterial = new THREE.MeshStandardMaterial({
+          color: wireColor,
+          roughness: 0.65,
+          metalness: 0.0,
+          emissive: 0x181818,
+        })
+
+        group.userData.ensureWireJoint = function (index) {
+          if (group.userData._wireJointPool[index]) {
+            return group.userData._wireJointPool[index]
+          }
+
+          const joint = new THREE.Mesh(
+            group.userData._wireJointGeometry,
+            group.userData._wireJointMaterial
+          )
+          joint.name = `WireJoint_${index}`
+          joint.visible = false
+          group.add(joint)
+          group.userData._wireJointPool[index] = joint
+          return joint
+        }
+
+        group.userData.ensureWireSegment = function (index) {
+          if (group.userData._wireSegmentPool[index]) {
+            return group.userData._wireSegmentPool[index]
+          }
+
+          const segment = new THREE.Mesh(
+            group.userData._wireSegmentGeometry,
+            group.userData._wireSegmentMaterial
+          )
+          segment.name = `WireSegment_${index}`
+          segment.visible = false
+          group.add(segment)
+          group.userData._wireSegmentPool[index] = segment
+          return segment
+        }
+
         group.userData.rebuildWireGeometry = function (nextPoints) {
-          while (group.children.length > 0) {
-            const child = group.children.pop()
-            child?.geometry?.dispose?.()
-            child?.material?.dispose?.()
+          const safePoints = Array.isArray(nextPoints) ? nextPoints.map((p) => p.clone()) : []
+          if (safePoints.length < 2) return
+
+          group.userData.fixedPoints = safePoints.map((p) => p.clone())
+
+          if (group.userData._wireJointMaterial?.color) {
+            group.userData._wireJointMaterial.color.setHex(group.userData.wireColor ?? 0x111111)
           }
 
-          const wireMat = new THREE.MeshStandardMaterial({
-            color: group.userData.wireColor ?? 0x111111,
-            roughness: 0.65,
-            metalness: 0.0,
-            emissive: 0x181818,
-          })
-
-          const jointMat = new THREE.MeshStandardMaterial({
-            color: group.userData.wireColor ?? 0x111111,
-            roughness: 0.7,
-            metalness: 0.0,
-          })
-
-          for (let i = 0; i < nextPoints.length; i++) {
-            const joint = new THREE.Mesh(
-              new THREE.SphereGeometry((group.userData.wireRadius ?? 0.0038) * 1.15, 10, 10),
-              jointMat.clone()
-            )
-            joint.position.copy(nextPoints[i])
-            group.add(joint)
+          if (group.userData._wireSegmentMaterial?.color) {
+            group.userData._wireSegmentMaterial.color.setHex(group.userData.wireColor ?? 0x111111)
           }
 
-          for (let i = 0; i < nextPoints.length - 1; i++) {
-            const start = nextPoints[i]
-            const end = nextPoints[i + 1]
+          const jointCount = safePoints.length
+          const segmentCount = safePoints.length - 1
+
+          for (let i = 0; i < jointCount; i++) {
+            const joint = group.userData.ensureWireJoint(i)
+            joint.position.copy(safePoints[i])
+            joint.visible = true
+          }
+
+          for (let i = jointCount; i < group.userData._wireJointPool.length; i++) {
+            const joint = group.userData._wireJointPool[i]
+            if (joint) joint.visible = false
+          }
+
+          for (let i = 0; i < segmentCount; i++) {
+            const start = safePoints[i]
+            const end = safePoints[i + 1]
             const dir = end.clone().sub(start)
             const len = dir.length()
-            if (len < 0.0001) continue
+
+            const segment = group.userData.ensureWireSegment(i)
+
+            if (len < 0.0001) {
+              segment.visible = false
+              continue
+            }
 
             const mid = start.clone().add(end).multiplyScalar(0.5)
-
-            const segment = new THREE.Mesh(
-              new THREE.CylinderGeometry(
-                group.userData.wireRadius ?? 0.0038,
-                group.userData.wireRadius ?? 0.0038,
-                1,
-                12
-              ),
-              wireMat.clone()
-            )
 
             segment.position.copy(mid)
             dir.normalize()
             segment.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
             segment.scale.set(1, len, 1)
-            group.add(segment)
+            segment.visible = true
+          }
+
+          for (let i = segmentCount; i < group.userData._wireSegmentPool.length; i++) {
+            const segment = group.userData._wireSegmentPool[i]
+            if (segment) segment.visible = false
           }
         }
 

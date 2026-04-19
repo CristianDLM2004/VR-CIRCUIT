@@ -69,32 +69,130 @@ export class ElectricalSystem {
     this._blinkAccumMs = 0
     this._blinkOn = false
 
-    // Optimización: no recalcular todo el grafo cada frame
-    this._simIntervalMs = 90
-    this._simAccumMs = 0
+    this._lastCircuitSignature = ""
     this._lastGraph = null
+    this._lastLedStates = new Map()
   }
 
   update(dt) {
-    const dtMs = dt * 1000
+    const prevBlink = this._blinkOn
 
-    this._blinkAccumMs += dtMs
+    this._blinkAccumMs += dt * 1000
     if (this._blinkAccumMs >= this._blinkIntervalMs) {
       this._blinkAccumMs -= this._blinkIntervalMs
       this._blinkOn = !this._blinkOn
     }
 
-    this._simAccumMs += dtMs
-    if (!this._lastGraph || this._simAccumMs >= this._simIntervalMs) {
-      this._simAccumMs = 0
+    const nextSignature = this._buildCircuitSignature()
+    const blinkChanged = prevBlink !== this._blinkOn
+    const circuitChanged =
+      !this._lastGraph ||
+      nextSignature !== this._lastCircuitSignature
+
+    if (circuitChanged) {
+      this._lastCircuitSignature = nextSignature
       this._lastGraph = this._buildGraph()
-      this._simulate(this._lastGraph)
+      this._lastLedStates = this._evaluateAllLeds(this._lastGraph)
+      this._applyAllLedStates(this._lastLedStates)
       return
     }
 
-    // Si no toca recomputar el circuito, al menos reaplicar el estado visual
-    // para que el blink "sin resistencia" siga viéndose fluido.
-    this._simulate(this._lastGraph)
+    if (blinkChanged) {
+      this._applyAllLedStates(this._lastLedStates)
+    }
+  }
+
+  _buildCircuitSignature() {
+    const parts = []
+
+    for (const comp of this.appState.components) {
+      if (comp.type === "battery5v") {
+        parts.push(`battery:${comp.id}`)
+        continue
+      }
+
+      if (comp.type === "led") {
+        parts.push(
+          [
+            "led",
+            comp.id,
+            comp.inserted ? 1 : 0,
+            comp.pinConnections?.anode ?? "-",
+            comp.pinConnections?.cathode ?? "-",
+            comp.meta?.color ?? "-"
+          ].join(":")
+        )
+        continue
+      }
+
+      if (comp.type === "resistor") {
+        parts.push(
+          [
+            "resistor",
+            comp.id,
+            comp.inserted ? 1 : 0,
+            comp.pinConnections?.left ?? "-",
+            comp.pinConnections?.right ?? "-",
+            comp.meta?.resistance ?? "-"
+          ].join(":")
+        )
+        continue
+      }
+
+      if (comp.type === "button") {
+        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
+        const pressed = mesh?.userData?.buttonState === true ? 1 : 0
+
+        parts.push(
+          [
+            "button",
+            comp.id,
+            comp.inserted ? 1 : 0,
+            comp.pinConnections?.pin_a ?? "-",
+            comp.pinConnections?.pin_b ?? "-",
+            pressed
+          ].join(":")
+        )
+        continue
+      }
+
+      if (comp.type === "switch") {
+        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
+        const closed = mesh?.userData?.switchState === true ? 1 : 0
+
+        parts.push(
+          [
+            "switch",
+            comp.id,
+            comp.inserted ? 1 : 0,
+            comp.pinConnections?.pin_a ?? "-",
+            comp.pinConnections?.pin_b ?? "-",
+            closed
+          ].join(":")
+        )
+        continue
+      }
+
+      if (comp.type === "wire") {
+        parts.push(
+          [
+            "wire",
+            comp.id,
+            comp.meta?.startAnchor?.kind ?? "-",
+            comp.meta?.startAnchor?.componentId ?? "-",
+            comp.meta?.startAnchor?.id ?? "-",
+            comp.meta?.startAnchor?.holeId ?? "-",
+            comp.meta?.endAnchor?.kind ?? "-",
+            comp.meta?.endAnchor?.componentId ?? "-",
+            comp.meta?.endAnchor?.id ?? "-",
+            comp.meta?.endAnchor?.holeId ?? "-",
+            comp.meta?.color ?? "-"
+          ].join(":")
+        )
+      }
+    }
+
+    return parts.join("|")
   }
 
   _buildGraph() {
@@ -212,9 +310,17 @@ export class ElectricalSystem {
     return { edges, batteries, leds, resistors }
   }
 
-  _simulate(graph) {
+  _evaluateAllLeds(graph) {
+    const states = new Map()
     for (const led of graph.leds) {
-      this._applyLEDState(led.componentId, this._evaluateLED(led, graph))
+      states.set(led.componentId, this._evaluateLED(led, graph))
+    }
+    return states
+  }
+
+  _applyAllLedStates(states) {
+    for (const [componentId, state] of states.entries()) {
+      this._applyLEDState(componentId, state)
     }
   }
 

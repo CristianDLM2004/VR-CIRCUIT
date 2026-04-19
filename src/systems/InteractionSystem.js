@@ -122,6 +122,7 @@ export class InteractionSystem {
     this._sphere = new THREE.Sphere()
 
     this._lastPokedButton = null
+    this._controllerHoverCache = new Map()
     this._lastUpdateTime = performance.now()
     this._activePinHoleMarkers = []
     this._pinHoleMarkerGeometry = new THREE.SphereGeometry(0.0075, 12, 12)
@@ -746,10 +747,25 @@ export class InteractionSystem {
     return null
   }
 
+  refreshControllerHoverCache() {
+    this._controllerHoverCache.clear()
+    for (const controller of this.controllers) {
+      this._controllerHoverCache.set(controller, this.computeControllerHoverFor(controller))
+    }
+  }
+
+  clearControllerHoverCache() {
+    this._controllerHoverCache.clear()
+  }
+
+  getCachedControllerHover(controller) {
+    return this._controllerHoverCache.get(controller) || null
+  }
+
   computeControllerHover() {
     for (const c of this.controllers) {
-      const b = this.computeControllerHoverFor(c)
-      if (b) return b
+      const cached = this.getCachedControllerHover(c)
+      if (cached) return cached
     }
     return null
   }
@@ -781,7 +797,7 @@ export class InteractionSystem {
           if (targetPoint) dist = THREE.MathUtils.clamp(origin.distanceTo(targetPoint), this.controllerRayMinLength, this.controllerRayMaxLength)
         }
       } else {
-        const target = this.computeControllerHoverFor(controller)
+        const target = this.getCachedControllerHover(controller)
         if (target) {
           target.getWorldPosition(this._tmpG)
           dist = THREE.MathUtils.clamp(origin.distanceTo(this._tmpG), this.controllerRayMinLength, this.controllerRayMaxLength)
@@ -2389,6 +2405,13 @@ export class InteractionSystem {
 
     const handsActive = this.isHandTrackingActive()
     const showControllerRays = !handsActive
+
+    if (showControllerRays && this.toolMode !== "wire") {
+      this.refreshControllerHoverCache()
+    } else {
+      this.clearControllerHoverCache()
+    }
+
     this.updateControllerRays(showControllerRays)
 
     if (handsActive) {
