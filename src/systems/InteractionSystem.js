@@ -74,9 +74,9 @@ export class InteractionSystem {
     this.wireHoverSourceIndex = null
     this._wireHoverMarker = null
 
-    this.wireHoverMaxDist = 0.026
-    this.wireHoverReleaseDist = 0.050
-    this.wireEndpointHoverMaxDist = 0.014
+    this.wireHoverMaxDist = 0.018
+    this.wireHoverReleaseDist = 0.034
+    this.wireEndpointHoverMaxDist = 0.012
     this.wirePinchStartDist = 0.014
     this.wirePinchEndDist = 0.028
     this.wirePinchConfirmMs = 95
@@ -88,10 +88,10 @@ export class InteractionSystem {
     this.wireControllerFallbackDist = 0.18
 
     this.wireEndpointHoverBias = 0.012
-    this.wireEndpointActionMaxDist = 0.022
+    this.wireEndpointActionMaxDist = 0.018
 
-    this.wireHandActivationMaxDist = 0.060
-    this.wireControllerActivationMaxDist = 0.075
+    this.wireHandActivationMaxDist = 0.040
+    this.wireControllerActivationMaxDist = 0.060
 
     this._wireHoleAnchorsCache = []
     this._wireDynamicAnchorsCache = []
@@ -136,6 +136,7 @@ export class InteractionSystem {
     this._sphere = new THREE.Sphere()
 
     this._lastPokedButton = null
+    this._handsActiveFrame = false
     this._controllerHoverCache = new Map()
     this._lastUpdateTime = performance.now()
     this._activePinHoleMarkers = []
@@ -873,6 +874,22 @@ export class InteractionSystem {
     return out
   }
 
+  getWireHandPointerWorld(he, out) {
+    const index = this.getIndexTipWorld(he, this._tmpA)
+    if (index) {
+      out.copy(index)
+      return out
+    }
+
+    const thumb = this.getThumbTipWorld(he, this._tmpB)
+    if (thumb) {
+      out.copy(thumb)
+      return out
+    }
+
+    return this.getGrabPointWorld(he, out)
+  }
+
   rebuildWireHoleAnchorsCache() {
     this._wireHoleAnchorsCache = []
     this._wireZoneReady = false
@@ -1023,33 +1040,39 @@ export class InteractionSystem {
   findBestWireAnchorForHand(he, maxDist = this.wireHoverMaxDist) {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject) return null
 
-    this.getGrabPointWorld(he, this._tmpC)
+    this.getWireHandPointerWorld(he, this._tmpC)
 
     if (!this.canHandUseWireHoverAt(this._tmpC)) return null
 
     const anchors = this.getAllConnectionAnchors()
     let best = null
     let bestDist = maxDist
+    let bestScore = Infinity
 
     for (const anchor of anchors) {
       const d = anchor.worldPos.distanceTo(this._tmpC)
-      if (d > bestDist) continue
+      if (d > maxDist) continue
 
-      if (!best) {
+      let score = d
+
+      if (anchor.kind === "hole") {
+        score -= 0.0035
+      }
+
+      if (!best || score < bestScore - 0.0005) {
         best = anchor
         bestDist = d
+        bestScore = score
         continue
       }
 
       const bp = this.wireAnchorPriority[best.kind] ?? 999
       const cp = this.wireAnchorPriority[anchor.kind] ?? 999
 
-      if (d < bestDist - 0.001) {
+      if (Math.abs(score - bestScore) <= 0.0005 && cp < bp) {
         best = anchor
         bestDist = d
-      } else if (Math.abs(d - bestDist) <= 0.001 && cp < bp) {
-        best = anchor
-        bestDist = d
+        bestScore = score
       }
     }
 
@@ -1143,7 +1166,7 @@ export class InteractionSystem {
   findBestWireEndpointForHand(he, maxDist = this.wireEndpointHoverMaxDist) {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
 
-    this.getGrabPointWorld(he, this._tmpC)
+    this.getWireHandPointerWorld(he, this._tmpC)
 
     if (!this.canHandUseWireHoverAt(this._tmpC)) return null
 
@@ -1248,55 +1271,57 @@ export class InteractionSystem {
     let bestType = null
 
     if (!this.wireDraftStartAnchor) {
-      for (const he of this.hands) {
-        const ac = this.findBestWireAnchorForHand(he)
-        const ep = this.findBestWireEndpointForHand(he)
+      if (this._handsActiveFrame) {
+        for (const he of this.hands) {
+          const ac = this.findBestWireAnchorForHand(he)
+          const ep = this.findBestWireEndpointForHand(he)
 
-        let candidate = null
-        let candidateType = null
+          let candidate = null
+          let candidateType = null
 
-        if (ac && ep) {
-          const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
-          candidate = scored.best
-          candidateType = scored.bestType
-        } else if (ep) {
-          candidate = ep
-          candidateType = "endpoint"
-        } else if (ac) {
-          candidate = ac
-          candidateType = "anchor"
+          if (ac && ep) {
+            const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
+            candidate = scored.best
+            candidateType = scored.bestType
+          } else if (ep) {
+            candidate = ep
+            candidateType = "endpoint"
+          } else if (ac) {
+            candidate = ac
+            candidateType = "anchor"
+          }
+
+          if (candidate) {
+            const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
+            best = scored.best
+            bestType = scored.bestType
+          }
         }
+      } else {
+        for (const controller of this.controllers) {
+          const ac = this.findBestWireAnchorForController(controller)
+          const ep = this.findBestWireEndpointForController(controller)
 
-        if (candidate) {
-          const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
-          best = scored.best
-          bestType = scored.bestType
-        }
-      }
+          let candidate = null
+          let candidateType = null
 
-      for (const controller of this.controllers) {
-        const ac = this.findBestWireAnchorForController(controller)
-        const ep = this.findBestWireEndpointForController(controller)
+          if (ac && ep) {
+            const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
+            candidate = scored.best
+            candidateType = scored.bestType
+          } else if (ep) {
+            candidate = ep
+            candidateType = "endpoint"
+          } else if (ac) {
+            candidate = ac
+            candidateType = "anchor"
+          }
 
-        let candidate = null
-        let candidateType = null
-
-        if (ac && ep) {
-          const scored = this.pickBetterWireHoverCandidate(ac, "anchor", ep, "endpoint")
-          candidate = scored.best
-          candidateType = scored.bestType
-        } else if (ep) {
-          candidate = ep
-          candidateType = "endpoint"
-        } else if (ac) {
-          candidate = ac
-          candidateType = "anchor"
-        }
-
-        if (candidate) {
-          const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
-          best = scored.best
-          bestType = scored.bestType
+          if (candidate) {
+            const scored = this.pickBetterWireHoverCandidate(best, bestType, candidate, candidateType)
+            best = scored.best
+            bestType = scored.bestType
+          }
         }
       }
     } else {
@@ -2559,6 +2584,7 @@ export class InteractionSystem {
     this._lastUpdateTime = now
 
     const handsActive = this.isHandTrackingActive()
+    this._handsActiveFrame = handsActive
     const showControllerRays = !handsActive
 
     if (showControllerRays && this.toolMode !== "wire") {
