@@ -74,21 +74,35 @@ export class InteractionSystem {
     this.wireHoverSourceIndex = null
     this._wireHoverMarker = null
 
-    this.wireHoverMaxDist = 0.055
-    this.wireHoverReleaseDist = 0.085
-    this.wireEndpointHoverMaxDist = 0.020
+    this.wireHoverMaxDist = 0.026
+    this.wireHoverReleaseDist = 0.050
+    this.wireEndpointHoverMaxDist = 0.014
     this.wirePinchStartDist = 0.014
     this.wirePinchEndDist = 0.028
     this.wirePinchConfirmMs = 95
     this.wireEndpointHoverBias = 0.010
 
-    this.wireControllerHoverPerpMaxDist = 0.022
-    this.wireControllerEndpointPerpMaxDist = 0.026
+    this.wireControllerHoverPerpMaxDist = 0.016
+    this.wireControllerEndpointPerpMaxDist = 0.020
     this.wireControllerRayMaxDist = this.controllerRayMaxLength
-    this.wireControllerFallbackDist = 0.35
+    this.wireControllerFallbackDist = 0.18
 
     this.wireEndpointHoverBias = 0.012
-    this.wireEndpointActionMaxDist = 0.034
+    this.wireEndpointActionMaxDist = 0.022
+
+    this.wireHandActivationMaxDist = 0.060
+    this.wireControllerActivationMaxDist = 0.075
+
+    this._wireHoleAnchorsCache = []
+    this._wireDynamicAnchorsCache = []
+    this._wireEndpointsCache = []
+    this._wireCachesDirty = true
+    this._wireLastCacheRefreshMs = 0
+    this.wireCacheRefreshMs = 50
+
+    this._wireZoneMin = new THREE.Vector3()
+    this._wireZoneMax = new THREE.Vector3()
+    this._wireZoneReady = false
 
     this.wireAnchorPriority = { terminal: 0, pin: 1, hole: 2 }
 
@@ -135,7 +149,10 @@ export class InteractionSystem {
     })
   }
 
-  setHoleSystem(hs) { this.holeSystem = hs }
+  setHoleSystem(hs) {
+    this.holeSystem = hs
+    this.rebuildWireHoleAnchorsCache()
+  }
   setStateSyncSystem(sss) { this.stateSyncSystem = sss }
 
   setAppMode(mode) {
@@ -171,11 +188,17 @@ export class InteractionSystem {
   setToolMode(mode = "grab") {
     const next = mode === "wire" ? "wire" : "grab"
     if (this.toolMode === next) return
+
     this.toolMode = next
-    if (this.toolMode !== "wire") {
-      this.clearWireHoverAnchor()
-      this.clearWireDraft()
+    this.markWireCachesDirty()
+
+    if (this.toolMode === "wire") {
+      this.refreshWireCaches(true)
+      return
     }
+
+    this.clearWireHoverAnchor()
+    this.clearWireDraft()
   }
 
   isSimMode() { return this.appMode === "sim" }
@@ -850,53 +873,177 @@ export class InteractionSystem {
     return out
   }
 
-  getAllConnectionAnchors() {
-    const anchors = []
-    if (this.holeSystem) {
-      this.holeSystem.updateWorldPositions()
-      for (const hole of this.holeSystem.holes) {
-        anchors.push({
-          kind: "hole",
-          id: hole.id,
-          label: hole.id,
-          worldPos: hole.worldPos.clone(),
-          holeId: hole.id,
-          groupKey: hole.groupKey
-        })
-      }
+  rebuildWireHoleAnchorsCache() {
+    this._wireHoleAnchorsCache = []
+    this._wireZoneReady = false
+
+    if (!this.holeSystem) return
+
+    this.holeSystem.updateWorldPositions()
+
+    let minX = Infinity
+    let minY = Infinity
+    let minZ = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    let maxZ = -Infinity
+
+    for (const hole of this.holeSystem.holes) {
+      const wp = hole.worldPos.clone()
+
+      this._wireHoleAnchorsCache.push({
+        kind: "hole",
+        id: hole.id,
+        label: hole.id,
+        worldPos: wp,
+        holeId: hole.id,
+        groupKey: hole.groupKey,
+      })
+
+      if (wp.x < minX) minX = wp.x
+      if (wp.y < minY) minY = wp.y
+      if (wp.z < minZ) minZ = wp.z
+      if (wp.x > maxX) maxX = wp.x
+      if (wp.y > maxY) maxY = wp.y
+      if (wp.z > maxZ) maxZ = wp.z
     }
+
+    if (Number.isFinite(minX)) {
+      this._wireZoneMin.set(minX - 0.05, minY - 0.04, minZ - 0.05)
+      this._wireZoneMax.set(maxX + 0.05, maxY + 0.10, maxZ + 0.05)
+      this._wireZoneReady = true
+    }
+
+    this._wireCachesDirty = true
+  }
+
+  markWireCachesDirty() {
+    this._wireCachesDirty = true
+  }
+
+  refreshWireCaches(force = false) {
+    const now = performance.now()
+    if (!force && !this._wireCachesDirty && (now - this._wireLastCacheRefreshMs) < this.wireCacheRefreshMs) {
+      return
+    }
+
+    this._wireLastCacheRefreshMs = now
+    this._wireCachesDirty = false
+
+    this._wireDynamicAnchorsCache = []
+    this._wireEndpointsCache = []
+
     for (const obj of this.interactables) {
-      if (!obj?.userData?.componentId || typeof obj.userData?.getConnectionAnchors !== "function") continue
-      for (const a of obj.userData.getConnectionAnchors()) {
-        anchors.push({
-          kind: a.kind,
-          id: a.id,
-          label: a.label,
-          worldPos: a.worldPos.clone(),
-          componentId: obj.userData.componentId,
-          componentType: obj.userData.componentType
-        })
+      if (!obj?.userData?.componentId) continue
+
+      if (typeof obj.userData?.getConnectionAnchors === "function") {
+        for (const a of obj.userData.getConnectionAnchors()) {
+          this._wireDynamicAnchorsCache.push({
+            kind: a.kind,
+            id: a.id,
+            label: a.label,
+            worldPos: a.worldPos.clone(),
+            componentId: obj.userData.componentId,
+            componentType: obj.userData.componentType,
+          })
+        }
       }
     }
-    return anchors
+
+    if (this.stateSyncSystem) {
+      for (const mesh of this.stateSyncSystem.meshById.values()) {
+        if (!mesh?.userData?.isWire) continue
+
+        const sw = this.getWireEndpointWorldPosition(mesh, "start")
+        const ew = this.getWireEndpointWorldPosition(mesh, "end")
+
+        if (sw) {
+          this._wireEndpointsCache.push({
+            kind: "wire-endpoint",
+            endpointType: "start",
+            wireId: mesh.userData.componentId,
+            worldPos: sw,
+          })
+        }
+
+        if (ew) {
+          this._wireEndpointsCache.push({
+            kind: "wire-endpoint",
+            endpointType: "end",
+            wireId: mesh.userData.componentId,
+            worldPos: ew,
+          })
+        }
+      }
+    }
+  }
+
+  isPointInsideWireZone(worldPoint) {
+    if (!this._wireZoneReady) return true
+
+    return (
+      worldPoint.x >= this._wireZoneMin.x &&
+      worldPoint.x <= this._wireZoneMax.x &&
+      worldPoint.y >= this._wireZoneMin.y &&
+      worldPoint.y <= this._wireZoneMax.y &&
+      worldPoint.z >= this._wireZoneMin.z &&
+      worldPoint.z <= this._wireZoneMax.z
+    )
+  }
+
+  isPointNearDynamicWireTarget(worldPoint, maxDist = this.wireHandActivationMaxDist) {
+    const maxDistSq = maxDist * maxDist
+
+    for (const anchor of this._wireDynamicAnchorsCache) {
+      if (anchor.worldPos.distanceToSquared(worldPoint) <= maxDistSq) return true
+    }
+
+    for (const endpoint of this._wireEndpointsCache) {
+      if (endpoint.worldPos.distanceToSquared(worldPoint) <= maxDistSq) return true
+    }
+
+    return false
+  }
+
+  canHandUseWireHoverAt(worldPoint) {
+    if (this.isPointInsideWireZone(worldPoint)) return true
+    return this.isPointNearDynamicWireTarget(worldPoint, this.wireHandActivationMaxDist)
+  }
+
+  canControllerUseWireHoverAt(worldPoint) {
+    if (this.isPointInsideWireZone(worldPoint)) return true
+    return this.isPointNearDynamicWireTarget(worldPoint, this.wireControllerActivationMaxDist)
+  }
+
+  getAllConnectionAnchors() {
+    this.refreshWireCaches()
+    return [...this._wireHoleAnchorsCache, ...this._wireDynamicAnchorsCache]
   }
 
   findBestWireAnchorForHand(he, maxDist = this.wireHoverMaxDist) {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject) return null
+
     this.getGrabPointWorld(he, this._tmpC)
+
+    if (!this.canHandUseWireHoverAt(this._tmpC)) return null
+
     const anchors = this.getAllConnectionAnchors()
     let best = null
     let bestDist = maxDist
+
     for (const anchor of anchors) {
       const d = anchor.worldPos.distanceTo(this._tmpC)
       if (d > bestDist) continue
+
       if (!best) {
         best = anchor
         bestDist = d
         continue
       }
+
       const bp = this.wireAnchorPriority[best.kind] ?? 999
       const cp = this.wireAnchorPriority[anchor.kind] ?? 999
+
       if (d < bestDist - 0.001) {
         best = anchor
         bestDist = d
@@ -905,6 +1052,7 @@ export class InteractionSystem {
         bestDist = d
       }
     }
+
     return best ? {
       ...best,
       distance: bestDist,
@@ -916,6 +1064,10 @@ export class InteractionSystem {
 
   findBestWireAnchorForController(controller, maxPerpDist = this.wireControllerHoverPerpMaxDist) {
     if (!controller || controller.userData?.heldObject) return null
+
+    const pointerWorld = this.getControllerWirePointerWorld(controller, this._tmpL)
+    if (!pointerWorld || !this.canControllerUseWireHoverAt(pointerWorld)) return null
+
     const anchors = this.getAllConnectionAnchors()
     let best = null
     let bestPerp = maxPerpDist
@@ -984,23 +1136,20 @@ export class InteractionSystem {
   }
 
   getAllWireEndpoints() {
-    const eps = []
-    if (!this.stateSyncSystem) return eps
-    for (const mesh of this.stateSyncSystem.meshById.values()) {
-      if (!mesh?.userData?.isWire) continue
-      const sw = this.getWireEndpointWorldPosition(mesh, "start")
-      const ew = this.getWireEndpointWorldPosition(mesh, "end")
-      if (sw) eps.push({ kind: "wire-endpoint", endpointType: "start", wireId: mesh.userData.componentId, worldPos: sw })
-      if (ew) eps.push({ kind: "wire-endpoint", endpointType: "end", wireId: mesh.userData.componentId, worldPos: ew })
-    }
-    return eps
+    this.refreshWireCaches()
+    return this._wireEndpointsCache
   }
 
   findBestWireEndpointForHand(he, maxDist = this.wireEndpointHoverMaxDist) {
     if (!he || !this.isHandEntryTracked(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
+
     this.getGrabPointWorld(he, this._tmpC)
+
+    if (!this.canHandUseWireHoverAt(this._tmpC)) return null
+
     let best = null
     let bestDist = maxDist
+
     for (const ep of this.getAllWireEndpoints()) {
       const d = ep.worldPos.distanceTo(this._tmpC)
       if (d < bestDist) {
@@ -1008,6 +1157,7 @@ export class InteractionSystem {
         bestDist = d
       }
     }
+
     return best ? {
       ...best,
       distance: bestDist,
@@ -1019,6 +1169,9 @@ export class InteractionSystem {
 
   findBestWireEndpointForController(controller, maxPerpDist = this.wireControllerEndpointPerpMaxDist) {
     if (!controller || controller.userData?.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
+
+    const pointerWorld = this.getControllerWirePointerWorld(controller, this._tmpL)
+    if (!pointerWorld || !this.canControllerUseWireHoverAt(pointerWorld)) return null
 
     let best = null
     let bestPerp = maxPerpDist
@@ -1088,6 +1241,8 @@ export class InteractionSystem {
       this.clearWireHoverAnchor()
       return
     }
+
+    this.refreshWireCaches()
 
     let best = null
     let bestType = null
