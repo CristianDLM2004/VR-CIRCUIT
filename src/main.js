@@ -75,11 +75,15 @@ interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
-const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-for (const hole of holeSystem.holes) {
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 6, 6), holeMat)
-  dot.position.copy(hole.worldPos)
-  scene.add(dot)
+const DEBUG_SHOW_HOLE_DOTS = false
+
+if (DEBUG_SHOW_HOLE_DOTS) {
+  const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
+  for (const hole of holeSystem.holes) {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 6, 6), holeMat)
+    dot.position.copy(hole.worldPos)
+    scene.add(dot)
+  }
 }
 
 // ---------------------------
@@ -892,7 +896,6 @@ renderer.setAnimationLoop(() => {
 
   detectNewComponents()
   validateSelection()
-  refreshEditPanel()
 
   sceneManager.render()
 })

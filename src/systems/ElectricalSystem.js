@@ -68,17 +68,33 @@ export class ElectricalSystem {
     this._blinkIntervalMs = 400
     this._blinkAccumMs = 0
     this._blinkOn = false
+
+    // Optimización: no recalcular todo el grafo cada frame
+    this._simIntervalMs = 90
+    this._simAccumMs = 0
+    this._lastGraph = null
   }
 
   update(dt) {
-    this._blinkAccumMs += dt * 1000
+    const dtMs = dt * 1000
+
+    this._blinkAccumMs += dtMs
     if (this._blinkAccumMs >= this._blinkIntervalMs) {
       this._blinkAccumMs -= this._blinkIntervalMs
       this._blinkOn = !this._blinkOn
     }
 
-    const graph = this._buildGraph()
-    this._simulate(graph)
+    this._simAccumMs += dtMs
+    if (!this._lastGraph || this._simAccumMs >= this._simIntervalMs) {
+      this._simAccumMs = 0
+      this._lastGraph = this._buildGraph()
+      this._simulate(this._lastGraph)
+      return
+    }
+
+    // Si no toca recomputar el circuito, al menos reaplicar el estado visual
+    // para que el blink "sin resistencia" siga viéndose fluido.
+    this._simulate(this._lastGraph)
   }
 
   _buildGraph() {
