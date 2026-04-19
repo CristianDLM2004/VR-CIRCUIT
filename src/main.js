@@ -75,15 +75,27 @@ interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 const holeSystem = new HoleSystem(protoboard, layout)
 interactionSystem.setHoleSystem(holeSystem)
 
-const DEBUG_SHOW_HOLE_DOTS = false
+const SHOW_PROTO_HOLE_DOTS = true
 
-if (DEBUG_SHOW_HOLE_DOTS) {
+if (SHOW_PROTO_HOLE_DOTS) {
+  const holeGeo = new THREE.SphereGeometry(0.0025, 6, 6)
   const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-  for (const hole of holeSystem.holes) {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 6, 6), holeMat)
-    dot.position.copy(hole.worldPos)
-    scene.add(dot)
+  const holeDots = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
+  holeDots.name = "ProtoboardHoleDots"
+
+  const holeMatrix = new THREE.Matrix4()
+
+  for (let i = 0; i < holeSystem.holes.length; i++) {
+    holeMatrix.makeTranslation(
+      holeSystem.holes[i].worldPos.x,
+      holeSystem.holes[i].worldPos.y,
+      holeSystem.holes[i].worldPos.z
+    )
+    holeDots.setMatrixAt(i, holeMatrix)
   }
+
+  holeDots.instanceMatrix.needsUpdate = true
+  scene.add(holeDots)
 }
 
 // ---------------------------
