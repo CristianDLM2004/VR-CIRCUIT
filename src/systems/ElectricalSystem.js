@@ -1,7 +1,12 @@
 /**
  * ElectricalSystem.js
  *
- * Simulación eléctrica de nivel medio para VR-CIRCUIT.
+ * Simulación eléctrica para VR-CIRCUIT
+ * - Detecta continuidad del circuito
+ * - Detecta ausencia de resistencia
+ * - Usa el valor real de la resistencia para variar la intensidad del LED
+ * - Funciona tanto para una sola resistencia de alto valor
+ *   como para varias resistencias en serie
  */
 
 function namedColorToHex(name, fallback = 0xff3b3b) {
@@ -22,6 +27,7 @@ function namedColorToHex(name, fallback = 0xff3b3b) {
   }
 
   if (n in map) return map[n]
+
   if (n.startsWith("#")) {
     const parsed = Number.parseInt(n.slice(1), 16)
     if (Number.isFinite(parsed)) return parsed
@@ -59,6 +65,39 @@ function boostHex(hex, factor = 1.0) {
   return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
 }
 
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v))
+}
+
+function edgeKey(a, b) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
+
+function hexToRgb01(hex) {
+  return {
+    r: ((hex >> 16) & 255) / 255,
+    g: ((hex >> 8) & 255) / 255,
+    b: (hex & 255) / 255,
+  }
+}
+
+// Aproximación práctica de Vf según color del LED
+function estimateLedForwardVoltage(hexColor) {
+  const { r, g, b } = hexToRgb01(hexColor)
+
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+
+  if (max > 0.92 && min > 0.82) return 3.1
+  if (b > 0.75 && b >= g && b >= r) return 3.0
+  if (b > 0.65 && g > 0.65 && r < 0.35) return 3.0
+  if (r > 0.55 && b > 0.55 && g < 0.45) return 2.9
+  if (g > r && g > b) return 2.1
+  if (r > 0.75 && g > 0.45 && b < 0.25) return 2.1
+
+  return 2.0
+}
+
 export class ElectricalSystem {
   constructor(appState, stateSyncSystem, holeSystem) {
     this.appState = appState
@@ -68,145 +107,40 @@ export class ElectricalSystem {
     this._blinkIntervalMs = 400
     this._blinkAccumMs = 0
     this._blinkOn = false
-
-    this._lastCircuitSignature = ""
-    this._lastGraph = null
-    this._lastLedStates = new Map()
   }
 
   update(dt) {
-    const prevBlink = this._blinkOn
-
     this._blinkAccumMs += dt * 1000
     if (this._blinkAccumMs >= this._blinkIntervalMs) {
       this._blinkAccumMs -= this._blinkIntervalMs
       this._blinkOn = !this._blinkOn
     }
 
-    const nextSignature = this._buildCircuitSignature()
-    const blinkChanged = prevBlink !== this._blinkOn
-    const circuitChanged =
-      !this._lastGraph ||
-      nextSignature !== this._lastCircuitSignature
-
-    if (circuitChanged) {
-      this._lastCircuitSignature = nextSignature
-      this._lastGraph = this._buildGraph()
-      this._lastLedStates = this._evaluateAllLeds(this._lastGraph)
-      this._applyAllLedStates(this._lastLedStates)
-      return
-    }
-
-    if (blinkChanged) {
-      this._applyAllLedStates(this._lastLedStates)
-    }
-  }
-
-  _buildCircuitSignature() {
-    const parts = []
-
-    for (const comp of this.appState.components) {
-      if (comp.type === "battery5v") {
-        parts.push(`battery:${comp.id}`)
-        continue
-      }
-
-      if (comp.type === "led") {
-        parts.push(
-          [
-            "led",
-            comp.id,
-            comp.inserted ? 1 : 0,
-            comp.pinConnections?.anode ?? "-",
-            comp.pinConnections?.cathode ?? "-",
-            comp.meta?.color ?? "-"
-          ].join(":")
-        )
-        continue
-      }
-
-      if (comp.type === "resistor") {
-        parts.push(
-          [
-            "resistor",
-            comp.id,
-            comp.inserted ? 1 : 0,
-            comp.pinConnections?.left ?? "-",
-            comp.pinConnections?.right ?? "-",
-            comp.meta?.resistance ?? "-"
-          ].join(":")
-        )
-        continue
-      }
-
-      if (comp.type === "button") {
-        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
-        const pressed = mesh?.userData?.buttonState === true ? 1 : 0
-
-        parts.push(
-          [
-            "button",
-            comp.id,
-            comp.inserted ? 1 : 0,
-            comp.pinConnections?.pin_a ?? "-",
-            comp.pinConnections?.pin_b ?? "-",
-            pressed
-          ].join(":")
-        )
-        continue
-      }
-
-      if (comp.type === "switch") {
-        const mesh = this.stateSyncSystem?.getMeshById(comp.id)
-        const closed = mesh?.userData?.switchState === true ? 1 : 0
-
-        parts.push(
-          [
-            "switch",
-            comp.id,
-            comp.inserted ? 1 : 0,
-            comp.pinConnections?.pin_a ?? "-",
-            comp.pinConnections?.pin_b ?? "-",
-            closed
-          ].join(":")
-        )
-        continue
-      }
-
-      if (comp.type === "wire") {
-        parts.push(
-          [
-            "wire",
-            comp.id,
-            comp.meta?.startAnchor?.kind ?? "-",
-            comp.meta?.startAnchor?.componentId ?? "-",
-            comp.meta?.startAnchor?.id ?? "-",
-            comp.meta?.startAnchor?.holeId ?? "-",
-            comp.meta?.endAnchor?.kind ?? "-",
-            comp.meta?.endAnchor?.componentId ?? "-",
-            comp.meta?.endAnchor?.id ?? "-",
-            comp.meta?.endAnchor?.holeId ?? "-",
-            comp.meta?.color ?? "-"
-          ].join(":")
-        )
-      }
-    }
-
-    return parts.join("|")
+    const graph = this._buildGraph()
+    this._simulate(graph)
   }
 
   _buildGraph() {
     const edges = new Map()
+    const edgeResistance = new Map()
     const batteries = []
     const leds = []
-    const resistors = []
 
-    const addEdge = (a, b) => {
+    const addEdge = (a, b, resistance = 0) => {
       if (!a || !b || a === b) return
+
       if (!edges.has(a)) edges.set(a, new Set())
       if (!edges.has(b)) edges.set(b, new Set())
+
       edges.get(a).add(b)
       edges.get(b).add(a)
+
+      const key = edgeKey(a, b)
+      const prev = edgeResistance.get(key)
+
+      if (prev == null || resistance < prev) {
+        edgeResistance.set(key, resistance)
+      }
     }
 
     const holeGroupMap = new Map()
@@ -258,7 +192,15 @@ export class ElectricalSystem {
       if (comp.type === "battery5v") {
         const posNode = `terminal:${comp.id}:positive`
         const negNode = `terminal:${comp.id}:negative`
-        batteries.push({ posNode, negNode, componentId: comp.id })
+        const voltage = Math.max(0, Number(comp.meta?.voltage) || 5)
+
+        batteries.push({
+          posNode,
+          negNode,
+          componentId: comp.id,
+          voltage,
+        })
+
         if (!edges.has(posNode)) edges.set(posNode, new Set())
         if (!edges.has(negNode)) edges.set(negNode, new Set())
       }
@@ -266,134 +208,181 @@ export class ElectricalSystem {
       if (comp.type === "led" && comp.inserted && comp.pinConnections) {
         const anodeNode = pinToNode(comp, "anode")
         const cathodeNode = pinToNode(comp, "cathode")
+
         if (anodeNode && cathodeNode) {
-          leds.push({ anodeNode, cathodeNode, componentId: comp.id })
+          leds.push({
+            anodeNode,
+            cathodeNode,
+            componentId: comp.id,
+            color: normalizeColorValue(comp.meta?.color, 0xff3b3b),
+          })
         }
       }
 
       if (comp.type === "resistor" && comp.inserted && comp.pinConnections) {
         const leftNode = pinToNode(comp, "left")
         const rightNode = pinToNode(comp, "right")
+        const resistance = Math.max(1, Math.round(Number(comp.meta?.resistance) || 220))
+
         if (leftNode && rightNode) {
-          resistors.push({ leftNode, rightNode, componentId: comp.id })
-          addEdge(leftNode, rightNode)
+          addEdge(leftNode, rightNode, resistance)
         }
       }
 
       if (comp.type === "button" && comp.inserted && comp.pinConnections) {
         const mesh = this.stateSyncSystem?.getMeshById(comp.id)
         const isPressed = mesh?.userData?.buttonState === true
+
         if (isPressed) {
           const nA = pinToNode(comp, "pin_a")
           const nB = pinToNode(comp, "pin_b")
-          if (nA && nB) addEdge(nA, nB)
+          if (nA && nB) addEdge(nA, nB, 0)
         }
       }
 
       if (comp.type === "switch" && comp.inserted && comp.pinConnections) {
         const mesh = this.stateSyncSystem?.getMeshById(comp.id)
         const isClosed = mesh?.userData?.switchState === true
+
         if (isClosed) {
           const nA = pinToNode(comp, "pin_a")
           const nB = pinToNode(comp, "pin_b")
-          if (nA && nB) addEdge(nA, nB)
+          if (nA && nB) addEdge(nA, nB, 0)
         }
       }
 
       if (comp.type === "wire" && comp.meta?.startAnchor && comp.meta?.endAnchor) {
         const sn = anchorToNode(comp.meta.startAnchor)
         const en = anchorToNode(comp.meta.endAnchor)
-        if (sn && en) addEdge(sn, en)
+        if (sn && en) addEdge(sn, en, 0)
       }
     }
 
-    return { edges, batteries, leds, resistors }
+    return { edges, edgeResistance, batteries, leds }
   }
 
-  _evaluateAllLeds(graph) {
-    const states = new Map()
+  _simulate(graph) {
     for (const led of graph.leds) {
-      states.set(led.componentId, this._evaluateLED(led, graph))
-    }
-    return states
-  }
-
-  _applyAllLedStates(states) {
-    for (const [componentId, state] of states.entries()) {
-      this._applyLEDState(componentId, state)
+      const ledState = this._evaluateLED(led, graph)
+      this._applyLEDState(led.componentId, ledState)
     }
   }
 
   _evaluateLED(led, graph) {
-    const { edges, batteries, resistors } = graph
+    const { edges, edgeResistance, batteries } = graph
 
     for (const battery of batteries) {
-      const toAnode = this._bfsWithResistorCheck(
+      const toAnode = this._findLeastResistancePath(
         battery.posNode,
         led.anodeNode,
         new Set([led.cathodeNode, battery.negNode]),
         edges,
-        resistors
+        edgeResistance
       )
       if (!toAnode.reached) continue
 
-      const toCathode = this._bfsWithResistorCheck(
+      const toCathode = this._findLeastResistancePath(
         led.cathodeNode,
         battery.negNode,
         new Set([led.anodeNode, battery.posNode]),
         edges,
-        resistors
+        edgeResistance
       )
       if (!toCathode.reached) continue
 
-      const hasResistor = toAnode.passedResistor || toCathode.passedResistor
-      return hasResistor ? "on" : "no_resistor"
+      const totalResistance = toAnode.totalResistance + toCathode.totalResistance
+
+      if (totalResistance <= 0) {
+        return { mode: "no_resistor", brightness: 0, currentA: 0 }
+      }
+
+      const vf = estimateLedForwardVoltage(led.color)
+      const availableVoltage = Math.max(0, battery.voltage - vf)
+      const currentA = availableVoltage / totalResistance
+
+      if (currentA <= 0.0008) {
+        return { mode: "off", brightness: 0, currentA }
+      }
+
+      const normalizedCurrent = clamp01(currentA / 0.02)
+      const brightness = Math.pow(normalizedCurrent, 0.7)
+
+      return {
+        mode: "on",
+        brightness,
+        currentA,
+      }
     }
 
-    return "off"
+    return { mode: "off", brightness: 0, currentA: 0 }
   }
 
-  _bfsWithResistorCheck(startNode, targetNode, blockedNodes, edges, resistors) {
-    if (startNode === targetNode) return { reached: true, passedResistor: false }
-    if (blockedNodes.has(startNode)) return { reached: false, passedResistor: false }
-
-    const resistorNodes = new Set()
-    for (const r of resistors) {
-      resistorNodes.add(r.leftNode)
-      resistorNodes.add(r.rightNode)
+  _findLeastResistancePath(startNode, targetNode, blockedNodes, edges, edgeResistance) {
+    if (startNode === targetNode) {
+      return { reached: true, totalResistance: 0 }
     }
 
-    const visited = new Set([startNode])
-    const queue = [[startNode, false]]
+    if (blockedNodes.has(startNode)) {
+      return { reached: false, totalResistance: Infinity }
+    }
+
+    const dist = new Map()
+    const visited = new Set()
+    const queue = []
+
+    dist.set(startNode, 0)
+    queue.push({ node: startNode, totalResistance: 0 })
 
     while (queue.length > 0) {
-      const [current, passedR] = queue.shift()
-      const neighbors = edges.get(current)
+      queue.sort((a, b) => a.totalResistance - b.totalResistance)
+      const current = queue.shift()
+
+      if (!current) break
+      if (visited.has(current.node)) continue
+
+      visited.add(current.node)
+
+      if (current.node === targetNode) {
+        return { reached: true, totalResistance: current.totalResistance }
+      }
+
+      const neighbors = edges.get(current.node)
       if (!neighbors) continue
 
       for (const neighbor of neighbors) {
         if (visited.has(neighbor)) continue
         if (blockedNodes.has(neighbor) && neighbor !== targetNode) continue
 
-        const nowPassedR = passedR || resistorNodes.has(neighbor)
+        const key = edgeKey(current.node, neighbor)
+        const resistance = edgeResistance.get(key) ?? 0
+        const nextTotal = current.totalResistance + resistance
+        const prev = dist.get(neighbor)
 
-        if (neighbor === targetNode) {
-          return { reached: true, passedResistor: nowPassedR }
+        if (prev == null || nextTotal < prev) {
+          dist.set(neighbor, nextTotal)
+          queue.push({
+            node: neighbor,
+            totalResistance: nextTotal,
+          })
         }
-
-        visited.add(neighbor)
-        queue.push([neighbor, nowPassedR])
       }
     }
 
-    return { reached: false, passedResistor: false }
+    return { reached: false, totalResistance: Infinity }
   }
 
-  _applyLEDState(componentId, state) {
+  _applyLEDState(componentId, ledState) {
     const mesh = this.stateSyncSystem?.getMeshById(componentId)
     if (!mesh) return
 
-    const baseColor = normalizeColorValue(mesh.userData?.meta?.color, mesh.userData?.baseLedColor ?? 0xff3b3b)
+    const state = ledState?.mode ?? "off"
+    const brightness = clamp01(ledState?.brightness ?? 0)
+
+    const baseColor = normalizeColorValue(
+      mesh.userData?.meta?.color,
+      mesh.userData?.baseLedColor ?? 0xff3b3b
+    )
+
     const onColor = boostHex(baseColor, 1.15)
     const onEmissive = boostHex(baseColor, 0.95)
     const warningColor = mixHex(baseColor, 0xffa000, 0.45)
@@ -407,9 +396,12 @@ export class ElectricalSystem {
       if (!mat || !("emissive" in mat)) return
 
       if (state === "on") {
-        mat.color.setHex(onColor)
+        const colorT = 0.20 + brightness * 0.80
+        const visibleColor = mixHex(baseColor, onColor, colorT)
+
+        mat.color.setHex(visibleColor)
         mat.emissive.setHex(onEmissive)
-        mat.emissiveIntensity = 1.8
+        mat.emissiveIntensity = 0.15 + brightness * 1.65
         mat.transparent = false
         mat.opacity = 1.0
       } else if (state === "no_resistor") {
