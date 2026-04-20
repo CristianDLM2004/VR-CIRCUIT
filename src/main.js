@@ -799,7 +799,7 @@ function toggleAppMode() {
 // ---------------------------
 // Paneles separados
 // ---------------------------
-const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
+const panelWorldPos = new THREE.Vector3(0.95, 1.32, -0.72)
 const panelRotY = -Math.PI / 6
 
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
@@ -826,7 +826,7 @@ setWireModeVisualFn = setWireModeVisual
 setSimModeVisualFn = setSimModeVisual
 
 const editPanelApi = createEditPanel({
-  position: new THREE.Vector3(-0.62, 1.15, -0.48),
+  position: new THREE.Vector3(-1.00, 1.32, -0.72),
   rotationY: Math.PI / 6,
   onSelectHeld: selectHeldComponent,
   onSelectLastWire: selectLastWire,
