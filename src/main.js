@@ -29,8 +29,8 @@ interactionSystem.setStateSyncSystem(stateSyncSystem)
 // ---------------------------
 // Luces + entorno salón Mrs. Puff
 // ---------------------------
-scene.background = new THREE.Color(0xdfe6ef)
-scene.fog = new THREE.Fog(0xdfe6ef, 8, 18)
+scene.background = new THREE.Color(0xcfc78a)
+scene.fog = new THREE.Fog(0xcfc78a, 14, 28)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.95))
 
@@ -85,7 +85,7 @@ scene.add(classroomRoot)
 
 // Mesa helper invisible alineada al escritorio de la miss
 const tableHelper = new THREE.Mesh(
-  new THREE.BoxGeometry(1.55, 0.08, 0.80),
+  new THREE.BoxGeometry(1.80, 0.08, 0.95),
   new THREE.MeshStandardMaterial({
     color: 0xffffff,
     transparent: true,
@@ -173,9 +173,10 @@ function rebuildProtoboardOnDesk() {
   }
 }
 
+const classroomModelUrl = `${import.meta.env.BASE_URL}models/mrs-puffs-classroom.glb`
 const classroomLoader = new GLTFLoader()
 classroomLoader.load(
-  "/models/mrs-puffs-classroom.glb",
+  classroomModelUrl,
   (gltf) => {
     const classroom = gltf.scene
     classroom.name = "MrsPuffsClassroom"
@@ -202,22 +203,33 @@ classroomLoader.load(
 
     const rawBox = new THREE.Box3().setFromObject(classroom)
     const rawSize = rawBox.getSize(new THREE.Vector3())
+    console.log("📏 Tamaño original del salón:", rawSize)
 
-    const targetRoomWidth = 5.6
+    const targetRoomWidth = 7.2
     const scaleFactor = rawSize.x > 0 ? targetRoomWidth / rawSize.x : 1
     classroom.scale.setScalar(scaleFactor)
     classroom.updateMatrixWorld(true)
 
     const scaledBox = new THREE.Box3().setFromObject(classroom)
+    const scaledSize = scaledBox.getSize(new THREE.Vector3())
     const scaledCenter = scaledBox.getCenter(new THREE.Vector3())
 
+    console.log("📏 Tamaño escalado del salón:", scaledSize)
+    console.log("📍 Centro escalado del salón:", scaledCenter)
+    console.log("📍 Min escalado:", scaledBox.min)
+    console.log("📍 Max escalado:", scaledBox.max)
+
     classroom.position.x -= scaledCenter.x
-    classroom.position.z -= scaledCenter.z
     classroom.position.y -= scaledBox.min.y
+
+    // Deja el salón ligeramente corrido para que el origen (usuario al entrar)
+    // quede atrás del escritorio de la señora Puff y mirando hacia el frente del aula.
+    classroom.position.z = -1.35
+
     classroom.updateMatrixWorld(true)
 
     // Ajuste inicial del escritorio de la miss
-    tableHelper.position.set(0.00, 0.76, -0.82)
+    tableHelper.position.set(0.00, 0.76, -0.80)
     tableHelper.updateMatrixWorld(true)
 
     table = tableHelper
@@ -226,9 +238,11 @@ classroomLoader.load(
 
     console.log("✅ Salón cargado")
   },
-  undefined,
+  () => {
+    console.log("📦 Cargando salón desde:", classroomModelUrl)
+  },
   (error) => {
-    console.error("❌ No se pudo cargar el salón GLB:", error)
+    console.error("❌ No se pudo cargar el salón GLB:", classroomModelUrl, error)
 
     tableHelper.position.set(0, 0.75, -0.8)
     tableHelper.updateMatrixWorld(true)
