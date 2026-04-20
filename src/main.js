@@ -223,8 +223,8 @@ classroomLoader.load(
     classroom.position.y -= scaledBox.min.y
 
     // Ajuste moderado: mantiene al usuario dentro del salón y detrás del escritorio
-    classroom.position.z = -2.75
-    classroom.position.x -= 0.08 //Negativos a la izquierda, positivos a la derecha
+    classroom.position.z = -2.80
+    classroom.position.x -= 0.06 //Negativos a la izquierda, positivos a la derecha
 
     classroom.updateMatrixWorld(true)
 
