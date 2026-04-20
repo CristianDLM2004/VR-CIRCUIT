@@ -224,6 +224,7 @@ classroomLoader.load(
 
     // Ajuste moderado: mantiene al usuario dentro del salón y detrás del escritorio
     classroom.position.z = -2.75
+    classroom.position.x -= 0.08 //Negativos a la izquierda, positivos a la derecha
 
     classroom.updateMatrixWorld(true)
 
@@ -234,6 +235,14 @@ classroomLoader.load(
     table = tableHelper
     updateTableSurfaceBounds()
     rebuildProtoboardOnDesk()
+
+    // Botones físicos delante de ti pero todavía sobre la zona del escritorio
+    btnSpawnGroup.position.set(0.18, tableButtonY, table.position.z - 0.28)
+    btnModeGroup.position.set(0.34, tableButtonY, table.position.z - 0.28)
+    btnEditGroup.position.set(0.50, tableButtonY, table.position.z - 0.28)
+
+    // Bote al costado izquierdo, cerca del escritorio
+    trashBin.position.set(-0.55, 0.20, table.position.z - 0.40)
 
     console.log("✅ Salón cargado")
   },
