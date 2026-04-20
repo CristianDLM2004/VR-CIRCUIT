@@ -132,12 +132,12 @@ function rebuildProtoboardOnDesk() {
   const tableTopY = table.position.y + 0.04
 
   const protoData = createProtoboard({
-    position: new THREE.Vector3(
-      table.position.x,
-      tableTopY + 0.03,
-      table.position.z -40
-    ),
-  })
+  position: new THREE.Vector3(
+    table.position.x,
+    tableTopY + 0.03,
+    table.position.z + 0.18
+  ),
+})
 
   protoboard = protoData.group
   protoSurface = protoData.surfaceMesh
@@ -236,13 +236,13 @@ classroomLoader.load(
     updateTableSurfaceBounds()
     rebuildProtoboardOnDesk()
 
-    // Botones físicos enfrente de ti y cerca del escritorio
-    btnSpawnGroup.position.set(0.18, tableButtonY, table.position.z - 0.24)
-    btnModeGroup.position.set(0.34, tableButtonY, table.position.z - 0.24)
-    btnEditGroup.position.set(0.50, tableButtonY, table.position.z - 0.24)
+    // Botones físicos delante de ti pero todavía sobre la zona del escritorio
+    btnSpawnGroup.position.set(0.18, tableButtonY, table.position.z - 0.34)
+    btnModeGroup.position.set(0.34, tableButtonY, table.position.z - 0.34)
+    btnEditGroup.position.set(0.50, tableButtonY, table.position.z - 0.34)
 
     // Bote al costado izquierdo, cerca del escritorio
-    trashBin.position.set(-0.55, 0.20, table.position.z + 0.05)
+    trashBin.position.set(-0.55, 0.20, table.position.z - 0.18)
 
     console.log("✅ Salón cargado")
   },
