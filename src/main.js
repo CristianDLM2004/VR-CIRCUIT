@@ -135,7 +135,7 @@ function rebuildProtoboardOnDesk() {
   position: new THREE.Vector3(
     table.position.x,
     tableTopY + 0.03,
-    table.position.z - 1.40
+    table.position.z - 1.27
   ),
 })
 
@@ -237,9 +237,9 @@ classroomLoader.load(
     rebuildProtoboardOnDesk()
 
     // Botones físicos delante de ti pero todavía sobre la zona del escritorio
-    btnSpawnGroup.position.set(0.23, tableButtonY, table.position.z - 0.95)
-    btnModeGroup.position.set(0.39, tableButtonY, table.position.z - 0.95)
-    btnEditGroup.position.set(0.55, tableButtonY, table.position.z - 0.95)
+    btnSpawnGroup.position.set(0.28, tableButtonY, table.position.z - 0.95)
+    btnModeGroup.position.set(0.44, tableButtonY, table.position.z - 0.95)
+    btnEditGroup.position.set(0.60, tableButtonY, table.position.z - 0.95)
 
     // Bote al costado izquierdo, cerca del escritorio
     trashBin.position.set(-0.55, 0.20, table.position.z - 0.75)
