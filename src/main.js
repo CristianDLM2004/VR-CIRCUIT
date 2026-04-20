@@ -221,16 +221,14 @@ classroomLoader.load(
 
     classroom.position.x -= scaledCenter.x
     classroom.position.y -= scaledBox.min.y
-    classroom.position.y += 0.20
 
-    // Movemos TODO el entorno 1.30m más al frente para que el usuario
-    // quede detrás del escritorio, pero conservando la alineación visual.
-    classroom.position.z = -3.95
+    // Ajuste moderado: mantiene al usuario dentro del salón y detrás del escritorio
+    classroom.position.z = -2.75
 
     classroom.updateMatrixWorld(true)
 
-    // Este valor se conserva relativo al escritorio, solo trasladado al frente
-    tableHelper.position.set(0.00, 0.76, -0.65)
+    // ESTE valor se queda porque ya comprobaste que coincide con el escritorio
+    tableHelper.position.set(0.00, 0.76, 0.65)
     tableHelper.updateMatrixWorld(true)
 
     table = tableHelper
