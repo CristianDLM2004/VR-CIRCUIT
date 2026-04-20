@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { SceneManager } from "./core/SceneManager.js"
 import { VRManager } from "./core/VRManager.js"
 import { AppState } from "./core/AppState.js"
@@ -26,83 +27,220 @@ const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem)
 interactionSystem.setStateSyncSystem(stateSyncSystem)
 
 // ---------------------------
-// Luces
+// Luces + entorno salón Mrs. Puff
 // ---------------------------
-scene.add(new THREE.AmbientLight(0xffffff, 0.6))
-const dir = new THREE.DirectionalLight(0xffffff, 1.0)
-dir.position.set(2, 4, 2)
+scene.background = new THREE.Color(0xdfe6ef)
+scene.fog = new THREE.Fog(0xdfe6ef, 8, 18)
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.95))
+
+const hemi = new THREE.HemisphereLight(0xf7f4ea, 0xb8c4d6, 1.10)
+hemi.position.set(0, 4, 0)
+scene.add(hemi)
+
+const dir = new THREE.DirectionalLight(0xfff4dc, 1.15)
+dir.position.set(2.5, 4.5, 1.5)
 scene.add(dir)
 
+const frontSpot = new THREE.SpotLight(0xfff1d8, 1.8, 10, Math.PI / 5, 0.35, 1.0)
+frontSpot.position.set(0, 3.2, -1.8)
+frontSpot.target.position.set(0, 0.8, -0.9)
+scene.add(frontSpot)
+scene.add(frontSpot.target)
+
+const centerFill = new THREE.PointLight(0xffffff, 0.45, 8)
+centerFill.position.set(0, 2.4, 0)
+scene.add(centerFill)
+
 // ---------------------------
-// Piso + Mesa
+// Piso físico invisible
 // ---------------------------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(50, 50),
-  new THREE.MeshStandardMaterial({ color: 0x222222 })
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  })
 )
 floor.rotation.x = -Math.PI / 2
+floor.visible = false
 scene.add(floor)
-
-const table = new THREE.Mesh(
-  new THREE.BoxGeometry(2.0, 0.1, 1.2),
-  new THREE.MeshStandardMaterial({ color: 0x444444 })
-)
-table.position.set(0, 0.75, -0.8)
-scene.add(table)
-table.updateMatrixWorld(true)
-
 interactionSystem.registerSurface(floor, { type: "floor" })
-const tableBox = new THREE.Box3().setFromObject(table)
-const tableMargin = 0.12
-interactionSystem.registerSurface(table, {
-  type: "table",
-  bounds: {
-    minX: tableBox.min.x + tableMargin, maxX: tableBox.max.x - tableMargin,
-    minZ: tableBox.min.z + tableMargin, maxZ: tableBox.max.z - tableMargin,
-  },
-})
 
 // ---------------------------
-// Protoboard + HoleSystem
+// Entorno GLB
 // ---------------------------
-const tableTopY = table.position.y + 0.05
-const { group: protoboard, surfaceMesh: protoSurface, layout } = createProtoboard({
-  position: new THREE.Vector3(table.position.x, tableTopY + 0.03, table.position.z),
-})
-scene.add(protoboard)
-interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
+let table = null
+let protoboard = null
+let protoSurface = null
+let layout = null
+let holeSystem = null
+let holeDots = null
 
-const holeSystem = new HoleSystem(protoboard, layout)
-interactionSystem.setHoleSystem(holeSystem)
+const classroomRoot = new THREE.Group()
+classroomRoot.name = "MrsPuffsClassroomRoot"
+scene.add(classroomRoot)
 
-const SHOW_PROTO_HOLE_DOTS = true
+// Mesa helper invisible alineada al escritorio de la miss
+const tableHelper = new THREE.Mesh(
+  new THREE.BoxGeometry(1.55, 0.08, 0.80),
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  })
+)
+tableHelper.name = "TeacherDeskHelper"
+tableHelper.visible = false
+scene.add(tableHelper)
 
-if (SHOW_PROTO_HOLE_DOTS) {
-  const holeGeo = new THREE.SphereGeometry(0.0025, 6, 6)
-  const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-  const holeDots = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
-  holeDots.name = "ProtoboardHoleDots"
+function updateTableSurfaceBounds() {
+  if (!table) return
 
-  const holeMatrix = new THREE.Matrix4()
+  table.updateMatrixWorld(true)
 
-  for (let i = 0; i < holeSystem.holes.length; i++) {
-    holeMatrix.makeTranslation(
-      holeSystem.holes[i].worldPos.x,
-      holeSystem.holes[i].worldPos.y,
-      holeSystem.holes[i].worldPos.z
-    )
-    holeDots.setMatrixAt(i, holeMatrix)
-  }
+  const tableBox = new THREE.Box3().setFromObject(table)
+  const tableMargin = 0.10
 
-  holeDots.instanceMatrix.needsUpdate = true
-  scene.add(holeDots)
+  interactionSystem.registerSurface(table, {
+    type: "table",
+    bounds: {
+      minX: tableBox.min.x + tableMargin,
+      maxX: tableBox.max.x - tableMargin,
+      minZ: tableBox.min.z + tableMargin,
+      maxZ: tableBox.max.z - tableMargin,
+    },
+  })
 }
 
+function rebuildProtoboardOnDesk() {
+  if (!table) return
+
+  if (protoboard) {
+    scene.remove(protoboard)
+    protoboard = null
+  }
+
+  if (holeDots) {
+    scene.remove(holeDots)
+    holeDots = null
+  }
+
+  const tableTopY = table.position.y + 0.04
+
+  const protoData = createProtoboard({
+    position: new THREE.Vector3(
+      table.position.x,
+      tableTopY + 0.03,
+      table.position.z
+    ),
+  })
+
+  protoboard = protoData.group
+  protoSurface = protoData.surfaceMesh
+  layout = protoData.layout
+
+  scene.add(protoboard)
+  interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
+
+  holeSystem = new HoleSystem(protoboard, layout)
+  interactionSystem.setHoleSystem(holeSystem)
+  electricalSystem.holeSystem = holeSystem
+
+  const SHOW_PROTO_HOLE_DOTS = true
+  if (SHOW_PROTO_HOLE_DOTS) {
+    const holeGeo = new THREE.SphereGeometry(0.0025, 6, 6)
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
+    holeDots = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
+    holeDots.name = "ProtoboardHoleDots"
+
+    const holeMatrix = new THREE.Matrix4()
+
+    for (let i = 0; i < holeSystem.holes.length; i++) {
+      holeMatrix.makeTranslation(
+        holeSystem.holes[i].worldPos.x,
+        holeSystem.holes[i].worldPos.y,
+        holeSystem.holes[i].worldPos.z
+      )
+      holeDots.setMatrixAt(i, holeMatrix)
+    }
+
+    holeDots.instanceMatrix.needsUpdate = true
+    scene.add(holeDots)
+  }
+}
+
+const classroomLoader = new GLTFLoader()
+classroomLoader.load(
+  "/models/mrs-puffs-classroom.glb",
+  (gltf) => {
+    const classroom = gltf.scene
+    classroom.name = "MrsPuffsClassroom"
+
+    classroomRoot.clear()
+    classroomRoot.add(classroom)
+
+    classroom.traverse((obj) => {
+      if (!obj.isMesh) return
+
+      obj.castShadow = false
+      obj.receiveShadow = true
+
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          for (const mat of obj.material) {
+            if (mat?.map) mat.map.anisotropy = 4
+          }
+        } else {
+          if (obj.material.map) obj.material.map.anisotropy = 4
+        }
+      }
+    })
+
+    const rawBox = new THREE.Box3().setFromObject(classroom)
+    const rawSize = rawBox.getSize(new THREE.Vector3())
+
+    const targetRoomWidth = 5.6
+    const scaleFactor = rawSize.x > 0 ? targetRoomWidth / rawSize.x : 1
+    classroom.scale.setScalar(scaleFactor)
+    classroom.updateMatrixWorld(true)
+
+    const scaledBox = new THREE.Box3().setFromObject(classroom)
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3())
+
+    classroom.position.x -= scaledCenter.x
+    classroom.position.z -= scaledCenter.z
+    classroom.position.y -= scaledBox.min.y
+    classroom.updateMatrixWorld(true)
+
+    // Ajuste inicial del escritorio de la miss
+    tableHelper.position.set(0.00, 0.76, -0.82)
+    tableHelper.updateMatrixWorld(true)
+
+    table = tableHelper
+    updateTableSurfaceBounds()
+    rebuildProtoboardOnDesk()
+
+    console.log("✅ Salón cargado")
+  },
+  undefined,
+  (error) => {
+    console.error("❌ No se pudo cargar el salón GLB:", error)
+
+    tableHelper.position.set(0, 0.75, -0.8)
+    tableHelper.updateMatrixWorld(true)
+    table = tableHelper
+    updateTableSurfaceBounds()
+    rebuildProtoboardOnDesk()
+  }
+)
 // ---------------------------
 // Sistema eléctrico
 // ---------------------------
-const electricalSystem = new ElectricalSystem(appState, stateSyncSystem, holeSystem)
-
+const electricalSystem = new ElectricalSystem(appState, stateSyncSystem, null)
 // ---------------------------
 // Helpers base
 // ---------------------------
@@ -176,6 +314,12 @@ function getLatestComponentByType(type) {
     if (appState.components[i].type === type) return appState.components[i]
   }
   return null
+}
+
+function getSpawnBasePosition() {
+  if (protoboard) return protoboard.position.clone()
+  if (table) return new THREE.Vector3(table.position.x, table.position.y + 0.12, table.position.z)
+  return new THREE.Vector3(0, 0.9, -0.8)
 }
 
 function syncSpecialRefs(mesh) {
@@ -481,7 +625,7 @@ function applyPendingChanges() {
 // ---------------------------
 function addBattery5V() {
   const id = genId("battery5v")
-  const p = protoboard.position.clone(); p.y += 0.15; p.z += 0.12
+  const p = getSpawnBasePosition(); p.y += 0.15; p.z += 0.12
 
   const data = {
     id,
@@ -498,7 +642,7 @@ function addBattery5V() {
 
 function addLed() {
   const id = genId("led")
-  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.12
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.12
 
   const data = {
     id,
@@ -515,7 +659,7 @@ function addLed() {
 
 function addResistor() {
   const id = genId("resistor")
-  const p = protoboard.position.clone(); p.y += 0.32; p.z += 0.12
+  const p = getSpawnBasePosition(); p.y += 0.32; p.z += 0.12
 
   const resistance = 220
   const data = {
@@ -533,7 +677,7 @@ function addResistor() {
 
 function addButton() {
   const id = genId("button")
-  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.20
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.20
 
   const data = {
     id,
@@ -550,7 +694,7 @@ function addButton() {
 
 function addSwitch() {
   const id = genId("switch")
-  const p = protoboard.position.clone(); p.y += 0.25; p.z += 0.28
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.28
 
   const data = {
     id,
