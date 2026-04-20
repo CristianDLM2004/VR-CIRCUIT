@@ -132,12 +132,12 @@ function rebuildProtoboardOnDesk() {
   const tableTopY = table.position.y + 0.04
 
   const protoData = createProtoboard({
-  position: new THREE.Vector3(
-    table.position.x,
-    tableTopY + 0.03,
-    table.position.z - 1.27
-  ),
-})
+    position: new THREE.Vector3(
+      table.position.x,
+      tableTopY + 0.03,
+      table.position.z - 1.27
+    ),
+  })
 
   protoboard = protoData.group
   protoSurface = protoData.surfaceMesh
@@ -799,7 +799,7 @@ function toggleAppMode() {
 // ---------------------------
 // Paneles separados
 // ---------------------------
-const panelWorldPos = new THREE.Vector3(0.55, 1.15, -1.80)
+const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY = -Math.PI / 6
 
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
@@ -826,7 +826,7 @@ setWireModeVisualFn = setWireModeVisual
 setSimModeVisualFn = setSimModeVisual
 
 const editPanelApi = createEditPanel({
-  position: new THREE.Vector3(-0.62, 1.15, -1.78),
+  position: new THREE.Vector3(-0.62, 1.15, -0.48),
   rotationY: Math.PI / 6,
   onSelectHeld: selectHeldComponent,
   onSelectLastWire: selectLastWire,
@@ -947,9 +947,10 @@ function createTableToggleButton({ name, label, color, position, onPress }) {
 
   const labelPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(0.085, 0.040),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
   )
-  labelPlane.position.set(0, 0.035, 0.047)
+  labelPlane.rotation.x = -Math.PI / 2
+  labelPlane.position.set(0, 0.011, 0)
   button.add(labelPlane)
 
   return { group, button }
