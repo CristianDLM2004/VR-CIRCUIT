@@ -229,7 +229,7 @@ classroomLoader.load(
     classroom.updateMatrixWorld(true)
 
     // Ajuste inicial del escritorio de la miss
-    tableHelper.position.set(0.00, 0.76, -0.80)
+    tableHelper.position.set(0.00, 0.76, -0.20)
     tableHelper.updateMatrixWorld(true)
 
     table = tableHelper
