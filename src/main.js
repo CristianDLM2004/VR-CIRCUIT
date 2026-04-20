@@ -221,15 +221,16 @@ classroomLoader.load(
 
     classroom.position.x -= scaledCenter.x
     classroom.position.y -= scaledBox.min.y
+    classroom.position.y += 0.20
 
-    // Deja el salón ligeramente corrido para que el origen (usuario al entrar)
-    // quede atrás del escritorio de la señora Puff y mirando hacia el frente del aula.
-    classroom.position.z = -1.35
+    // Movemos TODO el entorno 1.30m más al frente para que el usuario
+    // quede detrás del escritorio, pero conservando la alineación visual.
+    classroom.position.z = -3.95
 
     classroom.updateMatrixWorld(true)
 
-    // Ajuste inicial del escritorio de la miss
-    tableHelper.position.set(0.00, 0.76, 0.80)
+    // Este valor se conserva relativo al escritorio, solo trasladado al frente
+    tableHelper.position.set(0.00, 0.76, -0.65)
     tableHelper.updateMatrixWorld(true)
 
     table = tableHelper
@@ -791,7 +792,7 @@ function toggleAppMode() {
 // ---------------------------
 // Paneles separados
 // ---------------------------
-const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
+const panelWorldPos = new THREE.Vector3(0.55, 1.15, -1.80)
 const panelRotY = -Math.PI / 6
 
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
@@ -818,7 +819,7 @@ setWireModeVisualFn = setWireModeVisual
 setSimModeVisualFn = setSimModeVisual
 
 const editPanelApi = createEditPanel({
-  position: new THREE.Vector3(-0.62, 1.15, -0.48),
+  position: new THREE.Vector3(-0.62, 1.15, -1.78),
   rotationY: Math.PI / 6,
   onSelectHeld: selectHeldComponent,
   onSelectLastWire: selectLastWire,
@@ -953,7 +954,7 @@ const { group: btnSpawnGroup, button: btnSpawn } = createTableToggleButton({
   name: "BtnTableSpawn",
   label: "Comp.",
   color: 0x2ecc71,
-  position: new THREE.Vector3(0.18, tableButtonY, -0.33),
+  position: new THREE.Vector3(0.18, tableButtonY, -1.63),
   onPress: () => togglePanel("spawn"),
 })
 
@@ -961,7 +962,7 @@ const { group: btnModeGroup, button: btnMode } = createTableToggleButton({
   name: "BtnTableMode",
   label: "Modos",
   color: 0x3498db,
-  position: new THREE.Vector3(0.34, tableButtonY, -0.33),
+  position: new THREE.Vector3(0.34, tableButtonY, -1.63),
   onPress: () => togglePanel("mode"),
 })
 
@@ -969,7 +970,7 @@ const { group: btnEditGroup, button: btnEdit } = createTableToggleButton({
   name: "BtnTableEdit",
   label: "Editor",
   color: 0x9b59b6,
-  position: new THREE.Vector3(0.50, tableButtonY, -0.33),
+  position: new THREE.Vector3(0.50, tableButtonY, -1.63),
   onPress: () => togglePanel("edit"),
 })
 
@@ -982,7 +983,7 @@ interactionSystem.register(btnEdit)
 // Trash System
 // ---------------------------
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
-const trashBin = trashSystem.createTrashBin({ parent: scene, position: new THREE.Vector3(-0.55, 0.0, -0.10) })
+const trashBin = trashSystem.createTrashBin({ parent: scene, position: new THREE.Vector3(-0.55, 0.20, -1.40) })
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
