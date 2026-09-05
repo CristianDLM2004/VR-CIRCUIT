@@ -352,7 +352,7 @@ function getSpawnBasePosition() {
 
 function syncSpecialRefs(mesh) {
   if (!mesh) return
-  if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent || mesh.userData?.isPowerSupply) {
+  if (mesh.userData?.isSwitchComponent || mesh.userData?.isButtonComponent) {
     mesh.userData._appStateRef = appState
   }
 }
@@ -546,6 +546,43 @@ function applyPendingChanges() {
 // Crear componentes
 // ─────────────────────────────────────────────
 
+function addBattery5V() {
+  const id = genId("battery5v")
+  const p  = getSpawnBasePosition(); p.y += 0.15; p.z += 0.12
+  const data = { id, type: "battery5v", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { voltage: 5 } }
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh); selectComponent(id)
+}
+
+function addLed() {
+  const id = genId("led")
+  const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.12
+  const data = { id, type: "led", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { color: 0xff3b3b } }
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh); selectComponent(id)
+}
+
+function addResistor() {
+  const id = genId("resistor")
+  const p  = getSpawnBasePosition(); p.y += 0.32; p.z += 0.12
+  const resistance = 220
+  const data = { id, type: "resistor", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { resistance, bands: resistanceToBands(resistance) } }
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh); selectComponent(id)
+}
+
+function addButton() {
+  const id = genId("button")
+  const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.20
+  const data = { id, type: "button", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: {} }
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh); selectComponent(id)
+}
+
 function addSwitch() {
   const id = genId("switch")
   const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.28
@@ -555,26 +592,7 @@ function addSwitch() {
   syncSpecialRefs(mesh); selectComponent(id)
 }
 
-/**
- * Crea una fuente de poder variable en la escena.
- * Hecho e implementado por LFTS.
- * Voltaje inicial: 5V, Corriente máxima inicial: 1A
- */
-function addPowerSupply() {
-  const id = genId("powersupply")
-  const p  = getSpawnBasePosition(); p.y += 0.20; p.z += 0.05
-  const data = {
-    id,
-    type: "powersupply",
-    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
-    meta: { voltage: 5, maxCurrent: 1 },
-  }
-  appState.addComponent(data)
-  const mesh = stateSyncSystem.addMeshFromComponent(data)
-  syncSpecialRefs(mesh)
-  selectComponent(id)
-}
-
+// ─────────────────────────────────────────────
 // Guardar / cargar / limpiar
 // ─────────────────────────────────────────────
 
@@ -663,7 +681,7 @@ const panelRotY     = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply,
+  onButton: addButton, onSwitch: addSwitch,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -845,7 +863,6 @@ window.addEventListener("keydown", (e) => {
   if (k === "b") addResistor()
   if (k === "n") addButton()
   if (k === "m") addSwitch()
-  if (k === "f") addPowerSupply()
   if (k === "w") toggleWireMode()
   if (k === "e") toggleAppMode()
   if (k === "s") saveState()
@@ -919,3 +936,4 @@ renderer.setAnimationLoop(() => {
   validateSelection()
 
   sceneManager.render()
+})
