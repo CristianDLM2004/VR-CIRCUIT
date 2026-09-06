@@ -1,3 +1,4 @@
+// Hecho e implementado por LFTS
 import * as THREE from "three"
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js"
 import { XRHandModelFactory } from "three/examples/jsm/webxr/XRHandModelFactory.js"
@@ -159,6 +160,7 @@ export class InteractionSystem {
   setAppMode(mode) {
     const next = mode === "sim" ? "sim" : "edit"
     if (this.appMode === next) return
+    this.powerSupplyControls?.cancel()
     this.appMode = next
 
     if (this.appMode === "sim") {
@@ -190,6 +192,7 @@ export class InteractionSystem {
     const next = mode === "wire" ? "wire" : "grab"
     if (this.toolMode === next) return
 
+    this.powerSupplyControls?.cancel()
     this.toolMode = next
     this.markWireCachesDirty()
 
@@ -413,12 +416,12 @@ export class InteractionSystem {
 
   setHover(newH) {
     if (this.hovered === newH) return
-    if (this.hovered) {
+    if (this.hovered && !this.hovered.userData?.diagnosticError) {
       this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x000000) })
       if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x000000)
     }
     this.hovered = newH
-    if (this.hovered) {
+    if (this.hovered && !this.hovered.userData?.diagnosticError) {
       this.hovered.traverse?.((c) => { if (c.isMesh && c.material?.emissive) c.material.emissive.setHex(0x222222) })
       if (this.hovered.material?.emissive) this.hovered.material.emissive.setHex(0x222222)
     }
@@ -755,6 +758,8 @@ export class InteractionSystem {
   }
 
   computeControllerHoverFor(controller) {
+    const supplyControl = this.powerSupplyControls?.controllerHover(controller)
+    if (supplyControl) return supplyControl
     this.tempMatrix.identity().extractRotation(controller.matrixWorld)
     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld)
     this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix)
@@ -2222,9 +2227,12 @@ export class InteractionSystem {
   }
 
   onControllerSelectStart(event) {
+    if (event.data?.hand) return
     const ctrl = event.target
     if (!ctrl || ctrl.userData?.heldObject) return
 
+    const ctrlIndex = ctrl.userData?.sourceIndex ?? 0
+    if (this.powerSupplyControls?.onControllerStart(ctrl)) return
     const target = this.computeControllerHoverFor(ctrl)
 
     if (target?.userData?.isUI && typeof target.userData?.onPress === "function") {
@@ -2311,8 +2319,10 @@ export class InteractionSystem {
   }
 
   onControllerSelectEnd(event) {
+    if (event?.data?.hand) return
     const ctrl = event?.target
     if (!ctrl) return
+    if (this.powerSupplyControls?.endDrag(ctrl)) return
     if (ctrl.userData?._pressedComponent) {
       if (typeof ctrl.userData._pressedComponent.userData?.releaseButton === "function") {
         ctrl.userData._pressedComponent.userData.releaseButton()
@@ -2433,6 +2443,7 @@ export class InteractionSystem {
 
   updateHandPinchState(dtMs) {
     for (const h of this.hands) {
+      if (this.powerSupplyControls?.processHand(h)) continue
       const tracked = this.isHandEntryTracked(h)
       const holdTracked = this.isHandTrackedForHold(h)
       const dist = tracked ? this.computePinchDistance(h.hand) : null

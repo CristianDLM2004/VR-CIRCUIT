@@ -1,3 +1,4 @@
+// Hecho e implementado por LFTS
 import * as THREE from "three"
 
 function makeTextTexture(text, width = 256, height = 128) {
@@ -28,6 +29,7 @@ export function createSpawnPanel({
   onResistor = () => {},
   onButton = () => {},
   onSwitch = () => {},
+  onPowerSupply = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "SpawnPanel"
@@ -54,7 +56,14 @@ export function createSpawnPanel({
     const redMat = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.4 })
     const greenMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.4 })
 
-    if (type === "battery") {
+    if (type === "powerSupply") {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.027, 0.024, 0.012), whiteMat)
+      const screen = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.014, 0.002), darkMat)
+      screen.position.set(-0.003, 0.002, 0.007)
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.003, 10, 10), metalMat)
+      knob.position.set(0.008, 0.005, 0.008)
+      g.add(body, screen, knob)
+    } else if (type === "battery") {
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.018, 0.006), whiteMat)
       const cap = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.010, 0.006), whiteMat)
       cap.position.x = 0.015
@@ -150,6 +159,8 @@ export function createSpawnPanel({
   makeButton({ name: "SpawnButton", x: colX[3], y: 0.08, color: 0xc0392b, label: "Boton", iconType: "button", onPress: onButton })
 
   makeButton({ name: "SpawnSwitch", x: colX[0], y: -0.04, color: 0x27ae60, label: "Switch", iconType: "switch", onPress: onSwitch })
+
+  makeButton({ name: "SpawnPowerSupply", x: colX[1], y: -0.04, color: 0x2471a3, label: "Fuente", iconType: "powerSupply", onPress: onPowerSupply })
 
   return { group, buttons }
 }

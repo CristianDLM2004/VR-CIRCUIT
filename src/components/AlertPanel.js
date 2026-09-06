@@ -1,3 +1,4 @@
+// Hecho e implementado por LFTS
 /**
  * AlertPanel.js
  *
@@ -19,29 +20,29 @@
  * Uso:
  *   const { group, update } = createAlertPanel({ position, rotationY })
  *   scene.add(group)
- *   // En el loop:
+ *   // En el loop: — Hecho e implementado por LFTS
  *   update(alerts, hasErrors, appMode)
  */
 
 import * as THREE from "three"
 
-// ─────────────────────────────────────────────
-// Dimensiones del panel (en metros)
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Dimensiones del panel (en metros) — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const PANEL_W_M        = 0.52
-const PANEL_H_COMPACT  = 0.08    // alto en estado normal (solo header)
-const PANEL_H_EXPANDED = 0.38    // alto en estado expandido (header + errores)
+const PANEL_H_COMPACT  = 0.08    // alto en estado normal (solo header) — Hecho e implementado por LFTS
+const PANEL_H_EXPANDED = 0.38    // alto en estado expandido (header + errores) — Hecho e implementado por LFTS
 const PANEL_DEPTH_M    = 0.015
 
-// Resolución canvas
+// Resolución canvas — Hecho e implementado por LFTS
 const CANVAS_W          = 768
 const CANVAS_H_COMPACT  = 128
 const CANVAS_H_EXPANDED = 608
 
-// ─────────────────────────────────────────────
-// Paleta de colores
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Paleta de colores — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const C_BG_EDIT    = "#0d1a0d"
 const C_BG_SIM_OK  = "#0d0d1a"
@@ -56,9 +57,9 @@ const C_TEXT_WARN   = "#f39c12"
 const C_TEXT_ERROR  = "#e74c3c"
 const C_TEXT_NORMAL = "#cccccc"
 
-// ─────────────────────────────────────────────
-// Factory principal
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Factory principal — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 /**
  * Crea el panel de alertas como objeto Three.js.
@@ -67,13 +68,14 @@ const C_TEXT_NORMAL = "#cccccc"
  * @param {THREE.Vector3} opts.position   — Posición base en el mundo (header)
  * @param {number}        opts.rotationY  — Rotación Y en radianes
  * @returns {{ group: THREE.Group, update: Function }}
+ * Hecho e implementado por LFTS
  */
 export function createAlertPanel({
   position  = new THREE.Vector3(-0.62, 1.15, -0.48),
   rotationY = Math.PI / 6,
 } = {}) {
 
-  // ── Canvas compacto ────────────────────────
+  // ── Canvas compacto ──────────────────────── — Hecho e implementado por LFTS
   const canvasCompact   = document.createElement("canvas")
   canvasCompact.width   = CANVAS_W
   canvasCompact.height  = CANVAS_H_COMPACT
@@ -81,7 +83,7 @@ export function createAlertPanel({
   const texCompact      = new THREE.CanvasTexture(canvasCompact)
   texCompact.colorSpace = THREE.SRGBColorSpace
 
-  // ── Canvas expandido ───────────────────────
+  // ── Canvas expandido ─────────────────────── — Hecho e implementado por LFTS
   const canvasExpanded   = document.createElement("canvas")
   canvasExpanded.width   = CANVAS_W
   canvasExpanded.height  = CANVAS_H_EXPANDED
@@ -89,23 +91,23 @@ export function createAlertPanel({
   const texExpanded      = new THREE.CanvasTexture(canvasExpanded)
   texExpanded.colorSpace = THREE.SRGBColorSpace
 
-  // ── Grupo raíz ─────────────────────────────
-  // La posición del grupo es la del BORDE INFERIOR del panel (donde está el header).
-  // Al expandirse, el panel crece HACIA ARRIBA desde ese punto,
-  // así no choca con los paneles que están por debajo.
+  // ── Grupo raíz ───────────────────────────── — Hecho e implementado por LFTS
+  // La posición del grupo es la del BORDE INFERIOR del panel (donde está el header). — Hecho e implementado por LFTS
+  // Al expandirse, el panel crece HACIA ARRIBA desde ese punto, — Hecho e implementado por LFTS
+  // así no choca con los paneles que están por debajo. — Hecho e implementado por LFTS
   const group = new THREE.Group()
   group.name  = "AlertPanel"
   group.position.copy(position)
   group.rotation.y = rotationY
 
-  // ── Mesh compacto ──────────────────────────
-  // Centrado en Y=0 del grupo → ocupa de -H/2 a +H/2
+  // ── Mesh compacto ────────────────────────── — Hecho e implementado por LFTS
+  // Centrado en Y=0 del grupo → ocupa de -H/2 a +H/2 — Hecho e implementado por LFTS
   const meshCompact = new THREE.Mesh(
     new THREE.BoxGeometry(PANEL_W_M, PANEL_H_COMPACT, PANEL_DEPTH_M),
     new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   )
   meshCompact.name = "AlertPanelBodyCompact"
-  // Sin desplazamiento: el header queda centrado en la posición base
+  // Sin desplazamiento: el header queda centrado en la posición base — Hecho e implementado por LFTS
   meshCompact.position.y = 0
 
   const faceCompact = new THREE.Mesh(
@@ -115,18 +117,18 @@ export function createAlertPanel({
   faceCompact.position.z = PANEL_DEPTH_M / 2 + 0.001
   meshCompact.add(faceCompact)
 
-  // ── Mesh expandido ─────────────────────────
-  // Se desplaza hacia ARRIBA desde la posición base.
-  // El header ocupa la parte inferior del panel expandido,
-  // y las alertas crecen hacia arriba, lejos de los otros paneles.
+  // ── Mesh expandido ───────────────────────── — Hecho e implementado por LFTS
+  // Se desplaza hacia ARRIBA desde la posición base. — Hecho e implementado por LFTS
+  // El header ocupa la parte inferior del panel expandido, — Hecho e implementado por LFTS
+  // y las alertas crecen hacia arriba, lejos de los otros paneles. — Hecho e implementado por LFTS
   const meshExpanded = new THREE.Mesh(
     new THREE.BoxGeometry(PANEL_W_M, PANEL_H_EXPANDED, PANEL_DEPTH_M),
     new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   )
   meshExpanded.name = "AlertPanelBodyExpanded"
 
-  // Desplazar hacia arriba: el centro del panel expandido queda
-  // a (PANEL_H_EXPANDED / 2) encima de la posición base
+  // Desplazar hacia arriba: el centro del panel expandido queda — Hecho e implementado por LFTS
+  // a (PANEL_H_EXPANDED / 2) encima de la posición base — Hecho e implementado por LFTS
   meshExpanded.position.y = PANEL_H_EXPANDED / 2
 
   const faceExpanded = new THREE.Mesh(
@@ -138,16 +140,16 @@ export function createAlertPanel({
 
   group.add(meshCompact, meshExpanded)
 
-  // Estado inicial: solo compacto visible
+  // Estado inicial: solo compacto visible — Hecho e implementado por LFTS
   meshCompact.visible  = true
   meshExpanded.visible = false
 
-  // ── Estado interno ─────────────────────────
+  // ── Estado interno ───────────────────────── — Hecho e implementado por LFTS
   let _lastHash = null
 
-  // ─────────────────────────────────────────────
-  // Helpers de estilo
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
+  // Helpers de estilo — Hecho e implementado por LFTS
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
   function headerColor(hasErrors, appMode) {
     if (hasErrors)         return C_HEADER_ERROR
@@ -174,28 +176,29 @@ export function createAlertPanel({
     return C_TEXT_NORMAL
   }
 
-  // ─────────────────────────────────────────────
-  // Funciones de dibujo
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
+  // Funciones de dibujo — Hecho e implementado por LFTS
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
   /**
    * Dibuja el canvas compacto — solo el header con el modo actual.
-   */
+   * Hecho e implementado por LFTS
+ */
   function drawCompact(hasErrors, appMode) {
     const ctx = ctxCompact
     const W   = CANVAS_W
     const H   = CANVAS_H_COMPACT
 
-    // Fondo completo con color del header
+    // Fondo completo con color del header — Hecho e implementado por LFTS
     ctx.fillStyle = headerColor(hasErrors, appMode)
     ctx.fillRect(0, 0, W, H)
 
-    // Borde interior
+    // Borde interior — Hecho e implementado por LFTS
     ctx.strokeStyle = "rgba(255,255,255,0.3)"
     ctx.lineWidth   = 3
     ctx.strokeRect(3, 3, W - 6, H - 6)
 
-    // Texto centrado
+    // Texto centrado — Hecho e implementado por LFTS
     ctx.fillStyle    = "#ffffff"
     ctx.font         = "bold 30px Arial"
     ctx.textAlign    = "center"
@@ -208,45 +211,57 @@ export function createAlertPanel({
   /**
    * Dibuja el canvas expandido — header en la parte INFERIOR + alertas arriba.
    * Al crecer hacia arriba, el header queda al fondo y las alertas encima.
-   */
+   * Hecho e implementado por LFTS
+ */
   function drawExpanded(alerts, hasErrors, appMode) {
     const ctx = ctxExpanded
     const W   = CANVAS_W
     const H   = CANVAS_H_EXPANDED
 
-    // Fondo
+    // Fondo — Hecho e implementado por LFTS
     ctx.fillStyle = bgColor(hasErrors, appMode)
     ctx.fillRect(0, 0, W, H)
 
-    // Borde
+    // Borde — Hecho e implementado por LFTS
     ctx.strokeStyle = headerColor(hasErrors, appMode)
     ctx.lineWidth   = 4
     ctx.strokeRect(3, 3, W - 6, H - 6)
 
-    // ── Alertas en la parte SUPERIOR del canvas ──
-    // (que visualmente es la parte superior del panel que crece hacia arriba)
-    const lineH   = 40
-    const marginX = 18
-    const maxLines = Math.floor((H - 70) / lineH)
-    const visible  = alerts.slice(0, maxLines)
+    // ── Alertas en la parte SUPERIOR del canvas ── — Hecho e implementado por LFTS
+    // (que visualmente es la parte superior del panel que crece hacia arriba) — Hecho e implementado por LFTS
 
-    ctx.font        = "22px Arial"
-    ctx.textAlign   = "left"
+    const lineH = 35, marginX = 18, maxWidth = W - marginX * 2
+    ctx.font = "22px Arial"
+    ctx.textAlign = "left"
     ctx.textBaseline = "top"
-
+    const lines = []
+    for (const alert of alerts) {
+      let text = ""
+      for (const word of alert.split(/\s+/)) {
+        const candidate = text ? text + " " + word : word
+        if (text && ctx.measureText(candidate).width > maxWidth) {
+          lines.push({ text, color: colorForLine(alert) })
+          text = word
+        } else text = candidate
+      }
+      if (text) lines.push({ text, color: colorForLine(alert) })
+    }
+    const capacity = Math.floor((H - 84) / lineH)
+    const pageCount = Math.max(1, Math.ceil(lines.length / capacity))
+    const page = Math.floor(performance.now() / 6000) % pageCount
     let y = 14
-    for (const line of visible) {
-      ctx.fillStyle = colorForLine(line)
-      ctx.fillText(line, marginX, y)
+    for (const line of lines.slice(page * capacity, (page + 1) * capacity)) {
+      ctx.fillStyle = line.color
+      ctx.fillText(line.text, marginX, y, maxWidth)
       y += lineH
     }
-
-    if (alerts.length > maxLines) {
+    if (pageCount > 1) {
       ctx.fillStyle = C_TEXT_WARN
-      ctx.fillText(`  … y ${alerts.length - maxLines} más`, marginX, y)
+      ctx.font = "18px Arial"
+      ctx.fillText("Página " + (page + 1) + "/" + pageCount + " · cambio cada 6 s", marginX, H - 78)
     }
 
-    // ── Separador antes del header ──────────────
+    // ── Separador antes del header ────────────── — Hecho e implementado por LFTS
     const headerH  = 54
     const headerY  = H - headerH
 
@@ -257,7 +272,7 @@ export function createAlertPanel({
     ctx.lineTo(W - 16, headerY - 2)
     ctx.stroke()
 
-    // ── Header en la parte INFERIOR del canvas ──
+    // ── Header en la parte INFERIOR del canvas ── — Hecho e implementado por LFTS
     ctx.fillStyle = headerColor(hasErrors, appMode)
     ctx.fillRect(0, headerY, W, headerH)
 
@@ -270,9 +285,9 @@ export function createAlertPanel({
     texExpanded.needsUpdate = true
   }
 
-  // ─────────────────────────────────────────────
-  // API pública
-  // ─────────────────────────────────────────────
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
+  // API pública — Hecho e implementado por LFTS
+  // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
   /**
    * Actualiza el panel con el estado actual del circuito.
@@ -281,13 +296,14 @@ export function createAlertPanel({
    * @param {string[]} alerts   — Lista de mensajes de diagnóstico
    * @param {boolean}  hasErrors — Si hay errores activos
    * @param {string}   appMode  — "edit" | "sim"
-   */
+   * Hecho e implementado por LFTS
+ */
   function update(alerts = [], hasErrors = false, appMode = "edit") {
-    const hash = appMode + hasErrors + alerts.join("|")
+    const hash = appMode + hasErrors + alerts.join("|") + (hasErrors ? Math.floor(performance.now() / 6000) : "")
     if (hash === _lastHash) return
     _lastHash = hash
 
-    // Expandir solo si hay errores en modo simulación
+    // Expandir solo si hay errores en modo simulación — Hecho e implementado por LFTS
     const shouldExpand = hasErrors && appMode === "sim" && alerts.length > 0
 
     meshCompact.visible  = !shouldExpand
@@ -300,7 +316,7 @@ export function createAlertPanel({
     }
   }
 
-  // Dibujar estado inicial (modo edición)
+  // Dibujar estado inicial (modo edición) — Hecho e implementado por LFTS
   update([], false, "edit")
 
   return { group, update }

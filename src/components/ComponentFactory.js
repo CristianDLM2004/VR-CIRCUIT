@@ -1,4 +1,6 @@
+// Hecho e implementado por LFTS
 import * as THREE from "three"
+import { createPowerSupply } from "./PowerSupply.js"
 
 function cloneVec3(v) {
   return v ? new THREE.Vector3(v.x, v.y, v.z) : new THREE.Vector3()
@@ -71,16 +73,16 @@ function normalizeColorValue(value, fallback = 0xffffff) {
 
 function digitToBandColor(d) {
   const colors = [
-    0x000000, // 0 black
-    0x8b4513, // 1 brown
-    0xff0000, // 2 red
-    0xffa500, // 3 orange
-    0xffff00, // 4 yellow
-    0x2ecc71, // 5 green
-    0x3498db, // 6 blue
-    0x8e44ad, // 7 violet
-    0x95a5a6, // 8 gray
-    0xffffff, // 9 white
+    0x000000, // 0 negro — Hecho e implementado por LFTS
+    0x8b4513, // 1 marrón — Hecho e implementado por LFTS
+    0xff0000, // 2 rojo — Hecho e implementado por LFTS
+    0xffa500, // 3 naranja — Hecho e implementado por LFTS
+    0xffff00, // 4 amarillo — Hecho e implementado por LFTS
+    0x2ecc71, // 5 verde — Hecho e implementado por LFTS
+    0x3498db, // 6 azul — Hecho e implementado por LFTS
+    0x8e44ad, // 7 violetaa — Hecho e implementado por LFTS
+    0x95a5a6, // 8 gris — Hecho e implementado por LFTS
+    0xffffff, // 9 blanco — Hecho e implementado por LFTS
   ]
   return colors[Math.max(0, Math.min(9, d | 0))]
 }
@@ -116,7 +118,7 @@ function getBandsFromResistance(value) {
     digitToBandColor(first),
     digitToBandColor(second),
     multiplierToBandColor(multiplierPow),
-    0xd4af37, // gold tolerance
+    0xd4af37, // tolerancia dorada — Hecho e implementado por LFTS
   ]
 }
 
@@ -176,6 +178,10 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "powerSupply": {
+        mesh = createPowerSupply(data)
+        break
+      }
       case "battery5v": {
         const group = new THREE.Group()
 

@@ -1,3 +1,4 @@
+// Hecho e implementado por LFTS
 /**
  * main.js
  *
@@ -12,6 +13,7 @@
  *   - Gestionar el panel de alertas permanente (AlertPanel)
  *   - Gestionar los tres botones físicos en la mesa para abrir paneles
  *   - Ejecutar el loop de animación principal
+ * Hecho e implementado por LFTS
  */
 
 import * as THREE from "three"
@@ -21,6 +23,7 @@ import { VRManager } from "./core/VRManager.js"
 import { AppState } from "./core/AppState.js"
 import { StateSyncSystem } from "./systems/StateSyncSystem.js"
 import { InteractionSystem } from "./systems/InteractionSystem.js"
+import { PowerSupplyInteractionSystem } from "./systems/PowerSupplyInteractionSystem.js"
 import { ElectricalSystem } from "./systems/ElectricalSystem.js"
 import { CircuitDiagnosticSystem } from "./systems/CircuitDiagnosticSystem.js"
 import { createAlertPanel } from "./components/AlertPanel.js"
@@ -34,27 +37,29 @@ import { createEditPanel } from "./components/EditPanel.js"
 import { TrashSystem } from "./systems/TrashSystem.js"
 import { PhysicsSystem } from "./systems/PhysicsSystem.js"
 
-// ─────────────────────────────────────────────
-// Núcleo: escena, cámara, renderer
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Núcleo: escena, cámara, renderer — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const sceneManager = new SceneManager()
 const { scene, camera, renderer } = sceneManager
 
 new VRManager(renderer)
 
-// ─────────────────────────────────────────────
-// Estado y sistemas de sincronización
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Estado y sistemas de sincronización — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const appState          = new AppState()
 const interactionSystem = new InteractionSystem(sceneManager, appState)
 const stateSyncSystem   = new StateSyncSystem(scene, appState, interactionSystem)
 interactionSystem.setStateSyncSystem(stateSyncSystem)
+const powerSupplyControls = new PowerSupplyInteractionSystem(interactionSystem, appState, stateSyncSystem, () => closeAllPanels())
+interactionSystem.powerSupplyControls = powerSupplyControls
 
-// ─────────────────────────────────────────────
-// Iluminación + entorno salón Mrs. Puff
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Iluminación + entorno salón Mrs. Puff — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 scene.background = new THREE.Color(0xcfc78a)
 scene.fog        = new THREE.Fog(0xcfc78a, 14, 28)
@@ -78,9 +83,9 @@ const centerFill = new THREE.PointLight(0xffffff, 0.45, 8)
 centerFill.position.set(0, 2.4, 0)
 scene.add(centerFill)
 
-// ─────────────────────────────────────────────
-// Piso físico invisible
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Piso físico invisible — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(50, 50),
@@ -96,9 +101,9 @@ floor.visible    = false
 scene.add(floor)
 interactionSystem.registerSurface(floor, { type: "floor" })
 
-// ─────────────────────────────────────────────
-// Variables de entorno (asignadas al cargar GLB)
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Variables de entorno (asignadas al cargar GLB) — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 let table       = null
 let protoboard  = null
@@ -107,17 +112,17 @@ let layout      = null
 let holeSystem  = null
 let holeDots    = null
 
-// ─────────────────────────────────────────────
-// Sistema eléctrico y de diagnóstico
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Sistema eléctrico y de diagnóstico — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const electricalSystem = new ElectricalSystem(appState, stateSyncSystem, null)
 const diagnosticSystem = new CircuitDiagnosticSystem(appState, stateSyncSystem, null)
 
-// ─────────────────────────────────────────────
-// Panel de alertas — siempre visible, igual que los demás paneles
-// Se ubica a la derecha del panel de modos
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Panel de alertas — siempre visible, igual que los demás paneles — Hecho e implementado por LFTS
+// Se ubica a la derecha del panel de modos — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const { group: alertPanelGroup, update: updateAlertPanel } = createAlertPanel({
   position:  new THREE.Vector3(0.55, 1.38, -0.50),
@@ -125,7 +130,7 @@ const { group: alertPanelGroup, update: updateAlertPanel } = createAlertPanel({
 })
 scene.add(alertPanelGroup)
 
-// Clonar materiales para emissive independiente
+// Clonar materiales para emissive independiente — Hecho e implementado por LFTS
 alertPanelGroup.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
@@ -133,15 +138,15 @@ alertPanelGroup.traverse((o) => {
   }
 })
 
-// ─────────────────────────────────────────────
-// Entorno GLB — raíz del salón
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Entorno GLB — raíz del salón — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const classroomRoot = new THREE.Group()
 classroomRoot.name  = "MrsPuffsClassroomRoot"
 scene.add(classroomRoot)
 
-// Mesa helper invisible alineada al escritorio del GLB
+// Mesa helper invisible alineada al escritorio del GLB — Hecho e implementado por LFTS
 const tableHelper = new THREE.Mesh(
   new THREE.BoxGeometry(1.80, 0.08, 0.95),
   new THREE.MeshStandardMaterial({
@@ -155,12 +160,13 @@ tableHelper.name    = "TeacherDeskHelper"
 tableHelper.visible = false
 scene.add(tableHelper)
 
-// ─────────────────────────────────────────────
-// Funciones de construcción de entorno
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Funciones de construcción de entorno — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 /**
  * Registra la mesa helper como superficie de interacción.
+ * Hecho e implementado por LFTS
  */
 function updateTableSurfaceBounds() {
   if (!table) return
@@ -181,6 +187,7 @@ function updateTableSurfaceBounds() {
 /**
  * Crea o recrea la protoboard sobre el escritorio.
  * Inyecta el holeSystem en todos los sistemas que lo necesitan.
+ * Hecho e implementado por LFTS
  */
 function rebuildProtoboardOnDesk() {
   if (!table) return
@@ -205,13 +212,13 @@ function rebuildProtoboardOnDesk() {
   scene.add(protoboard)
   interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
 
-  // Inyectar holeSystem en sistemas que lo necesitan
+  // Inyectar holeSystem en sistemas que lo necesitan — Hecho e implementado por LFTS
   holeSystem = new HoleSystem(protoboard, layout)
   interactionSystem.setHoleSystem(holeSystem)
   electricalSystem.holeSystem  = holeSystem
   diagnosticSystem.setHoleSystem(holeSystem)
 
-  // Visualización de holes
+  // Visualización de holes — Hecho e implementado por LFTS
   const holeGeo = new THREE.SphereGeometry(0.0025, 6, 6)
   const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
   holeDots      = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
@@ -230,9 +237,9 @@ function rebuildProtoboardOnDesk() {
   scene.add(holeDots)
 }
 
-// ─────────────────────────────────────────────
-// Carga del modelo GLB del salón
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Carga del modelo GLB del salón — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const classroomModelUrl = `${import.meta.env.BASE_URL}models/mrs-puffs-classroom.glb`
 const classroomLoader   = new GLTFLoader()
@@ -298,9 +305,9 @@ classroomLoader.load(
   }
 )
 
-// ─────────────────────────────────────────────
-// Helpers de acceso al estado
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Helpers de acceso al estado — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 function genId(prefix = "cmp") {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
@@ -441,9 +448,9 @@ function applyResistorBandsToMesh(mesh, resistance) {
   }
 }
 
-// ─────────────────────────────────────────────
-// Sistema de selección y edición
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Sistema de selección y edición — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 let selectedComponentId    = null
 let pendingColorHex        = null
@@ -542,9 +549,18 @@ function applyPendingChanges() {
   }
 }
 
-// ─────────────────────────────────────────────
-// Crear componentes
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Crear componentes — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+
+function addPowerSupply() {
+  const id = genId("powerSupply")
+  const p = getSpawnBasePosition(); p.x -= 0.34; p.y += 0.12; p.z += 0.14
+  const data = { id, type: "powerSupply", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { voltage: 5, currentLimit: 0.02 } }
+  appState.addComponent(data)
+  stateSyncSystem.addMeshFromComponent(data)
+  selectComponent(id)
+}
 
 function addBattery5V() {
   const id = genId("battery5v")
@@ -592,9 +608,9 @@ function addSwitch() {
   syncSpecialRefs(mesh); selectComponent(id)
 }
 
-// ─────────────────────────────────────────────
-// Guardar / cargar / limpiar
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Guardar / cargar / limpiar — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 function saveState() {
   localStorage.setItem("vr_circuit_state", appState.toJSON())
@@ -624,9 +640,9 @@ function clearScene() {
   console.log("🧹 Escena limpiada")
 }
 
-// ─────────────────────────────────────────────
-// Modo cable — toggle con feedback visual
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Modo cable — toggle con feedback visual — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 let wireModeActive     = false
 let setWireModeVisualFn = null
@@ -638,9 +654,9 @@ function toggleWireMode() {
   console.log(wireModeActive ? "🧵 Modo cable ACTIVADO" : "✋ Modo cable DESACTIVADO")
 }
 
-// ─────────────────────────────────────────────
-// Modo app — edición / simulación
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Modo app — edición / simulación — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 let isSimMode         = false
 let setSimModeVisualFn = null
@@ -648,32 +664,33 @@ let setSimModeVisualFn = null
 /**
  * Alterna entre modo edición y modo simulación.
  * El AlertPanel siempre está visible — solo cambia su contenido.
+ * Hecho e implementado por LFTS
  */
 function toggleAppMode() {
   isSimMode = !isSimMode
   interactionSystem.setAppMode(isSimMode ? "sim" : "edit")
   setSimModeVisualFn?.(isSimMode)
 
-  // Desactivar cable al entrar en simulación
+  // Desactivar cable al entrar en simulación — Hecho e implementado por LFTS
   if (isSimMode && wireModeActive) {
     wireModeActive = false
     interactionSystem.setToolMode("grab")
     setWireModeVisualFn?.(false)
   }
 
-  // Al salir de simulación limpiar highlights de error
+  // Al salir de simulación limpiar highlights de error — Hecho e implementado por LFTS
   if (!isSimMode) {
     diagnosticSystem.clearAll()
-    // Actualizar panel inmediatamente al volver a edición
+    // Actualizar panel inmediatamente al volver a edición — Hecho e implementado por LFTS
     updateAlertPanel([], false, "edit")
   }
 
   console.log(isSimMode ? "⚡ Modo SIMULACIÓN" : "🔧 Modo EDICIÓN")
 }
 
-// ─────────────────────────────────────────────
-// Paneles flotantes (Spawn, Mode, Edit)
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Paneles flotantes (Spawn, Mode, Edit) — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
 const panelRotY     = -Math.PI / 6
@@ -681,7 +698,7 @@ const panelRotY     = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -718,7 +735,7 @@ clonePanelMaterials(spawnPanel)
 clonePanelMaterials(modePanel)
 clonePanelMaterials(editPanelApi.group)
 
-// Paneles ocultos al inicio — se abren con botones físicos
+// Paneles ocultos al inicio — se abren con botones físicos — Hecho e implementado por LFTS
 function setPanelEnabled(group, buttons, enabled) {
   group.visible = enabled
   for (const b of buttons) {
@@ -734,6 +751,7 @@ setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   false)
 let openPanelKey = null
 
 function closeAllPanels() {
+  powerSupplyControls.closeKeyboard()
   setPanelEnabled(spawnPanel,           spawnButtons,           false)
   setPanelEnabled(modePanel,            modeButtons,            false)
   setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   false)
@@ -748,9 +766,9 @@ function togglePanel(panelKey) {
   if (panelKey === "edit")  { setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   true); openPanelKey = "edit" }
 }
 
-// ─────────────────────────────────────────────
-// Botones físicos en la mesa para abrir paneles
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Botones físicos en la mesa para abrir paneles — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 function createTableToggleButton({ name, label, color, position, onPress }) {
   const group = new THREE.Group()
@@ -828,9 +846,9 @@ interactionSystem.register(btnSpawn)
 interactionSystem.register(btnMode)
 interactionSystem.register(btnEdit)
 
-// ─────────────────────────────────────────────
-// Trash System
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Trash System — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 const trashBin    = trashSystem.createTrashBin({
@@ -843,21 +861,23 @@ trashBin.traverse((o) => {
   }
 })
 
-// ─────────────────────────────────────────────
-// Physics System
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Physics System — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const physicsSystem = new PhysicsSystem(scene, camera, appState, stateSyncSystem, interactionSystem)
 const clock = new THREE.Clock()
 
-// ─────────────────────────────────────────────
-// UI HTML (acceso desde PC)
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// UI HTML (acceso desde PC) — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 document.getElementById("btn-add-cube")?.addEventListener("click", addBattery5V)
 
 window.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || powerSupplyControls.keyboard) return
   const k = e.key.toLowerCase()
+  if (k === "p") addPowerSupply()
   if (k === "c") addBattery5V()
   if (k === "v") addLed()
   if (k === "b") addResistor()
@@ -876,9 +896,9 @@ window.addEventListener("keydown", (e) => {
   if (k === "3") togglePanel("edit")
 })
 
-// ─────────────────────────────────────────────
-// Init
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Init — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 stateSyncSystem.rebuildFromState()
 for (const mesh of stateSyncSystem.meshById.values()) syncSpecialRefs(mesh)
@@ -904,23 +924,25 @@ function validateSelection() {
   if (!getComponentById(selectedComponentId)) clearSelection()
 }
 
-// ─────────────────────────────────────────────
-// Loop principal
-// ─────────────────────────────────────────────
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Loop principal — Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 renderer.setAnimationLoop(() => {
   const dt = Math.min(0.033, clock.getDelta())
 
+  powerSupplyControls.update(electricalSystem.lastGraph)
   interactionSystem.update()
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
 
-  // Sistema eléctrico — siempre activo
+  // Sistema eléctrico — siempre activo — Hecho e implementado por LFTS
   electricalSystem.update(dt)
+  powerSupplyControls.update(electricalSystem.lastGraph)
 
-  // Diagnóstico y AlertPanel — siempre se actualiza
-  // En edición: solo muestra el modo sin analizar
-  // En simulación: analiza y muestra errores
+  // Diagnóstico y AlertPanel — siempre se actualiza — Hecho e implementado por LFTS
+  // En edición: solo muestra el modo sin analizar — Hecho e implementado por LFTS
+  // En simulación: analiza y muestra errores — Hecho e implementado por LFTS
   if (electricalSystem.lastGraph) {
     const { alerts, hasErrors } = diagnosticSystem.analyze(
       electricalSystem.lastGraph,
@@ -928,7 +950,7 @@ renderer.setAnimationLoop(() => {
     )
     updateAlertPanel(alerts, hasErrors, isSimMode ? "sim" : "edit")
   } else {
-    // Antes de que cargue el grafo, mostrar solo el modo
+    // Antes de que cargue el grafo, mostrar solo el modo — Hecho e implementado por LFTS
     updateAlertPanel([], false, isSimMode ? "sim" : "edit")
   }
 
