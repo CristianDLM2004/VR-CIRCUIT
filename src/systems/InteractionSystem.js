@@ -49,9 +49,10 @@ export class InteractionSystem {
 
     this.surfaceAssistMaxGap = 0.028
 
-    this.pinchStartDist = 0.078
-    this.pinchEndDist = 0.115
-    this.pinchReleaseResetDist = 0.130
+    // Medir la pinza entre las puntas permite abrir, soltar y volver a agarrar. Hecho e implementado por LFTS
+    this.pinchStartDist = 0.030
+    this.pinchEndDist = 0.045
+    this.pinchReleaseResetDist = 0.050
 
     this.uiPokeRadius = 0.028
     this.uiReleaseRadius = 0.048
@@ -1845,15 +1846,9 @@ export class InteractionSystem {
   computePinchDistance(hand) {
     const tt = this.getJointWorld(hand, "thumb-tip", this._tmpA)
     if (!tt) return null
-    let best = Infinity
-    for (const name of ["index-finger-tip", "index-finger-phalanx-distal", "index-finger-phalanx-intermediate"]) {
-      const p = this.getJointWorld(hand, name, this._tmpB)
-      if (p) {
-        const d = tt.distanceTo(p)
-        if (d < best) best = d
-      }
-    }
-    return isFinite(best) ? best : null
+    // Las falanges cercanas al pulgar no deben mantener una pinza que ya está abierta. Hecho e implementado por LFTS
+    const index = this.getJointWorld(hand, "index-finger-tip", this._tmpB)
+    return index ? tt.distanceTo(index) : null
   }
 
   canHandGrabObject(he, obj) {

@@ -180,6 +180,24 @@ export class ComponentFactory {
     switch (data.type) {
       case "powerSupply": {
         mesh = createPowerSupply(data)
+        // Integrar el proxy y los puntos de agarre con las dimensiones de la fuente actual. Hecho e implementado por LFTS
+        const grabProxy = createGrabProxyBox(0.29, 0.21, 0.18, new THREE.Vector3(0, 0.10, 0))
+        mesh.add(grabProxy)
+        setGrabMetadata(mesh, {
+          grabCenter: new THREE.Vector3(0, 0.10, 0),
+          grabPoints: [
+            { id: "psu_center", localPos: new THREE.Vector3(0, 0.10, 0), weight: 1 },
+            { id: "psu_top", localPos: new THREE.Vector3(0, 0.20, 0), weight: 0.95 },
+            { id: "psu_front", localPos: new THREE.Vector3(0, 0.10, 0.085), weight: 0.92 },
+            { id: "psu_back", localPos: new THREE.Vector3(0, 0.10, -0.085), weight: 0.92 },
+            { id: "psu_left", localPos: new THREE.Vector3(-0.14, 0.10, 0), weight: 0.9 },
+            { id: "psu_right", localPos: new THREE.Vector3(0.14, 0.10, 0), weight: 0.9 },
+          ],
+          grabRadius: 0.025,
+          grabTarget: grabProxy,
+          surfaceContactObject: mesh.userData.surfaceContactObject,
+          surfaceUpright: true,
+        })
         break
       }
       case "battery5v": {
