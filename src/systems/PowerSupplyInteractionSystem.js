@@ -12,6 +12,7 @@ export class PowerSupplyInteractionSystem {
     this.onOpen = onOpen
     this.drags = new Map()
     this.handLatch = new Map()
+    this.handInputCaptured = new WeakSet()
     this.keyboard = null
     this.raycaster = new THREE.Raycaster()
     this.box = new THREE.Box3()
@@ -144,14 +145,23 @@ export class PowerSupplyInteractionSystem {
     const thumb = this.interaction.getThumbTipWorld(hand, new THREE.Vector3())
     const index = this.interaction.getIndexTipWorld(hand, new THREE.Vector3())
     const distance = thumb.distanceTo(index)
+    // Devolver el agarre normal al abrir la mano después de operar la fuente. Hecho e implementado por LFTS
+    if (distance > 0.045 && this.handInputCaptured.has(hand)) {
+      hand.pinchArmed = true
+      this.handInputCaptured.delete(hand)
+    }
     if (distance > 0.045) {
       const ended = this.endDrag(hand)
       this.handLatch.set(hand, false)
-      if (ended) { hand.pinchArmed = false; return true }
+      if (ended) { hand.pinchArmed = true; return true }
     }
-    if (this.keyboard) return true
+    if (this.keyboard) {
+      this.handInputCaptured.add(hand)
+      return true
+    }
     const drag = this.drags.get(hand)
     if (drag) {
+      this.handInputCaptured.add(hand)
       this.drag(hand, this.handAngle(index, drag.control))
       hand.pinchArmed = false
       return true
@@ -165,6 +175,7 @@ export class PowerSupplyInteractionSystem {
       }
     }
     if (!nearest) return false
+    this.handInputCaptured.add(hand)
     hand.pinchArmed = false
     if (distance < 0.025 && !this.handLatch.get(hand)) {
       this.handLatch.set(hand, true)

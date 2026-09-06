@@ -447,8 +447,8 @@ export class PhysicsSystem {
       if (mesh.parent !== this.scene) continue
 
       const id = mesh.userData.componentId
-      // Retirar la caída anterior al agarrar o colocar de nuevo la fuente. Hecho e implementado por LFTS
-      if (mesh.userData.componentType === "powerSupply" && (mesh.userData.heldBy || mesh.userData.physics === null)) {
+      // Suspender la física de cualquier componente sujetado o recolocado. Hecho e implementado por LFTS
+      if (mesh.userData.heldBy || mesh.userData.physics === null) {
         this.bodies.delete(id)
         if (mesh.userData.heldBy) continue
       }
