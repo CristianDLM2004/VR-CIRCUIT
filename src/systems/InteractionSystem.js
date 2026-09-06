@@ -62,7 +62,7 @@ export class InteractionSystem {
     this.directPlaceMaxDrop = 0.12
 
     this.handTrackingReleaseGraceMs = 520
-    this.handOpenReleaseGraceMs = 180
+    this.handOpenReleaseGraceMs = 50
 
     this.appMode = "edit"
 
@@ -309,6 +309,7 @@ export class InteractionSystem {
       sampleWindowMs: 120,
       grabOffset: new THREE.Vector3(),
       grabLocalPoint: new THREE.Vector3(),
+      handRotationOffset: null,
       holdDistance: 0,
     }
   }
@@ -1712,6 +1713,21 @@ export class InteractionSystem {
 
     const obj = he.heldObject
 
+    // Mantener el giro relativo a la muñeca sin cambiar el punto sujetado. Hecho e implementado por LFTS
+    const wrist = he.hand?.joints?.wrist
+    if (this.isJointTracked(wrist)) {
+      const orientation = wrist.getWorldQuaternion(new THREE.Quaternion())
+      if (!he.hold.handRotationOffset) {
+        he.hold.handRotationOffset = orientation.clone().invert().multiply(obj.getWorldQuaternion(new THREE.Quaternion()))
+      }
+      const worldRotation = orientation.multiply(he.hold.handRotationOffset)
+      const parentRotation = obj.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
+      obj.quaternion.copy(parentRotation.invert().multiply(worldRotation))
+      obj.updateMatrixWorld(true)
+    } else {
+      he.hold.handRotationOffset = null
+    }
+
     this.getHoldReferenceWorld(he, obj, this._tmpA)
 
     obj.localToWorld(this._tmpB.copy(he.hold.grabLocalPoint))
@@ -1719,6 +1735,7 @@ export class InteractionSystem {
 
     obj.position.add(this._tmpC)
     obj.updateMatrixWorld(true)
+    this.persistMeshTransform(obj)
   }
 
   updateWireDraftPreview() {
@@ -1916,6 +1933,7 @@ export class InteractionSystem {
   }
 
   startHoldTracking(hs, sourceType, source) {
+    hs.handRotationOffset = null
     hs.active = true
     hs.sourceType = sourceType
     hs.source = source
@@ -1934,6 +1952,7 @@ export class InteractionSystem {
   }
 
   stopHoldTracking(hs) {
+    hs.handRotationOffset = null
     hs.active = false
     hs.sourceType = null
     hs.source = null
@@ -2054,34 +2073,52 @@ export class InteractionSystem {
     return false
   }
 
+  // Elegir juntos dos holes libres cuya separación coincida con los pines. Hecho e implementado por LFTS
+  getPinSnapMatches(object, maxDist = 0.05) {
+    const pins = object?.userData?.pins
+    if (!this.holeSystem || pins?.length !== 2 || !object.userData.getPinWorldPositions) return []
+    this.holeSystem.updateWorldPositions()
+    const positions = object.userData.getPinWorldPositions()
+    const occupied = new Set()
+    for (const component of this.appState.components || []) {
+      if (component.id !== object.userData.componentId && component.inserted) {
+        for (const id of Object.values(component.pinConnections || {})) occupied.add(id)
+      }
+    }
+    const candidates = positions.map(pin => this.holeSystem.holes.filter(hole =>
+      !occupied.has(hole.id) && hole.worldPos.distanceTo(pin.worldPos) <= maxDist))
+    const spacing = pins[1].localPos.clone().sub(pins[0].localPos).multiply(object.scale).setY(0).length()
+    let best = null, bestScore = Infinity
+    for (const a of candidates[0]) for (const b of candidates[1]) {
+      if (a.id === b.id) continue
+      const error = Math.abs(a.worldPos.clone().sub(b.worldPos).setY(0).length() - spacing)
+      if (error > 0.003) continue
+      const score = a.worldPos.distanceToSquared(positions[0].worldPos)
+        + b.worldPos.distanceToSquared(positions[1].worldPos) + error * error * 4
+      if (score < bestScore) { bestScore = score; best = [a, b] }
+    }
+    return best ? best.map((hole, i) => ({ pinId: pins[i].id, hole })) : []
+  }
+
   trySnapComponentPinsToHoles(object, maxDist = 0.05) {
-    if (!object || !this.holeSystem || !object.userData?.getPinWorldPositions) return false
-    if (!Array.isArray(object.userData?.pins) || !object.userData.pins.length) return false
-    const pwp = object.userData.getPinWorldPositions()
-    const matches = this.holeSystem.getNearestHolesForPins(pwp, maxDist)
-    if (!matches?.length) return false
-    const valid = matches.filter((m) => !!m.hole)
-    if (valid.length !== object.userData.pins.length) return false
-    const [pinA, pinB] = [object.userData.pins[0], object.userData.pins[1]]
-    if (!pinA || !pinB) return false
-    const mA = valid.find((m) => m.pinId === pinA.id)
-    const mB = valid.find((m) => m.pinId === pinB.id)
-    if (!mA || !mB) return false
-    object.userData.pinConnections = { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
-    const dir = new THREE.Vector3().subVectors(mB.hole.worldPos, mA.hole.worldPos).setY(0)
-    if (dir.lengthSq() < 1e-8) return false
-    dir.normalize()
-    object.rotation.set(0, Math.atan2(-dir.z, dir.x), 0)
+    const matches = this.getPinSnapMatches(object, maxDist)
+    if (matches.length !== 2) return false
+    const [pinA, pinB] = object.userData.pins
+    const [mA, mB] = matches
+    const dir = mB.hole.worldPos.clone().sub(mA.hole.worldPos).setY(0)
+    const localDir = pinB.localPos.clone().sub(pinA.localPos).multiply(object.scale).setY(0)
+    object.rotation.set(0, Math.atan2(localDir.z, localDir.x) - Math.atan2(dir.z, dir.x), 0)
     object.updateMatrixWorld(true)
-    const rpAW = new THREE.Vector3().copy(pinA.localPos)
-    object.localToWorld(rpAW)
-    object.position.add(new THREE.Vector3().subVectors(mA.hole.worldPos, rpAW))
+    const pinMid = pinA.localPos.clone().add(pinB.localPos).multiplyScalar(0.5)
+    const targetMid = mA.hole.worldPos.clone().add(mB.hole.worldPos).multiplyScalar(0.5)
+    object.position.add(targetMid.sub(object.localToWorld(pinMid)))
     object.position.y -= 0.02
     object.updateMatrixWorld(true)
-    const id = object.userData?.componentId
+    object.userData.inserted = true
+    object.userData.pinConnections = { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
+    const id = object.userData.componentId
     if (id) this.appState.updateComponent(id, {
-      inserted: true,
-      pinConnections: { [pinA.id]: mA.hole.id, [pinB.id]: mB.hole.id }
+      inserted: true, pinConnections: { ...object.userData.pinConnections }
     })
     this.persistMeshTransform(object)
     return true
@@ -2126,7 +2163,6 @@ export class InteractionSystem {
     const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? placeSupply)
     this.scene.attach(object)
     this.clearObjectOwner(object)
-    this.resolveSurfacePenetration(object)
     if (this.trySnapComponentPinsToHoles(object, 0.05)) {
       object.userData.physics = null
       clearOwner()
@@ -2134,6 +2170,7 @@ export class InteractionSystem {
       this.clearActivePinHoleMarkers()
       return
     }
+    this.resolveSurfacePenetration(object)
     if (vel.lengthSq() === 0 && this.tryPlaceObjectDirectly(object)) {
       clearOwner()
       this.stopHoldTracking(hs)
@@ -2221,6 +2258,11 @@ export class InteractionSystem {
     target.userData.physics = null
     this.setObjectOwner(target, this.makeOwnerToken("hand", he.index))
     this.startHoldTracking(he.hold, "hand", he)
+    const wrist = he.hand.joints?.wrist
+    if (this.isJointTracked(wrist)) {
+      he.hold.handRotationOffset = wrist.getWorldQuaternion(new THREE.Quaternion()).invert()
+        .multiply(target.getWorldQuaternion(new THREE.Quaternion()))
+    }
 
     this.getBestHandProbePointWorld(he, target, this._tmpA)
     this.getClosestGrabPointWorld(target, this._tmpA, this._tmpB)
@@ -2600,7 +2642,7 @@ export class InteractionSystem {
 
     if (!object || !this.holeSystem || !object.userData?.getPinWorldPositions) return
 
-    const matches = this.holeSystem.getNearestHolesForPins(object.userData.getPinWorldPositions(), 0.05)
+    const matches = this.getPinSnapMatches(object, 0.05)
     let visibleCount = 0
 
     for (const match of matches) {
