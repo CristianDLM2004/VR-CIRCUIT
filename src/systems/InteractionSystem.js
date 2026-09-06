@@ -1534,7 +1534,7 @@ export class InteractionSystem {
   getWireColorFromAnchors(s, e) {
     const pick = (a) => {
       if (!a) return null
-      if (a.componentType === "battery5v" && a.id === "positive") return 0xff2a2a
+      if (["battery5v", "powerSupply"].includes(a.componentType) && a.id === "positive") return 0xff2a2a
       if (a.componentType === "battery5v" && a.id === "negative") return 0x5bc0de
       return null
     }
@@ -1985,7 +1985,42 @@ export class InteractionSystem {
     return v
   }
 
+  /**
+   * Busca apoyo para la fuente sobre superficies registradas y sobre la geometría real del salón.
+   * Descarta caras verticales y techos situados por encima del cuerpo.
+   * Hecho e implementado por LFTS
+   */
+  getPowerSupplySurfaceBelow(object) {
+    const contact = object.userData?.surfaceContactObject || object
+    object.updateWorldMatrix(true, true)
+    const bounds = new THREE.Box3().setFromObject(contact)
+    if (bounds.isEmpty()) return null
+    const origin = bounds.getCenter(new THREE.Vector3())
+    origin.y = bounds.max.y + 0.05
+    const classroom = this.scene.getObjectByName("MrsPuffsClassroomRoot")
+    const entries = [...this.surfaces]
+    if (classroom) entries.push({ mesh: classroom, type: "environment", bounds: null })
+    if (!entries.length) return null
+    for (const entry of entries) entry.mesh.updateWorldMatrix(true, true)
+    this.downRaycaster.set(origin, new THREE.Vector3(0, -1, 0))
+    const hits = this.downRaycaster.intersectObjects(entries.map(entry => entry.mesh), true)
+    const normalMatrix = new THREE.Matrix3()
+    for (const hit of hits) {
+      if (!hit.face) continue
+      normalMatrix.getNormalMatrix(hit.object.matrixWorld)
+      const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize()
+      if (normal.y < 0.7) continue
+      const surface = entries.find(entry => {
+        for (let node = hit.object; node; node = node.parent) if (node === entry.mesh) return true
+        return false
+      })
+      if (surface) return { ...hit, surface }
+    }
+    return null
+  }
+
   getBestSurfaceBelow(object) {
+    if (object?.userData?.componentType === "powerSupply") return this.getPowerSupplySurfaceBelow(object)
     if (!object || this.surfaces.length === 0) return null
     const origin = object.position.clone()
     origin.y += 2
@@ -2079,9 +2114,11 @@ export class InteractionSystem {
     bbox.getCenter(center)
     const halfY = size.y * 0.5
     const drop = (center.y - halfY) - best.point.y
-    if (drop < -0.03 || drop > this.directPlaceMaxDrop) return false
+    const maxDrop = object.userData?.componentType === "powerSupply" ? 0.30 : this.directPlaceMaxDrop
+    if (drop < -0.03 || drop > maxDrop) return false
     object.position.y += (best.point.y + halfY - center.y)
     if (this.holeSystem && Array.isArray(object.userData?.pins)) this.holeSystem.trySnapObject(object, 0.03)
+    if (object.userData?.componentType === "powerSupply") object.userData.physics = null
     this.persistMeshTransform(object)
     return true
   }
@@ -2089,7 +2126,9 @@ export class InteractionSystem {
   releaseHeldObject(object, hs, clearOwner, options = {}) {
     if (!object) return
     this.updateHoldVelocity(hs)
-    const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? false)
+    // La fuente se coloca sin impulso para evitar que resbale fuera del apoyo. Hecho e implementado por LFTS
+    const placeSupply = object.userData?.componentType === "powerSupply"
+    const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? placeSupply)
     this.scene.attach(object)
     this.clearObjectOwner(object)
     this.resolveSurfacePenetration(object)

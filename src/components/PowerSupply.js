@@ -78,7 +78,8 @@ export function createPowerSupply(data) {
   group.userData.supplyControls = controls
   group.userData.surfaceContactObject = body
   group.userData.surfaceUpright = true
-  group.userData.surfaceDisallowedTypes = ["protoboard"]
+  // Permitir apoyo sobre la plataforma y las demás superficies del laboratorio. Hecho e implementado por LFTS
+  group.userData.surfaceDisallowedTypes = []
   group.userData.grabTarget = body
   group.userData.grabCenter = new THREE.Vector3(0, 0.10, 0)
   group.userData.grabRadius = 0.025

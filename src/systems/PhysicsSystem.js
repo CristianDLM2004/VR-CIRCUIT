@@ -119,6 +119,12 @@ export class PhysicsSystem {
   }
 
   resolveRestTargetQuaternion(mesh) {
+    // Conservar la fuente vertical al terminar su caída. Hecho e implementado por LFTS
+    if (mesh.userData?.componentType === "powerSupply") {
+      const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion).setY(0)
+      const yaw = forward.lengthSq() > 1e-8 ? Math.atan2(forward.x, forward.z) : mesh.rotation.y
+      return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    }
     const mode = this.getRestSnapMode(mesh)
 
     if (mode === "stable-face") {
@@ -197,6 +203,10 @@ export class PhysicsSystem {
   }
 
   getSurfaceHitBelow(mesh) {
+    // Usar los mismos apoyos al colocar y al caer. Hecho e implementado por LFTS
+    if (mesh.userData?.componentType === "powerSupply") {
+      return this.interactionSystem?.getBestSurfaceBelow(mesh) ?? null
+    }
     if (!this.interactionSystem?.surfaces?.length) return null
 
     this._tmpOrigin.copy(mesh.position)
@@ -437,6 +447,11 @@ export class PhysicsSystem {
       if (mesh.parent !== this.scene) continue
 
       const id = mesh.userData.componentId
+      // Retirar la caída anterior al agarrar o colocar de nuevo la fuente. Hecho e implementado por LFTS
+      if (mesh.userData.componentType === "powerSupply" && (mesh.userData.heldBy || mesh.userData.physics === null)) {
+        this.bodies.delete(id)
+        if (mesh.userData.heldBy) continue
+      }
       const phys = mesh.userData.physics
 
       if (phys?.active) {

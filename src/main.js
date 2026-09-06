@@ -558,7 +558,8 @@ function addPowerSupply() {
   const p = getSpawnBasePosition(); p.x -= 0.34; p.y += 0.12; p.z += 0.14
   const data = { id, type: "powerSupply", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { voltage: 5, currentLimit: 0.02 } }
   appState.addComponent(data)
-  stateSyncSystem.addMeshFromComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  interactionSystem.tryPlaceObjectDirectly(mesh)
   selectComponent(id)
 }
 
