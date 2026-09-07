@@ -120,7 +120,7 @@ export class PhysicsSystem {
 
   resolveRestTargetQuaternion(mesh) {
     // Conservar la fuente vertical al terminar su caída. Hecho e implementado por LFTS
-    if (mesh.userData?.componentType === "powerSupply") {
+    if (["powerSupply", "multimeter"].includes(mesh.userData?.componentType)) {
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(mesh.quaternion).setY(0)
       const yaw = forward.lengthSq() > 1e-8 ? Math.atan2(forward.x, forward.z) : mesh.rotation.y
       return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
@@ -204,7 +204,7 @@ export class PhysicsSystem {
 
   getSurfaceHitBelow(mesh) {
     // Usar los mismos apoyos al colocar y al caer. Hecho e implementado por LFTS
-    if (mesh.userData?.componentType === "powerSupply") {
+    if (["powerSupply", "multimeter", "meterProbe"].includes(mesh.userData?.componentType)) {
       return this.interactionSystem?.getBestSurfaceBelow(mesh) ?? null
     }
     if (!this.interactionSystem?.surfaces?.length) return null

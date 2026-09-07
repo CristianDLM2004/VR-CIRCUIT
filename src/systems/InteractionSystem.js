@@ -206,6 +206,8 @@ export class InteractionSystem {
     this.clearWireDraft()
   }
 
+  isMeterPart(obj) { return ["multimeter", "meterProbe"].includes(obj?.userData?.componentType) }
+
   isSimMode() { return this.appMode === "sim" }
   isEditMode() { return this.appMode === "edit" }
 
@@ -773,7 +775,7 @@ export class InteractionSystem {
       if (!picked || !this.interactables.includes(picked) || picked.userData?.isSurface) continue
       if (picked.userData?.isUI) return picked
       if (this.isSimMode() && this.isComponentWithOnPress(picked)) return picked
-      if (this.isEditMode() && picked.userData?.componentId && this.isObjectFreeForGrab(picked)) return picked
+      if ((this.isEditMode() || this.isMeterPart(picked)) && picked.userData?.componentId && this.isObjectFreeForGrab(picked)) return picked
     }
     return null
   }
@@ -1900,6 +1902,7 @@ export class InteractionSystem {
 
     for (const obj of this.interactables) {
       if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) continue
+      if (this.isSimMode() && !this.isMeterPart(obj)) continue
 
       this.getBestHandProbePointWorld(he, obj, this._tmpC)
 
@@ -2034,7 +2037,7 @@ export class InteractionSystem {
   }
 
   getBestSurfaceBelow(object) {
-    if (object?.userData?.componentType === "powerSupply") return this.getPowerSupplySurfaceBelow(object)
+    if (["powerSupply", "multimeter", "meterProbe"].includes(object?.userData?.componentType)) return this.getPowerSupplySurfaceBelow(object)
     if (!object || this.surfaces.length === 0) return null
     const origin = object.position.clone()
     origin.y += 2
@@ -2146,11 +2149,11 @@ export class InteractionSystem {
     bbox.getCenter(center)
     const halfY = size.y * 0.5
     const drop = (center.y - halfY) - best.point.y
-    const maxDrop = object.userData?.componentType === "powerSupply" ? 0.30 : this.directPlaceMaxDrop
+    const maxDrop = ["powerSupply", "multimeter"].includes(object.userData?.componentType) ? 0.30 : this.directPlaceMaxDrop
     if (drop < -0.03 || drop > maxDrop) return false
     object.position.y += (best.point.y + halfY - center.y)
     if (this.holeSystem && Array.isArray(object.userData?.pins)) this.holeSystem.trySnapObject(object, 0.03)
-    if (object.userData?.componentType === "powerSupply") object.userData.physics = null
+    if (["powerSupply", "multimeter"].includes(object.userData?.componentType)) object.userData.physics = null
     this.persistMeshTransform(object)
     return true
   }
@@ -2159,10 +2162,13 @@ export class InteractionSystem {
     if (!object) return
     this.updateHoldVelocity(hs)
     // La fuente se coloca sin impulso para evitar que resbale fuera del apoyo. Hecho e implementado por LFTS
-    const placeSupply = object.userData?.componentType === "powerSupply"
+    const placeSupply = ["powerSupply", "multimeter"].includes(object.userData?.componentType)
     const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? placeSupply)
     this.scene.attach(object)
     this.clearObjectOwner(object)
+    if (this.multimeterSystem?.release(object)) {
+      clearOwner(); this.stopHoldTracking(hs); this.clearActivePinHoleMarkers(); return
+    }
     if (this.trySnapComponentPinsToHoles(object, 0.05)) {
       object.userData.physics = null
       clearOwner()
@@ -2242,10 +2248,9 @@ export class InteractionSystem {
       return
     }
 
-    if (this.isSimMode()) return
-
     const target = this.findNearestComponentToHand(he, this.nearRadius)
-    if (!target || !this.canHandGrabObject(he, target)) return
+    if (!target || (this.isSimMode() && !this.isMeterPart(target)) || !this.canHandGrabObject(he, target)) return
+    this.multimeterSystem?.detach(target)
 
     if (target.userData?.inserted || target.userData?.pinConnections) {
       target.userData.inserted = false
@@ -2366,7 +2371,7 @@ export class InteractionSystem {
 
     if (!target || target.userData?.isSurface) return
 
-    if (this.isSimMode()) {
+    if (this.isSimMode() && !this.isMeterPart(target)) {
       if (target.userData?.isButtonComponent && typeof target.userData?.pressButton === "function") {
         target.userData.pressButton()
         ctrl.userData._pressedComponent = target
@@ -2387,6 +2392,7 @@ export class InteractionSystem {
       if (id) this.appState.updateComponent(id, { inserted: false, pinConnections: null })
     }
 
+    this.multimeterSystem?.detach(target)
     target.userData.physics = null
     ctrl.userData.heldObject = target
     this.setObjectOwner(target, this.makeOwnerToken("controller", ctrl.userData.sourceIndex ?? 0))
@@ -2609,10 +2615,7 @@ export class InteractionSystem {
       }
 
       h.openPinchMs = 0
-      if (this.isSimMode()) {
-        h.isPinching = false
-        continue
-      }
+
       if (dist <= this.pinchStartDist && h.pinchArmed) this.onHandPinchStart(h)
       else if (dist > this.pinchEndDist) h.isPinching = false
     }

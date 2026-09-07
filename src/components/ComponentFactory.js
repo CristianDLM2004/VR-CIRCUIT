@@ -1,3 +1,4 @@
+import { createMultimeterPart } from "./Multimeter.js"
 // Hecho e implementado por LFTS
 import * as THREE from "three"
 import { createPowerSupply } from "./PowerSupply.js"
@@ -178,6 +179,8 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "multimeter":
+      case "meterProbe": { mesh = createMultimeterPart(data); break }
       case "powerSupply": {
         mesh = createPowerSupply(data)
         // Integrar el proxy y los puntos de agarre con las dimensiones de la fuente actual. Hecho e implementado por LFTS

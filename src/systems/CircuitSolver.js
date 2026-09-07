@@ -50,6 +50,14 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
         : Math.max(0, Number.isFinite(raw) ? raw : 5)
       b.currentLimit = c.type === "powerSupply" ? supplySettings(c.meta).currentLimit : null
       b.source = true
+    } else if (c.type === "multimeter" && ["V", "A"].includes(c.meta?.mode || "V")) {
+      const probes = components.filter(p => p.type === "meterProbe" && p.meta?.meterId === c.id)
+      b.a = anchorNode(probes.find(p => p.meta.polarity === "red")?.meta.anchor)
+      b.b = anchorNode(probes.find(p => p.meta.polarity === "black")?.meta.anchor)
+      if (!b.a || !b.b) continue
+      // Impedancia de entrada de 10 MΩ en V y shunt de 10 mΩ en A. Hecho e implementado por LFTS
+      b.resistance = c.meta?.mode === "A" ? 0.01 : 1e7
+      b.conductor = c.meta?.mode === "A"
     } else if (c.type === "wire") {
       b.a = anchorNode(c.meta?.startAnchor)
       b.b = anchorNode(c.meta?.endAnchor)
@@ -73,7 +81,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
     } else continue
     branches.push(b)
   }
-  return { branches, invalidWires }
+  return { branches, invalidWires, anchorNode }
 }
 
 function adjacency(branches) {

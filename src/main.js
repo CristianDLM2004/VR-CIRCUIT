@@ -1,3 +1,4 @@
+import { MultimeterSystem } from "./systems/MultimeterSystem.js"
 // Hecho e implementado por LFTS
 /**
  * main.js
@@ -56,6 +57,8 @@ const stateSyncSystem   = new StateSyncSystem(scene, appState, interactionSystem
 interactionSystem.setStateSyncSystem(stateSyncSystem)
 const powerSupplyControls = new PowerSupplyInteractionSystem(interactionSystem, appState, stateSyncSystem, () => closeAllPanels())
 interactionSystem.powerSupplyControls = powerSupplyControls
+const multimeterSystem = new MultimeterSystem(scene, appState, stateSyncSystem, interactionSystem)
+interactionSystem.multimeterSystem = multimeterSystem
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 // Iluminación + entorno salón Mrs. Puff — Hecho e implementado por LFTS
@@ -553,6 +556,11 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+function addMultimeter() {
+  const p = getSpawnBasePosition(); p.x += 0.26; p.y += 0.08; p.z += 0.15
+  selectComponent(multimeterSystem.spawn(p))
+}
+
 function addPowerSupply() {
   const id = genId("powerSupply")
   const p = getSpawnBasePosition(); p.x -= 0.34; p.y += 0.12; p.z += 0.14
@@ -699,7 +707,7 @@ const panelRotY     = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -934,11 +942,13 @@ renderer.setAnimationLoop(() => {
 
   powerSupplyControls.update(electricalSystem.lastGraph)
   interactionSystem.update()
+  multimeterSystem.update(electricalSystem.lastGraph)
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
 
   // Sistema eléctrico — siempre activo — Hecho e implementado por LFTS
   electricalSystem.update(dt)
+  multimeterSystem.update(electricalSystem.lastGraph)
   powerSupplyControls.update(electricalSystem.lastGraph)
 
   // Diagnóstico y AlertPanel — siempre se actualiza — Hecho e implementado por LFTS
@@ -949,7 +959,8 @@ renderer.setAnimationLoop(() => {
       electricalSystem.lastGraph,
       isSimMode ? "sim" : "edit"
     )
-    updateAlertPanel(alerts, hasErrors, isSimMode ? "sim" : "edit")
+    const meterAlerts = multimeterSystem.alerts
+    updateAlertPanel([...alerts, ...meterAlerts], hasErrors || meterAlerts.length > 0, isSimMode ? "sim" : "edit")
   } else {
     // Antes de que cargue el grafo, mostrar solo el modo — Hecho e implementado por LFTS
     updateAlertPanel([], false, isSimMode ? "sim" : "edit")

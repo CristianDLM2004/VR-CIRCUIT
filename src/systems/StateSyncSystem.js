@@ -16,6 +16,8 @@ export class StateSyncSystem {
   detachAndDisposeMesh(mesh) {
     if (!mesh) return
 
+    this.interactionSystem?.multimeterSystem?.unregister(mesh)
+    mesh.userData?.disposeMeter?.()
     this.interactionSystem?.powerSupplyControls?.cancel()
     mesh.userData?.disposeSupply?.()
     if (this.interactionSystem) this.interactionSystem.unregister(mesh)
@@ -45,7 +47,10 @@ export class StateSyncSystem {
       this.scene.add(mesh)
       this.meshById.set(data.id, mesh)
 
-      if (this.interactionSystem) this.interactionSystem.register(mesh)
+      if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
 
       // Recolocar componentes insertados de 2 pines usando holes guardados — Hecho e implementado por LFTS
       if (
@@ -99,7 +104,10 @@ export class StateSyncSystem {
     this.scene.add(mesh)
     this.meshById.set(componentData.id, mesh)
 
-    if (this.interactionSystem) this.interactionSystem.register(mesh)
+    if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
     return mesh
   }
 
