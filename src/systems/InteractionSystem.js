@@ -64,6 +64,7 @@ export class InteractionSystem {
 
     this.handTrackingReleaseGraceMs = 520
     this.handOpenReleaseGraceMs = 50
+    this.partialTrackReleaseGraceMs = 600
 
     this.appMode = "edit"
 
@@ -297,6 +298,7 @@ export class InteractionSystem {
         hold: this.createHoldState("hand", null),
         lostTrackingMs: 0,
         openPinchMs: 0,
+        partialTrackMs: 0,
         wirePinchCloseMs: 0,
       })
     }
@@ -1753,7 +1755,8 @@ export class InteractionSystem {
     obj.localToWorld(this._tmpB.copy(he.hold.grabLocalPoint))
     this._tmpC.copy(this._tmpA).sub(this._tmpB)
 
-    obj.position.add(this._tmpC)
+    // Aplica el desplazamiento gradual (no 100% de golpe) para que un salto de
+    obj.position.add(this._tmpC.multiplyScalar(0.65))
     obj.updateMatrixWorld(true)
     this.persistMeshTransform(obj)
   }
@@ -2214,6 +2217,7 @@ export class InteractionSystem {
     he.pinchArmed = false
     he.lostTrackingMs = 0
     he.openPinchMs = 0
+    he.partialTrackMs = 0
 
     if (this.toolMode === "wire") {
       const hoverMatchesThisHand =
@@ -2306,6 +2310,7 @@ export class InteractionSystem {
     he.isPinching = false
     he.openPinchMs = 0
     he.lostTrackingMs = 0
+    he.partialTrackMs = 0
     if (this.toolMode === "wire" || !he.heldObject) return
     this.releaseHeldObject(he.heldObject, he.hold, () => { he.heldObject = null }, options)
   }
@@ -2315,6 +2320,7 @@ export class InteractionSystem {
     he.isPinching = false
     he.openPinchMs = 0
     he.lostTrackingMs = 0
+    he.partialTrackMs = 0
     if (this.toolMode === "wire") {
       this.stopHoldTracking(he.hold)
       return
@@ -2562,6 +2568,7 @@ export class InteractionSystem {
       if (h.heldObject) {
         if (tracked && dist != null) {
           h.lostTrackingMs = 0
+          h.partialTrackMs = 0
 
           if (dist >= this.pinchEndDist) {
             h.openPinchMs += dtMs
@@ -2576,7 +2583,13 @@ export class InteractionSystem {
         if (holdTracked) {
           h.lostTrackingMs = 0
           h.openPinchMs = 0
-          h.isPinching = true
+          h.partialTrackMs += dtMs
+          if (h.partialTrackMs >= this.partialTrackReleaseGraceMs) {
+            this.forceReleaseHand(h, true)
+            h.pinchArmed = true
+          } else {
+            h.isPinching = true
+          }
           continue
         }
 
