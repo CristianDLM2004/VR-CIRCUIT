@@ -1987,7 +1987,7 @@ export class InteractionSystem {
       this.getHandVelocityReferenceWorld(source, hs.lastPos)
     }
   }
-}
+
 //Cambio de prueba
 stopHoldTracking(hs) {
   hs.handRotationOffset = null
