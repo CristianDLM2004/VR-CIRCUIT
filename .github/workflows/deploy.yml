@@ -1,9 +1,9 @@
-name: Deploy to GitHub Pages
+name: Deploy VR-CIRCUIT to GitHub Pages
 
 on:
   push:
-    branches: ["develop"]
-  workflow_dispatch:
+    branches:
+      - develop
 
 permissions:
   contents: read
@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -35,9 +35,5 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
