@@ -1,4 +1,7 @@
+import { createMultimeterPart } from "./Multimeter.js"
+// Hecho e implementado por LFTS
 import * as THREE from "three"
+import { createPowerSupply } from "./PowerSupply.js"
 
 function cloneVec3(v) {
   return v ? new THREE.Vector3(v.x, v.y, v.z) : new THREE.Vector3()
@@ -71,16 +74,16 @@ function normalizeColorValue(value, fallback = 0xffffff) {
 
 function digitToBandColor(d) {
   const colors = [
-    0x000000, // 0 black
-    0x8b4513, // 1 brown
-    0xff0000, // 2 red
-    0xffa500, // 3 orange
-    0xffff00, // 4 yellow
-    0x2ecc71, // 5 green
-    0x3498db, // 6 blue
-    0x8e44ad, // 7 violet
-    0x95a5a6, // 8 gray
-    0xffffff, // 9 white
+    0x000000, // 0 negro — Hecho e implementado por LFTS
+    0x8b4513, // 1 marrón — Hecho e implementado por LFTS
+    0xff0000, // 2 rojo — Hecho e implementado por LFTS
+    0xffa500, // 3 naranja — Hecho e implementado por LFTS
+    0xffff00, // 4 amarillo — Hecho e implementado por LFTS
+    0x2ecc71, // 5 verde — Hecho e implementado por LFTS
+    0x3498db, // 6 azul — Hecho e implementado por LFTS
+    0x8e44ad, // 7 violetaa — Hecho e implementado por LFTS
+    0x95a5a6, // 8 gris — Hecho e implementado por LFTS
+    0xffffff, // 9 blanco — Hecho e implementado por LFTS
   ]
   return colors[Math.max(0, Math.min(9, d | 0))]
 }
@@ -116,7 +119,7 @@ function getBandsFromResistance(value) {
     digitToBandColor(first),
     digitToBandColor(second),
     multiplierToBandColor(multiplierPow),
-    0xd4af37, // gold tolerance
+    0xd4af37, // tolerancia dorada — Hecho e implementado por LFTS
   ]
 }
 
@@ -176,6 +179,30 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "multimeter":
+      case "meterProbe": { mesh = createMultimeterPart(data); break }
+      case "powerSupply": {
+        mesh = createPowerSupply(data)
+        // Integrar el proxy y los puntos de agarre con las dimensiones de la fuente actual. Hecho e implementado por LFTS
+        const grabProxy = createGrabProxyBox(0.29, 0.21, 0.18, new THREE.Vector3(0, 0.10, 0))
+        mesh.add(grabProxy)
+        setGrabMetadata(mesh, {
+          grabCenter: new THREE.Vector3(0, 0.10, 0),
+          grabPoints: [
+            { id: "psu_center", localPos: new THREE.Vector3(0, 0.10, 0), weight: 1 },
+            { id: "psu_top", localPos: new THREE.Vector3(0, 0.20, 0), weight: 0.95 },
+            { id: "psu_front", localPos: new THREE.Vector3(0, 0.10, 0.085), weight: 0.92 },
+            { id: "psu_back", localPos: new THREE.Vector3(0, 0.10, -0.085), weight: 0.92 },
+            { id: "psu_left", localPos: new THREE.Vector3(-0.14, 0.10, 0), weight: 0.9 },
+            { id: "psu_right", localPos: new THREE.Vector3(0.14, 0.10, 0), weight: 0.9 },
+          ],
+          grabRadius: 0.025,
+          grabTarget: grabProxy,
+          surfaceContactObject: mesh.userData.surfaceContactObject,
+          surfaceUpright: true,
+        })
+        break
+      }
       case "battery5v": {
         const group = new THREE.Group()
 
@@ -630,7 +657,7 @@ export class ComponentFactory {
         break
       }
 
-      case "wire": {
+            case "wire": {
         const group = new THREE.Group()
         const rawPoints = Array.isArray(data.meta?.points) ? data.meta.points : []
         const points = rawPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z))
@@ -647,59 +674,110 @@ export class ComponentFactory {
         group.userData.endAnchor = data.meta?.endAnchor ?? null
         group.userData.fixedPoints = points.map((p) => p.clone())
 
+        group.userData._wireJointPool = []
+        group.userData._wireSegmentPool = []
+
+        group.userData._wireJointGeometry = new THREE.SphereGeometry(radius * 1.15, 10, 10)
+        group.userData._wireSegmentGeometry = new THREE.CylinderGeometry(radius, radius, 1, 12)
+
+        group.userData._wireJointMaterial = new THREE.MeshStandardMaterial({
+          color: wireColor,
+          roughness: 0.7,
+          metalness: 0.0,
+        })
+
+        group.userData._wireSegmentMaterial = new THREE.MeshStandardMaterial({
+          color: wireColor,
+          roughness: 0.65,
+          metalness: 0.0,
+          emissive: 0x181818,
+        })
+
+        group.userData.ensureWireJoint = function (index) {
+          if (group.userData._wireJointPool[index]) {
+            return group.userData._wireJointPool[index]
+          }
+
+          const joint = new THREE.Mesh(
+            group.userData._wireJointGeometry,
+            group.userData._wireJointMaterial
+          )
+          joint.name = `WireJoint_${index}`
+          joint.visible = false
+          group.add(joint)
+          group.userData._wireJointPool[index] = joint
+          return joint
+        }
+
+        group.userData.ensureWireSegment = function (index) {
+          if (group.userData._wireSegmentPool[index]) {
+            return group.userData._wireSegmentPool[index]
+          }
+
+          const segment = new THREE.Mesh(
+            group.userData._wireSegmentGeometry,
+            group.userData._wireSegmentMaterial
+          )
+          segment.name = `WireSegment_${index}`
+          segment.visible = false
+          group.add(segment)
+          group.userData._wireSegmentPool[index] = segment
+          return segment
+        }
+
         group.userData.rebuildWireGeometry = function (nextPoints) {
-          while (group.children.length > 0) {
-            const child = group.children.pop()
-            child?.geometry?.dispose?.()
-            child?.material?.dispose?.()
+          const safePoints = Array.isArray(nextPoints) ? nextPoints.map((p) => p.clone()) : []
+          if (safePoints.length < 2) return
+
+          group.userData.fixedPoints = safePoints.map((p) => p.clone())
+
+          if (group.userData._wireJointMaterial?.color) {
+            group.userData._wireJointMaterial.color.setHex(group.userData.wireColor ?? 0x111111)
           }
 
-          const wireMat = new THREE.MeshStandardMaterial({
-            color: group.userData.wireColor ?? 0x111111,
-            roughness: 0.65,
-            metalness: 0.0,
-            emissive: 0x181818,
-          })
-
-          const jointMat = new THREE.MeshStandardMaterial({
-            color: group.userData.wireColor ?? 0x111111,
-            roughness: 0.7,
-            metalness: 0.0,
-          })
-
-          for (let i = 0; i < nextPoints.length; i++) {
-            const joint = new THREE.Mesh(
-              new THREE.SphereGeometry((group.userData.wireRadius ?? 0.0038) * 1.15, 10, 10),
-              jointMat.clone()
-            )
-            joint.position.copy(nextPoints[i])
-            group.add(joint)
+          if (group.userData._wireSegmentMaterial?.color) {
+            group.userData._wireSegmentMaterial.color.setHex(group.userData.wireColor ?? 0x111111)
           }
 
-          for (let i = 0; i < nextPoints.length - 1; i++) {
-            const start = nextPoints[i]
-            const end = nextPoints[i + 1]
+          const jointCount = safePoints.length
+          const segmentCount = safePoints.length - 1
+
+          for (let i = 0; i < jointCount; i++) {
+            const joint = group.userData.ensureWireJoint(i)
+            joint.position.copy(safePoints[i])
+            joint.visible = true
+          }
+
+          for (let i = jointCount; i < group.userData._wireJointPool.length; i++) {
+            const joint = group.userData._wireJointPool[i]
+            if (joint) joint.visible = false
+          }
+
+          for (let i = 0; i < segmentCount; i++) {
+            const start = safePoints[i]
+            const end = safePoints[i + 1]
             const dir = end.clone().sub(start)
             const len = dir.length()
-            if (len < 0.0001) continue
+
+            const segment = group.userData.ensureWireSegment(i)
+
+            if (len < 0.0001) {
+              segment.visible = false
+              continue
+            }
 
             const mid = start.clone().add(end).multiplyScalar(0.5)
-
-            const segment = new THREE.Mesh(
-              new THREE.CylinderGeometry(
-                group.userData.wireRadius ?? 0.0038,
-                group.userData.wireRadius ?? 0.0038,
-                1,
-                12
-              ),
-              wireMat.clone()
-            )
 
             segment.position.copy(mid)
             dir.normalize()
             segment.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
             segment.scale.set(1, len, 1)
-            group.add(segment)
+            segment.visible = true
+          }
+
+          for (let i = segmentCount; i < group.userData._wireSegmentPool.length; i++) {
+            const segment = group.userData._wireSegmentPool[i]
+            if (segment) segment.visible = false
           }
         }
 

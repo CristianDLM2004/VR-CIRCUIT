@@ -1,4 +1,5 @@
-import { ComponentFactory } from "../components/ComponentFactory"
+// Hecho e implementado por LFTS
+import { ComponentFactory } from "../components/ComponentFactory.js"
 
 export class StateSyncSystem {
   constructor(scene, appState, interactionSystem = null) {
@@ -15,6 +16,10 @@ export class StateSyncSystem {
   detachAndDisposeMesh(mesh) {
     if (!mesh) return
 
+    this.interactionSystem?.multimeterSystem?.unregister(mesh)
+    mesh.userData?.disposeMeter?.()
+    this.interactionSystem?.powerSupplyControls?.cancel()
+    mesh.userData?.disposeSupply?.()
     if (this.interactionSystem) this.interactionSystem.unregister(mesh)
 
     if (mesh.userData) {
@@ -42,9 +47,12 @@ export class StateSyncSystem {
       this.scene.add(mesh)
       this.meshById.set(data.id, mesh)
 
-      if (this.interactionSystem) this.interactionSystem.register(mesh)
+      if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
 
-      // Recolocar componentes insertados de 2 pines usando holes guardados
+      // Recolocar componentes insertados de 2 pines usando holes guardados — Hecho e implementado por LFTS
       if (
         data.inserted &&
         data.pinConnections &&
@@ -96,7 +104,10 @@ export class StateSyncSystem {
     this.scene.add(mesh)
     this.meshById.set(componentData.id, mesh)
 
-    if (this.interactionSystem) this.interactionSystem.register(mesh)
+    if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
     return mesh
   }
 
