@@ -1,0 +1,127 @@
+//StateSyncSystem
+// Hecho e implementado por LFTS
+import { ComponentFactory } from "../components/ComponentFactory.js"
+
+export class StateSyncSystem {
+  constructor(scene, appState, interactionSystem = null) {
+    this.scene = scene
+    this.appState = appState
+    this.interactionSystem = interactionSystem
+    this.meshById = new Map()
+  }
+
+  setInteractionSystem(interactionSystem) {
+    this.interactionSystem = interactionSystem
+  }
+
+  detachAndDisposeMesh(mesh) {
+    if (!mesh) return
+
+    this.interactionSystem?.multimeterSystem?.unregister(mesh)
+    mesh.userData?.disposeMeter?.()
+    this.interactionSystem?.powerSupplyControls?.cancel()
+    mesh.userData?.disposeSupply?.()
+    if (this.interactionSystem) this.interactionSystem.unregister(mesh)
+
+    if (mesh.userData) {
+      mesh.userData.heldBy = null
+      delete mesh.userData.physics
+    }
+
+    if (mesh.parent) {
+      mesh.parent.remove(mesh)
+    } else {
+      this.scene.remove(mesh)
+    }
+  }
+
+  rebuildFromState() {
+    for (const mesh of this.meshById.values()) {
+      this.detachAndDisposeMesh(mesh)
+    }
+    this.meshById.clear()
+
+    for (const data of this.appState.components) {
+      const mesh = ComponentFactory.createComponent(data)
+      if (!mesh) continue
+
+      this.scene.add(mesh)
+      this.meshById.set(data.id, mesh)
+
+      if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
+
+      // Recolocar componentes insertados de 2 pines usando holes guardados — Hecho e implementado por LFTS
+      if (
+        data.inserted &&
+        data.pinConnections &&
+        this.interactionSystem?.holeSystem &&
+        Array.isArray(mesh.userData?.pins) &&
+        mesh.userData.pins.length === 2
+      ) {
+        const pinA = mesh.userData.pins[0]
+        const pinB = mesh.userData.pins[1]
+
+        const holeA = this.interactionSystem.holeSystem.holes.find(
+          (h) => h.id === data.pinConnections[pinA.id]
+        )
+
+        const holeB = this.interactionSystem.holeSystem.holes.find(
+          (h) => h.id === data.pinConnections[pinB.id]
+        )
+
+        if (pinA && pinB && holeA && holeB) {
+          const targetDir = holeB.worldPos.clone().sub(holeA.worldPos).setY(0)
+
+          if (targetDir.lengthSq() > 1e-8) {
+            targetDir.normalize()
+
+            const targetYaw = Math.atan2(-targetDir.z, targetDir.x)
+            mesh.rotation.set(0, targetYaw, 0)
+            mesh.updateMatrixWorld(true)
+
+            const rotatedPinAWorld = pinA.localPos.clone()
+            mesh.localToWorld(rotatedPinAWorld)
+
+            const delta = holeA.worldPos.clone().sub(rotatedPinAWorld)
+            mesh.position.add(delta)
+            mesh.position.y -= 0.02
+            mesh.updateMatrixWorld(true)
+          }
+        }
+      }
+    }
+  }
+
+  addMeshFromComponent(componentData) {
+    if (!componentData?.id) return null
+    if (this.meshById.has(componentData.id)) return this.meshById.get(componentData.id)
+
+    const mesh = ComponentFactory.createComponent(componentData)
+    if (!mesh) return null
+
+    this.scene.add(mesh)
+    this.meshById.set(componentData.id, mesh)
+
+    if (this.interactionSystem) {
+      this.interactionSystem.register(mesh)
+      this.interactionSystem.multimeterSystem?.register(mesh)
+    }
+    return mesh
+  }
+
+  removeMeshById(id) {
+    const mesh = this.meshById.get(id)
+    if (!mesh) return false
+
+    this.detachAndDisposeMesh(mesh)
+    this.meshById.delete(id)
+    return true
+  }
+
+  getMeshById(id) {
+    return this.meshById.get(id) || null
+  }
+}

@@ -1,0 +1,79 @@
+import * as THREE from "three"
+
+export class SceneManager {
+  constructor() {
+    this.scene = new THREE.Scene()
+    this.scene.background = new THREE.Color(0x202020)
+
+    this.camera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100
+    )
+    this.camera.position.set(0, 1.6, 3)
+
+    // ✅ CLAVE: cámara base ve todas las layers
+    this.camera.layers.enableAll()
+
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+    })
+
+    this.renderer.setPixelRatio(window.devicePixelRatio)
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false)
+    this.renderer.xr.enabled = true
+
+    const app = document.getElementById("app")
+    if (!app) throw new Error("No existe <div id='app'></div> en index.html")
+    app.appendChild(this.renderer.domElement)
+
+    window.addEventListener("resize", this.onResize.bind(this))
+
+    this.renderer.xr.addEventListener("sessionstart", () => {
+      this.renderer.setPixelRatio(1)
+      this.renderer.xr.setFramebufferScaleFactor(1.0)
+      this.forceXREyeLayers()
+    })
+
+    this.renderer.xr.addEventListener("sessionend", () => {
+      this.renderer.setPixelRatio(window.devicePixelRatio)
+      this.onResize()
+    })
+  }
+
+  onResize() {
+    if (this.renderer.xr.isPresenting) return
+
+    this.camera.aspect = window.innerWidth / window.innerHeight
+    this.camera.updateProjectionMatrix()
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false)
+  }
+
+  forceXREyeLayers() {
+    if (!this.renderer.xr.isPresenting) return
+
+    // Asegurar base
+    this.camera.layers.enableAll()
+
+    const xrCam = this.renderer.xr.getCamera(this.camera)
+
+    // XR camera + ojos: enableAll
+    if (xrCam?.layers) xrCam.layers.enableAll()
+
+    if (xrCam?.isArrayCamera && Array.isArray(xrCam.cameras)) {
+      for (const eye of xrCam.cameras) {
+        eye.layers.enableAll()
+      }
+    }
+  }
+
+  render() {
+    // ✅ Reafirmar por frame (Quest puede “desfasar” en caliente)
+    if (this.renderer.xr.isPresenting) this.forceXREyeLayers()
+
+    this.renderer.render(this.scene, this.camera)
+  }
+}
