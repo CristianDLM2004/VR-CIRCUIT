@@ -1,3 +1,4 @@
+//InteractionSystem
 // Hecho e implementado por LFTS
 import * as THREE from "three"
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js"
@@ -119,6 +120,9 @@ export class InteractionSystem {
 
     this.wireActionCooldownMs = 90
     this._lastWireActionMs = 0
+
+    // Cadena de joints de referencia para rotación — más resiliente que depender solo de "wrist". Hecho e implementado por LFTS
+    this.rotationReferenceJoints = ["wrist", "index-finger-metacarpal", "middle-finger-metacarpal", "pinky-finger-metacarpal"]
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -312,6 +316,7 @@ export class InteractionSystem {
       grabOffset: new THREE.Vector3(),
       grabLocalPoint: new THREE.Vector3(),
       handRotationOffset: null,
+      rotationRefName: null,
       holdDistance: 0,
     }
   }
@@ -847,6 +852,16 @@ export class InteractionSystem {
     if (!this.isJointTracked(j)) return null
     j.getWorldPosition(out)
     return out
+  }
+
+  // Prueba varios joints en orden hasta encontrar uno trackeado; evita que la rotación se congele
+  // si "wrist" se pierde al girar la mano. Hecho e implementado por LFTS
+  getRotationReferenceJoint(hand) {
+    for (const name of this.rotationReferenceJoints) {
+      const j = hand.joints?.[name]
+      if (this.isJointTracked(j)) return { name, joint: j }
+    }
+    return null
   }
 
   getIndexTipWorld(he, out) {
@@ -1714,20 +1729,23 @@ export class InteractionSystem {
     if (!this.isHandTrackedForHold(he)) return
 
     const obj = he.heldObject
-
-    // Mantener el giro relativo a la muñeca sin cambiar el punto sujetado. Hecho e implementado por LFTS
-    const wrist = he.hand?.joints?.wrist
-    if (this.isJointTracked(wrist)) {
-      const orientation = wrist.getWorldQuaternion(new THREE.Quaternion())
-      if (!he.hold.handRotationOffset) {
+    // Mantener el giro relativo a la mano sin cambiar el punto sujetado.
+    // Usa una cadena de joints de respaldo si "wrist" se pierde. Hecho e implementado por LFTS
+    const ref = this.getRotationReferenceJoint(he.hand)
+    if (ref) {
+      const orientation = ref.joint.getWorldQuaternion(new THREE.Quaternion())
+      if (!he.hold.handRotationOffset || he.hold.rotationRefName !== ref.name) {
         he.hold.handRotationOffset = orientation.clone().invert().multiply(obj.getWorldQuaternion(new THREE.Quaternion()))
+        he.hold.rotationRefName = ref.name
       }
       const worldRotation = orientation.multiply(he.hold.handRotationOffset)
       const parentRotation = obj.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
-      obj.quaternion.copy(parentRotation.invert().multiply(worldRotation))
+      const targetLocal = parentRotation.invert().multiply(worldRotation)
+      obj.quaternion.slerp(targetLocal, 0.6)
       obj.updateMatrixWorld(true)
     } else {
       he.hold.handRotationOffset = null
+      he.hold.rotationRefName = null
     }
 
     this.getHoldReferenceWorld(he, obj, this._tmpA)
@@ -1956,6 +1974,7 @@ export class InteractionSystem {
 
   stopHoldTracking(hs) {
     hs.handRotationOffset = null
+    hs.rotationRefName = null
     hs.active = false
     hs.sourceType = null
     hs.source = null
@@ -2716,4 +2735,6 @@ export class InteractionSystem {
 
     this.setHover(handsActive ? this.computeHandHover() : this.computeControllerHover())
   }
+
+
 }

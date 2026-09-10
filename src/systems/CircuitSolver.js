@@ -1,3 +1,4 @@
+//CircuitSolver.js
 // Hecho e implementado por LFTS
 import { supplySettings } from "../core/PowerSupplySettings.js"
 

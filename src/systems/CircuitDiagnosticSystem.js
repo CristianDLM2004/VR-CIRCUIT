@@ -1,3 +1,4 @@
+//CircuitDiagnosticSystem.js
 // Hecho e implementado por LFTS
 import { componentRatings } from "../core/PowerSupplySettings.js"
 
