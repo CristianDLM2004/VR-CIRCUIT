@@ -1971,7 +1971,7 @@ export class InteractionSystem {
       this.getHoldReferenceWorld(source, source.heldObject || null, hs.lastPos)
     }
   }
-
+  //Cambio de prueba
   stopHoldTracking(hs) {
     hs.handRotationOffset = null
     hs.rotationRefName = null
