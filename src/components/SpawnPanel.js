@@ -1,3 +1,4 @@
+//Spawn Panel
 // Hecho e implementado por LFTS
 import * as THREE from "three"
 

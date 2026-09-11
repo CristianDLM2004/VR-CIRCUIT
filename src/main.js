@@ -37,6 +37,8 @@ import { createEditPanel } from "./components/EditPanel.js"
 
 import { TrashSystem } from "./systems/TrashSystem.js"
 import { PhysicsSystem } from "./systems/PhysicsSystem.js"
+import { TutorialSystem } from "./systems/TutorialSystem.js"
+import { createTutorialPanel } from "./components/TutorialPanel.js"
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 // Núcleo: escena, cámara, renderer — Hecho e implementado por LFTS
@@ -714,6 +716,7 @@ const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVis
   position: panelWorldPos, rotationY: panelRotY,
   onWire: toggleWireMode, onSave: saveState, onLoad: loadState,
   onMode: toggleAppMode, onClear: clearScene,
+  onTutorial: startTutorial,
 })
 
 setWireModeVisualFn = setWireModeVisual
@@ -856,8 +859,59 @@ interactionSystem.register(btnMode)
 interactionSystem.register(btnEdit)
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
-// Trash System — Hecho e implementado por LFTS
+// Tutorial guiado — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
+
+const tutorialSystem = new TutorialSystem({
+  appState,
+  electricalSystem,
+  getOpenPanelKey: () => openPanelKey,
+  getToolMode: () => interactionSystem.toolMode,
+  isSimMode: () => isSimMode,
+})
+
+const tutorialPanelApi = createTutorialPanel({
+  position: new THREE.Vector3(0, 1.42, -0.55),
+  rotationY: 0,
+  onAdvance: () => tutorialSystem.manualAdvance(),
+  onSkip: () => { tutorialSystem.close(true); setTutorialPanelEnabled(false) },
+})
+scene.add(tutorialPanelApi.group)
+clonePanelMaterials(tutorialPanelApi.group)
+
+function setTutorialPanelEnabled(enabled) {
+  tutorialPanelApi.group.visible = enabled
+  for (const b of tutorialPanelApi.buttons) {
+    if (enabled) interactionSystem.register(b)
+    else interactionSystem.unregister(b)
+  }
+}
+setTutorialPanelEnabled(false)
+
+function startTutorial() {
+  closeAllPanels()
+  tutorialSystem.start()
+  setTutorialPanelEnabled(true)
+}
+
+tutorialSystem.setTargets({
+  btnSpawn,
+  btnMode,
+  spawnBattery: spawnPanel.getObjectByName("SpawnBattery"),
+  spawnLed: spawnPanel.getObjectByName("SpawnLed"),
+  spawnResistor: spawnPanel.getObjectByName("SpawnResistor"),
+  spawnButtonOrSwitch: [spawnPanel.getObjectByName("SpawnButton"), spawnPanel.getObjectByName("SpawnSwitch")],
+  modeWire: modePanel.getObjectByName("ModeWire"),
+  modeToggle: modePanel.getObjectByName("ModeToggle"),
+})
+
+// Se ofrece automáticamente la primera vez que se entra a VR (no al cargar la página,
+// ya que fuera de la sesión XR no hay manos/controles con qué interactuar).
+renderer.xr.addEventListener("sessionstart", () => {
+  if (!tutorialSystem.hasBeenSeen()) startTutorial()
+})
+
+
 
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 const trashBin    = trashSystem.createTrashBin({
@@ -968,6 +1022,15 @@ renderer.setAnimationLoop(() => {
 
   detectNewComponents()
   validateSelection()
+
+  const dtMs = dt * 1000
+  tutorialSystem.update(dtMs)
+  if (tutorialSystem.active) {
+    tutorialPanelApi.updateContent(tutorialSystem.getPanelData())
+    if (!tutorialPanelApi.group.visible) setTutorialPanelEnabled(true)
+  } else if (tutorialPanelApi.group.visible) {
+    setTutorialPanelEnabled(false)
+  }
 
   sceneManager.render()
 })
