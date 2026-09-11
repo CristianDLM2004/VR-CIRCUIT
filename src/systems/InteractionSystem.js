@@ -536,36 +536,22 @@ export class InteractionSystem {
   }
 
   getSurfaceGrabAssist(object) {
+    if (object?.userData?.componentType !== "resistor") {
+      return { gap: Infinity, active: false, scoreBonus: 0, distBonus: 0, radiusBonus: 0 }
+    }
+
     const gap = this.getObjectSurfaceGap(object)
     if (!isFinite(gap) || gap > this.surfaceAssistMaxGap) {
-      return {
-        gap,
-        active: false,
-        scoreBonus: 0,
-        distBonus: 0,
-        radiusBonus: 0,
-      }
+      return { gap, active: false, scoreBonus: 0, distBonus: 0, radiusBonus: 0 }
     }
 
     const t = 1 - THREE.MathUtils.clamp(gap / this.surfaceAssistMaxGap, 0, 1)
 
-    let scoreBonus = 0.020 + t * 0.045
-    let distBonus = 0.012 + t * 0.018
-    let radiusBonus = 0.008 + t * 0.010
+    const scoreBonus = 0.012 + t * 0.018
+    const distBonus = 0.006 + t * 0.010
+    const radiusBonus = 0.004 + t * 0.008
 
-    if (object?.userData?.componentType === "resistor") {
-      scoreBonus += 0.040
-      distBonus += 0.020
-      radiusBonus += 0.016
-    }
-
-    return {
-      gap,
-      active: true,
-      scoreBonus,
-      distBonus,
-      radiusBonus,
-    }
+    return { gap, active: true, scoreBonus, distBonus, radiusBonus }
   }
 
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
@@ -1817,7 +1803,6 @@ export class InteractionSystem {
   }
 
   updateUIPoke() {
-    if (this.hands.some((h) => h.heldObject)) return
 
     for (const [handIndex, pressed] of this._handHeldButton.entries()) {
       const he = this.hands.find((h) => h.index === handIndex)
