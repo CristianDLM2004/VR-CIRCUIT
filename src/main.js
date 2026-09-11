@@ -240,11 +240,12 @@ function rebuildProtoboardOnDesk() {
   }
   holeDots.instanceMatrix.needsUpdate = true
   scene.add(holeDots)
+
+
+  tutorialSystem?.setTargets({ protoboard })
 }
 
-// ───────────────────────────────────────────── — Hecho e implementado por LFTS
-// Carga del modelo GLB del salón — Hecho e implementado por LFTS
-// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+
 
 const classroomModelUrl = `${import.meta.env.BASE_URL}models/mrs-puffs-classroom.glb`
 const classroomLoader   = new GLTFLoader()
@@ -897,12 +898,14 @@ function startTutorial() {
 tutorialSystem.setTargets({
   btnSpawn,
   btnMode,
-  spawnBattery: spawnPanel.getObjectByName("SpawnBattery"),
-  spawnLed: spawnPanel.getObjectByName("SpawnLed"),
-  spawnResistor: spawnPanel.getObjectByName("SpawnResistor"),
-  spawnButtonOrSwitch: [spawnPanel.getObjectByName("SpawnButton"), spawnPanel.getObjectByName("SpawnSwitch")],
+  btnEdit,
+  spawnAll: spawnButtons,
+  editPanel: editPanelApi.group,
   modeWire: modePanel.getObjectByName("ModeWire"),
   modeToggle: modePanel.getObjectByName("ModeToggle"),
+  modeSave: modePanel.getObjectByName("ModeSave"),
+  modeLoad: modePanel.getObjectByName("ModeLoad"),
+  modeClear: modePanel.getObjectByName("ModeClear"),
 })
 
 // Se ofrece automáticamente la primera vez que se entra a VR (no al cargar la página,
