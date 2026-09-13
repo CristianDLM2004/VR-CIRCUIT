@@ -863,18 +863,99 @@ interactionSystem.register(btnEdit)
 // Tutorial guiado — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+// Helpers exclusivos del tutorial: crear/quitar componentes de práctica sin pasar
+// por los paneles reales, y un botón temporal sin función real para enseñar el
+// gesto de "presionar". Hecho e implementado por LFTS
+// ───────────────────────────────────────────── — Hecho e implementado por LFTS
+
+function getTutorialSpawnPosition() {
+  // Un punto elevado y desplazado hacia el usuario respecto a la protoboard/mesa,
+  // para que el componente de práctica no compita visualmente con la protoboard
+  // en los pasos donde todavía no se explica. Hecho e implementado por LFTS
+  const base = getSpawnBasePosition()
+  return new THREE.Vector3(base.x, base.y + 0.28, base.z + 0.35)
+}
+
+function spawnTutorialComponent(type, meta = {}) {
+  const id = genId(type)
+  const p = getTutorialSpawnPosition()
+  const data = {
+    id, type,
+    transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 },
+    meta,
+  }
+  appState.addComponent(data)
+  const mesh = stateSyncSystem.addMeshFromComponent(data)
+  syncSpecialRefs(mesh)
+  return { id, mesh }
+}
+
+function removeTutorialComponent(id) {
+  if (!id || !getComponentById(id)) return
+  if (selectedComponentId === id) clearSelection()
+  appState.removeComponent(id)
+  stateSyncSystem.removeMeshById(id)
+}
+
+function createDemoButtonMesh() {
+  const group = new THREE.Group()
+  group.name = "TutorialDemoButton"
+
+  const btn = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.05, 0.02, 20),
+    new THREE.MeshStandardMaterial({ color: 0x607d8b, roughness: 0.55 })
+  )
+  btn.userData.isUI = true
+  btn.userData._lastPressMs = 0
+  btn.userData._cooldownMs = 250
+  btn.userData.onPress = () => {
+    const now = performance.now()
+    if (now - btn.userData._lastPressMs < btn.userData._cooldownMs) return
+    btn.userData._lastPressMs = now
+    btn.scale.set(0.9, 0.9, 0.9)
+    setTimeout(() => btn.scale.set(1, 1, 1), 80)
+    btn.userData._tutorialPressed = true
+  }
+  group.add(btn)
+  return { group, button: btn }
+}
+
+function spawnDemoButton() {
+  const { group, button } = createDemoButtonMesh()
+  group.position.copy(getTutorialSpawnPosition())
+  scene.add(group)
+  interactionSystem.register(button)
+  return button
+}
+
+function removeDemoButton(mesh) {
+  if (!mesh) return
+  interactionSystem.unregister(mesh)
+  if (interactionSystem._lastPokedButton === mesh) interactionSystem._lastPokedButton = null
+  scene.remove(mesh.parent || mesh)
+}
+
 const tutorialSystem = new TutorialSystem({
   appState,
   electricalSystem,
   getOpenPanelKey: () => openPanelKey,
   getToolMode: () => interactionSystem.toolMode,
   isSimMode: () => isSimMode,
+  getMeshById: (id) => stateSyncSystem.getMeshById(id),
+  spawnTutorialComponent,
+  removeTutorialComponent,
+  selectComponent,
+  clearSelection,
+  spawnDemoButton,
+  removeDemoButton,
 })
 
 const tutorialPanelApi = createTutorialPanel({
   position: new THREE.Vector3(0, 1.42, -0.55),
   rotationY: 0,
   onAdvance: () => tutorialSystem.manualAdvance(),
+  onBack: () => tutorialSystem.back(),
   onSkip: () => { tutorialSystem.close(true); setTutorialPanelEnabled(false) },
 })
 scene.add(tutorialPanelApi.group)
@@ -896,13 +977,8 @@ function startTutorial() {
 }
 
 tutorialSystem.setTargets({
-  btnSpawn,
   btnMode,
-  btnEdit,
-  spawnAll: spawnButtons,
-  editPanel: editPanelApi.group,
   modeWire: modePanel.getObjectByName("ModeWire"),
-  modeToggle: modePanel.getObjectByName("ModeToggle"),
   modeSave: modePanel.getObjectByName("ModeSave"),
   modeLoad: modePanel.getObjectByName("ModeLoad"),
   modeClear: modePanel.getObjectByName("ModeClear"),
