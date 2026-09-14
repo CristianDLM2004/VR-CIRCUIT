@@ -85,6 +85,12 @@ export class TutorialSystem {
         onEnter: (ctx, self) => {
           const { id, mesh } = ctx.spawnTutorialComponent("battery5v")
           self.data.grabBasicsId = id
+          // Limpia banderas de un intento anterior (relevante al regresar con "Atrás"):
+          // sin esto, el paso "recordaba" que ya se había completado la fase 1 y saltaba
+          // directo al texto de la basura, aunque la batería fuera nueva.
+          delete self.data["_grabCycle_grabBasics"]
+          delete self.data["_grabCycle_grabBasics_done"]
+          delete self.data._flag_grabBasicsPhase2
           self.applyHighlight(mesh)
         },
         onExit: (ctx, self) => {

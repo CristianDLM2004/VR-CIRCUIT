@@ -2080,7 +2080,8 @@ export class InteractionSystem {
     const halfY = this._tmpSize.y * 0.5
     if (center.y - halfY < best.point.y) {
       object.position.y += (best.point.y + halfY - center.y) + 0.001
-      if (object.userData?.surfaceUpright) {
+
+      if (["powerSupply", "multimeter"].includes(object.userData?.componentType)) {
         const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
         let yaw = object.rotation.y
         if (fwd.lengthSq() > 1e-8) {
@@ -2150,7 +2151,8 @@ export class InteractionSystem {
     if (!object) return false
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
-    if (object.userData?.surfaceUpright) {
+
+    if (["powerSupply", "multimeter"].includes(object.userData?.componentType)) {
       const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
       let yaw = object.rotation.y
       if (fwd.lengthSq() > 1e-8) {
