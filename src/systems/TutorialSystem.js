@@ -65,60 +65,68 @@ export class TutorialSystem {
       {
         id: "welcome",
         title: "Bienvenido a VR-Circuit",
-        instruction: "Este es un simulador de circuitos electrónicos en realidad virtual. Vamos a recorrer juntos, paso a paso, cómo moverte e interactuar con todo antes de armar tu primer circuito.",
+        instruction: "Este es un simulador de circuitos electrónicos en realidad virtual. Vamos a recorrer, paso a paso, cómo moverte e interactuar con todo antes de armar tu primer circuito.",
         manualAdvance: true,
         primaryLabel: "Empezar",
       },
       {
         id: "entorno",
         title: "El entorno",
-        instruction: "Frente a ti está la protoboard, donde más adelante vas a insertar y conectar componentes. A los lados hay paneles flotantes y, en la mesa, botones físicos para abrirlos. También hay un bote para deshacerte de componentes sueltos.",
+        instruction: "Frente a ti está la protoboard: ahí vas a insertar y conectar componentes más adelante. También hay paneles flotantes y botones físicos en la mesa para abrirlos. Ahora mismo estás en modo Edición, el modo por defecto para acomodar cosas libremente.",
         targetKey: "protoboard",
         manualAdvance: true,
         primaryLabel: "Entendido",
       },
 
-      // --- Agarrar, mover y tirar a la basura (fusionado en un solo paso) ---
+      // --- Agarrar y mover (batería de práctica) ---
       {
-        id: "grab-basics",
+        id: "grab-move",
         title: "Agarrar y mover componentes",
+        instruction: "Frente a ti hay una batería de práctica. Con la mano: acércate y junta el pulgar con el índice (gesto de pellizco) sobre ella para tomarla; gírala moviendo tu muñeca; abre los dedos para soltarla. Con el control: mantén presionado el gatillo apuntando hacia ella para tomarla, gírala moviendo el control, y suelta el gatillo para soltarla.",
         onEnter: (ctx, self) => {
-          const { id, mesh } = ctx.spawnTutorialComponent("battery5v")
-          self.data.grabBasicsId = id
-          // Limpia banderas de un intento anterior (relevante al regresar con "Atrás"):
-          // sin esto, el paso "recordaba" que ya se había completado la fase 1 y saltaba
-          // directo al texto de la basura, aunque la batería fuera nueva.
-          delete self.data["_grabCycle_grabBasics"]
-          delete self.data["_grabCycle_grabBasics_done"]
-          delete self.data._flag_grabBasicsPhase2
-          self.applyHighlight(mesh)
-        },
-        onExit: (ctx, self) => {
-          if (self.data.grabBasicsId) ctx.removeTutorialComponent(self.data.grabBasicsId)
-          delete self.data.grabBasicsId
-        },
-        instruction: (ctx, self) => {
-          const mesh = ctx.getMeshById(self.data.grabBasicsId)
-          const grabbed = self.trackGrabReleaseCycle("grabBasics", mesh)
-          if (!grabbed) {
-            return "Acércate a la batería flotante. Con la mano: junta el pulgar y el índice (pellizco) sobre ella para tomarla, y abre los dedos para soltarla. Con el control: mantén presionado el gatillo apuntando hacia ella, y suéltalo para dejarla caer."
+          if (!self.data.practiceBatteryId || !ctx.getMeshById(self.data.practiceBatteryId)) {
+            const { id } = ctx.spawnTutorialComponent("battery5v")
+            self.data.practiceBatteryId = id
+            delete self.data["_grabCycle_practiceBattery"]
+            delete self.data["_grabCycle_practiceBattery_done"]
           }
-          return "¡Bien! Ahora aparece un bote de basura. Toma la batería otra vez y suéltala dentro del bote para eliminarla."
+          self.applyHighlight(ctx.getMeshById(self.data.practiceBatteryId))
         },
-        onEnterExtra: null,
+        onExit: (ctx, self, direction) => {
+          // Solo se destruye si de verdad ya no hará falta (retrocediendo más allá de
+          // este paso); si avanzas al de la basura, la misma batería se reutiliza. Hecho e implementado por LFTS
+          if (direction === "backward" && self.data.practiceBatteryId) {
+            ctx.removeTutorialComponent(self.data.practiceBatteryId)
+            delete self.data.practiceBatteryId
+          }
+        },
         check: (ctx, self) => {
-          const mesh = ctx.getMeshById(self.data.grabBasicsId)
-          self.trackGrabReleaseCycle("grabBasics", mesh)
-          if (!self.data._flag_grabBasicsPhase2) {
-            if (self.data["_grabCycle_grabBasics_done"]) self.data._flag_grabBasicsPhase2 = true
-            return false
-          }
-          // Fase 2: se completa cuando el componente desaparece de la escena (basura)
-          return !ctx.appState.components.some((c) => c.id === self.data.grabBasicsId)
+          const mesh = ctx.getMeshById(self.data.practiceBatteryId)
+          return self.trackGrabReleaseCycle("practiceBattery", mesh)
         },
       },
 
-      // --- Botones UI con un botón de práctica neutro ---
+      // --- Bote de basura (paso propio, con su propio resaltado) ---
+      {
+        id: "trash-toss",
+        title: "El bote de basura",
+        instruction: "Para eliminar un componente, tómalo y suéltalo dentro del bote. Inténtalo con la misma batería.",
+        onEnter: (ctx, self) => {
+          if (!self.data.practiceBatteryId || !ctx.getMeshById(self.data.practiceBatteryId)) {
+            const { id } = ctx.spawnTutorialComponent("battery5v")
+            self.data.practiceBatteryId = id
+          }
+          const batteryMesh = ctx.getMeshById(self.data.practiceBatteryId)
+          self.applyHighlight([self.targets.trashBin, batteryMesh].filter(Boolean))
+        },
+        check: (ctx, self) => {
+          const done = !ctx.appState.components.some((c) => c.id === self.data.practiceBatteryId)
+          if (done) delete self.data.practiceBatteryId
+          return done
+        },
+      },
+
+      // --- Botones UI ---
       {
         id: "ui-button-basics",
         title: "Botones de la interfaz",
@@ -146,20 +154,20 @@ export class TutorialSystem {
       {
         id: "wire-activate",
         title: "Activar el modo cable",
-        instruction: "Dentro del panel, presiona el botón para activar el modo cable. Importante: si tienes algo agarrado en este momento, suéltalo antes de activarlo.",
+        instruction: "Dentro del panel, presiona el botón para activar el modo cable. Si tienes algo agarrado en este momento, suéltalo antes de activarlo. Fíjate en la apariencia de ese mismo botón: cambia mientras el modo cable está activo, así puedes confirmarlo en cualquier momento.",
         targetKey: "modeWire",
         check: (ctx) => ctx.getToolMode() === "wire",
       },
       {
         id: "wire-create",
         title: "Crear un cable",
-        instruction: "Toca un hoyo de la protoboard para iniciar el cable (punto A). Puedes tocar en el aire para agregar un doblez, y luego toca otro hoyo para cerrarlo (punto B). Con el control: apunta y usa el gatillo en cada caso.",
+        instruction: "Con la mano: haz el gesto de pellizcar cerca de un hoyo de la protoboard para iniciar el cable (punto A) — no hace falta tocarlo, solo estar cerca. Pellizca en el aire para agregar un doblez, y pellizca sobre otro hoyo para cerrar el cable (punto B). Con el control: apunta con el rayo y usa el gatillo en cada uno de esos momentos.",
         check: (ctx, self) => self.findNewComponent("wire", "wireCreated"),
       },
       {
         id: "wire-edit-end",
         title: "Editar el final de un cable",
-        instruction: "Toca (o apunta y presiona el gatillo sobre) el extremo final del cable que acabas de crear — no el punto donde empezó — y muévelo a otro hoyo para reconectarlo ahí.",
+        instruction: "Haz el gesto de pellizcar (o apunta con el control y usa el gatillo) sobre el extremo final del cable que acabas de crear — no el punto donde empezó — y muévelo a otro hoyo para reconectarlo ahí.",
         onEnter: (ctx, self) => {
           const wires = ctx.appState.components.filter((c) => c.type === "wire")
           self.data.wireBeforeEdit = wires[wires.length - 1]?.id ?? null
@@ -176,7 +184,7 @@ export class TutorialSystem {
       {
         id: "wire-delete",
         title: "Borrar un cable",
-        instruction: "Toca (o apunta y usa el gatillo sobre) el inicio de ese mismo cable para borrarlo por completo.",
+        instruction: "Haz el gesto de pellizcar (o apunta y usa el gatillo) sobre el inicio de ese mismo cable para borrarlo por completo.",
         onEnter: (ctx, self) => {
           const wires = ctx.appState.components.filter((c) => c.type === "wire")
           self.data.wireBeforeDelete = wires[wires.length - 1]?.id ?? null
@@ -189,28 +197,32 @@ export class TutorialSystem {
       {
         id: "wire-exit",
         title: "Salir del modo cable",
-        instruction: "Abre de nuevo el panel de Modos y presiona el botón de modo cable para desactivarlo.",
+        instruction: "Abre de nuevo el panel de Modos y presiona el mismo botón para desactivar el modo cable — notarás que vuelve a cambiar de apariencia al desactivarse.",
         targetKey: "modeWire",
         check: (ctx) => ctx.getToolMode() === "grab",
         onExit: (ctx, self) => self.cleanupTrackedWires(ctx),
       },
 
-      // --- Editar propiedades ---
+      // --- Editar propiedades: LED recién creado ---
       {
         id: "edit-fresh-led",
         title: "Editar un componente recién creado",
-        instruction: "Aparece un LED, ya seleccionado automáticamente por ser el más reciente. Abre el panel Editor, elige un color y confirma el cambio. (Esto mismo aplica para el valor de una resistencia.)",
+        instruction: "Este LED aparece ya seleccionado, por ser el más reciente. Abre el panel Editor, elige un color distinto y confirma el cambio. (Esto mismo aplica para el valor de una resistencia.)",
         onEnter: (ctx, self) => {
-          const { id, mesh } = ctx.spawnTutorialComponent("led", { color: 0xff3b3b })
-          self.data.freshLedId = id
-          self.data.freshLedInitialColor = 0xff3b3b
-          ctx.selectComponent(id)
-          self.applyHighlight(mesh)
+          if (!self.data.freshLedId || !ctx.getMeshById(self.data.freshLedId)) {
+            const { id } = ctx.spawnTutorialComponent("led", { color: 0xff3b3b })
+            self.data.freshLedId = id
+            self.data.freshLedInitialColor = 0xff3b3b
+          }
+          ctx.selectComponent(self.data.freshLedId)
+          self.applyHighlight([ctx.getMeshById(self.data.freshLedId), self.targets.btnEdit].filter(Boolean))
         },
-        onExit: (ctx, self) => {
-          if (self.data.freshLedId) ctx.removeTutorialComponent(self.data.freshLedId)
-          delete self.data.freshLedId
-          delete self.data.freshLedInitialColor
+        onExit: (ctx, self, direction) => {
+          if (direction === "backward" && self.data.freshLedId) {
+            ctx.removeTutorialComponent(self.data.freshLedId)
+            delete self.data.freshLedId
+            delete self.data.freshLedInitialColor
+          }
         },
         check: (ctx, self) => {
           const comp = ctx.appState.components.find((c) => c.id === self.data.freshLedId)
@@ -219,20 +231,39 @@ export class TutorialSystem {
         },
       },
       {
+        id: "edit-fresh-led-toss",
+        title: "¡Se ve el cambio!",
+        instruction: "Con el LED ya sin el resaltado, deberías ver claramente su nuevo color. Termina llevándolo al bote de basura.",
+        onEnter: (ctx, self) => {
+          self.applyHighlight([ctx.getMeshById(self.data.freshLedId), self.targets.trashBin].filter(Boolean))
+        },
+        check: (ctx, self) => {
+          const done = !ctx.appState.components.some((c) => c.id === self.data.freshLedId)
+          if (done) { delete self.data.freshLedId; delete self.data.freshLedInitialColor }
+          return done
+        },
+      },
+
+      // --- Editar propiedades: LED "ya existente" (En mano) ---
+      {
         id: "edit-held-led",
         title: "Editar un componente que ya estaba ahí",
-        instruction: "Este otro LED no está seleccionado. Tómalo con la mano o el control, y mientras lo sostienes usa la opción del panel Editor para seleccionar \"el que tienes en la mano\"; luego cambia su color y confirma.",
+        instruction: "Este otro LED no está seleccionado. Tómalo con la mano o el control y, mientras lo sostienes, usa la opción del panel Editor para seleccionar \"el que tienes en la mano\"; cambia su color y confirma.",
         onEnter: (ctx, self) => {
-          const { id, mesh } = ctx.spawnTutorialComponent("led", { color: 0x2ecc71 })
-          self.data.heldLedId = id
-          self.data.heldLedInitialColor = 0x2ecc71
+          if (!self.data.heldLedId || !ctx.getMeshById(self.data.heldLedId)) {
+            const { id } = ctx.spawnTutorialComponent("led", { color: 0x2ecc71 })
+            self.data.heldLedId = id
+            self.data.heldLedInitialColor = 0x2ecc71
+          }
           ctx.clearSelection()
-          self.applyHighlight(mesh)
+          self.applyHighlight([ctx.getMeshById(self.data.heldLedId), self.targets.btnEdit].filter(Boolean))
         },
-        onExit: (ctx, self) => {
-          if (self.data.heldLedId) ctx.removeTutorialComponent(self.data.heldLedId)
-          delete self.data.heldLedId
-          delete self.data.heldLedInitialColor
+        onExit: (ctx, self, direction) => {
+          if (direction === "backward" && self.data.heldLedId) {
+            ctx.removeTutorialComponent(self.data.heldLedId)
+            delete self.data.heldLedId
+            delete self.data.heldLedInitialColor
+          }
         },
         check: (ctx, self) => {
           const comp = ctx.appState.components.find((c) => c.id === self.data.heldLedId)
@@ -240,37 +271,68 @@ export class TutorialSystem {
           return comp.meta?.color !== self.data.heldLedInitialColor
         },
       },
-
-      // --- Edición vs. Simulación (fusionado en un solo paso, 3 fases) ---
       {
-        id: "edit-vs-sim",
-        title: "Edición vs. Simulación",
+        id: "edit-held-led-toss",
+        title: "¡Se ve el cambio!",
+        instruction: "Termina llevando este LED al bote de basura también.",
         onEnter: (ctx, self) => {
-          const { id, mesh } = ctx.spawnTutorialComponent("button")
-          self.data.circuitButtonId = id
-          self.applyHighlight(mesh)
+          self.applyHighlight([ctx.getMeshById(self.data.heldLedId), self.targets.trashBin].filter(Boolean))
         },
-        onExit: (ctx, self) => {
-          if (self.data.circuitButtonId) ctx.removeTutorialComponent(self.data.circuitButtonId)
-          delete self.data.circuitButtonId
+        check: (ctx, self) => {
+          const done = !ctx.appState.components.some((c) => c.id === self.data.heldLedId)
+          if (done) { delete self.data.heldLedId; delete self.data.heldLedInitialColor }
+          return done
         },
-        instruction: (ctx, self) => {
-          const mesh = ctx.getMeshById(self.data.circuitButtonId)
-          const moved = self.trackFlagOnce("editVsSimMoved", !!mesh?.userData?.heldBy)
-          if (!moved) {
-            return "Estás en modo Edición. Intenta presionar este componente — verás que en vez de accionarse, simplemente se mueve como cualquier otro objeto."
+      },
+
+      // --- Edición vs. Simulación (dividido en 3 pasos encadenados) ---
+      {
+        id: "sim-edit-move",
+        title: "Edición vs. Simulación",
+        instruction: "Aparece un botón de circuito. Estás en modo Edición: intenta tomarlo (pellizco o gatillo) — verás que en vez de accionarse, simplemente se mueve como cualquier otro objeto. Suéltalo cuando quieras.",
+        onEnter: (ctx, self) => {
+          if (!self.data.circuitButtonId || !ctx.getMeshById(self.data.circuitButtonId)) {
+            const { id } = ctx.spawnTutorialComponent("button")
+            self.data.circuitButtonId = id
+            delete self.data["_grabCycle_circuitButton"]
+            delete self.data["_grabCycle_circuitButton_done"]
           }
-          if (!ctx.isSimMode()) {
-            return "Ahora abre el panel de Modos y activa el modo Simulación."
+          self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
+        },
+        onExit: (ctx, self, direction) => {
+          if (direction === "backward" && self.data.circuitButtonId) {
+            ctx.removeTutorialComponent(self.data.circuitButtonId)
+            delete self.data.circuitButtonId
           }
-          return "Ahora sí presiónalo — en Simulación, este componente reacciona de verdad en vez de moverse."
         },
         check: (ctx, self) => {
           const mesh = ctx.getMeshById(self.data.circuitButtonId)
-          const moved = self.trackFlagOnce("editVsSimMoved", !!mesh?.userData?.heldBy)
-          if (!moved) return false
-          if (!ctx.isSimMode()) return false
-          return self.trackFlagOnce("editVsSimPressed", mesh?.userData?.buttonState === true)
+          return self.trackGrabReleaseCycle("circuitButton", mesh)
+        },
+      },
+      {
+        id: "sim-activate",
+        title: "Activar Simulación",
+        instruction: "Abre el panel de Modos y presiona el botón de modo para pasar a Simulación. Ese mismo botón también cambia de apariencia según el modo activo. Si en este momento tuvieras algo en la mano, se soltaría solo al cambiar de modo.",
+        targetKey: "modeToggle",
+        check: (ctx) => ctx.isSimMode(),
+      },
+      {
+        id: "sim-press",
+        title: "¡Ahora sí funciona!",
+        instruction: "Presiona el botón de circuito con el dedo, o apúntale y usa el gatillo — en Simulación reacciona de verdad en vez de moverse.",
+        onEnter: (ctx, self) => {
+          self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
+        },
+        onExit: (ctx, self, direction) => {
+          if (direction === "forward" && self.data.circuitButtonId) {
+            ctx.removeTutorialComponent(self.data.circuitButtonId)
+            delete self.data.circuitButtonId
+          }
+        },
+        check: (ctx, self) => {
+          const mesh = ctx.getMeshById(self.data.circuitButtonId)
+          return !!mesh?.userData?.buttonState
         },
       },
 
@@ -350,7 +412,7 @@ export class TutorialSystem {
 
   close(markSeen = true) {
     const step = this.steps[this.stepIndex]
-    step?.onExit?.(this.ctx, this)
+    step?.onExit?.(this.ctx, this, "forward")
     this.active = false
     this.clearHighlight()
     if (markSeen) localStorage.setItem(STORAGE_KEY, "1")
@@ -376,14 +438,17 @@ export class TutorialSystem {
     this.goTo(this.stepIndex - 1)
   }
 
-  // Simétrico en ambas direcciones: sale del paso actual, entra al nuevo. Hecho e implementado por LFTS
+  // Simétrico en ambas direcciones: sale del paso actual, entra al nuevo.
   goTo(index) {
     if (index < 0 || index >= this.steps.length) return
     const prev = this.steps[this.stepIndex]
-    prev?.onExit?.(this.ctx, this)
+    // La dirección le permite a un paso saber si debe destruir su componente temporal
+    // (al alejarse hacia atrás, ya no hará falta) o dejarlo vivo (al avanzar, porque un
+    // paso siguiente puede seguir usándolo). 
+    const direction = index > this.stepIndex ? "forward" : "backward"
+    prev?.onExit?.(this.ctx, this, direction)
     this.enterStep(index)
   }
-
   enterStep(index) {
     this.stepIndex = index
     this._stepStartMs = performance.now()
@@ -435,6 +500,12 @@ export class TutorialSystem {
 
   update(dtMs) {
     if (!this.active) return
+
+    if (this._highlighted) {
+      const meshes = Array.isArray(this._highlighted) ? this._highlighted : [this._highlighted]
+      const anyComponentHeld = meshes.some((m) => m?.userData?.componentId && m.userData?.heldBy)
+      if (anyComponentHeld) this.clearHighlight()
+    }
 
     if (this._highlighted) {
       this._pulseT += dtMs * 0.004

@@ -978,7 +978,9 @@ function startTutorial() {
 
 tutorialSystem.setTargets({
   btnMode,
+  btnEdit,
   modeWire: modePanel.getObjectByName("ModeWire"),
+  modeToggle: modePanel.getObjectByName("ModeToggle"),
   modeSave: modePanel.getObjectByName("ModeSave"),
   modeLoad: modePanel.getObjectByName("ModeLoad"),
   modeClear: modePanel.getObjectByName("ModeClear"),
@@ -996,6 +998,8 @@ const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
 const trashBin    = trashSystem.createTrashBin({
   parent: scene, position: new THREE.Vector3(-0.55, 0.20, -1.40),
 })
+
+tutorialSystem.setTargets({ trashBin })
 trashBin.traverse((o) => {
   if (o.isMesh && o.material) {
     o.material = o.material.clone()
