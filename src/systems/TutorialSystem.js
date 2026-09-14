@@ -126,13 +126,19 @@ export class TutorialSystem {
           self.applyHighlight([self.targets.trashBin, batteryMesh].filter(Boolean))
           self.setWatchTarget(batteryMesh)
         },
+
+        onExit: (ctx, self, direction) => {
+          if (direction === "forward" && self.data.practiceBatteryId) {
+            ctx.removeTutorialComponent(self.data.practiceBatteryId)
+            delete self.data.practiceBatteryId
+          }
+        },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.practiceBatteryId)
           if (done) delete self.data.practiceBatteryId
           return done
         },
       },
-
       // --- Botones UI ---
       {
         id: "ui-button-basics",
@@ -242,6 +248,13 @@ export class TutorialSystem {
           self.applyHighlight(self.targets.trashBin || null)
           self.setWatchTarget(ctx.getMeshById(self.data.freshLedId))
         },
+        onExit: (ctx, self, direction) => {
+          if (direction === "forward" && self.data.freshLedId) {
+            ctx.removeTutorialComponent(self.data.freshLedId)
+            delete self.data.freshLedId
+            delete self.data.freshLedInitialColor
+          }
+        },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.freshLedId)
           if (done) { delete self.data.freshLedId; delete self.data.freshLedInitialColor }
@@ -283,6 +296,13 @@ export class TutorialSystem {
         onEnter: (ctx, self) => {
           self.applyHighlight(self.targets.trashBin || null)
           self.setWatchTarget(ctx.getMeshById(self.data.heldLedId))
+        },
+        onExit: (ctx, self, direction) => {
+          if (direction === "forward" && self.data.heldLedId) {
+            ctx.removeTutorialComponent(self.data.heldLedId)
+            delete self.data.heldLedId
+            delete self.data.heldLedInitialColor
+          }
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.heldLedId)
@@ -586,10 +606,8 @@ export class TutorialSystem {
 
   getPanelData() {
     const step = this.steps[this.stepIndex]
-    let instruction = typeof step.instruction === "function" ? step.instruction(this.ctx, this) : step.instruction
+    const instruction = typeof step.instruction === "function" ? step.instruction(this.ctx, this) : step.instruction
     const title = typeof step.title === "function" ? step.title(this.ctx, this) : step.title
-    const stuckHint = this.getStuckHint()
-    if (stuckHint) instruction = `${instruction}\n\n${stuckHint}`
     return {
       active: this.active,
       stepIndex: this.stepIndex,

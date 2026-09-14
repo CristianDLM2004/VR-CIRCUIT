@@ -39,6 +39,7 @@ import { TrashSystem } from "./systems/TrashSystem.js"
 import { PhysicsSystem } from "./systems/PhysicsSystem.js"
 import { TutorialSystem } from "./systems/TutorialSystem.js"
 import { createTutorialPanel } from "./components/TutorialPanel.js"
+import { createStuckHintOverlay } from "./components/TutorialStuckHint.js"
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 // Núcleo: escena, cámara, renderer — Hecho e implementado por LFTS
@@ -986,6 +987,26 @@ function startTutorial() {
   closeAllPanels()
   tutorialSystem.start()
   setTutorialPanelEnabled(true)
+  stuckHintDismissed = false
+  lastStuckStepIndex = -1
+}
+
+// ───────────────────────────────────────────── 
+// Aviso flotante de "componente/paso atorado" — sigue la vista del usuario.
+// ───────────────────────────────────────────── 
+
+let stuckHintDismissed = false
+let lastStuckStepIndex = -1
+
+const stuckHintOverlay = createStuckHintOverlay({
+  onClose: () => { stuckHintDismissed = true },
+})
+scene.add(stuckHintOverlay.group)
+
+function setStuckHintVisible(visible) {
+  stuckHintOverlay.group.visible = visible
+  if (visible) interactionSystem.register(stuckHintOverlay.closeButton)
+  else interactionSystem.unregister(stuckHintOverlay.closeButton)
 }
 
 tutorialSystem.setTargets({
@@ -1120,14 +1141,27 @@ renderer.setAnimationLoop(() => {
     detectNewComponents()
     validateSelection()
 
-    const dtMs = dt * 1000
-    tutorialSystem.update(dtMs)
-    if (tutorialSystem.active) {
-      tutorialPanelApi.updateContent(tutorialSystem.getPanelData())
-      if (!tutorialPanelApi.group.visible) setTutorialPanelEnabled(true)
-    } else if (tutorialPanelApi.group.visible) {
-      setTutorialPanelEnabled(false)
+  const dtMs = dt * 1000
+  tutorialSystem.update(dtMs)
+  if (tutorialSystem.active) {
+    tutorialPanelApi.updateContent(tutorialSystem.getPanelData())
+    if (!tutorialPanelApi.group.visible) setTutorialPanelEnabled(true)
+
+    if (tutorialSystem.stepIndex !== lastStuckStepIndex) {
+      lastStuckStepIndex = tutorialSystem.stepIndex
+      stuckHintDismissed = false // un paso nuevo siempre puede volver a mostrar el aviso
     }
+    const hint = tutorialSystem.getStuckHint()
+    const showHint = !!hint && !stuckHintDismissed
+    if (showHint !== stuckHintOverlay.group.visible) setStuckHintVisible(showHint)
+    if (showHint) {
+      stuckHintOverlay.drawText(hint)
+      stuckHintOverlay.updateFollow(camera)
+    }
+  } else if (tutorialPanelApi.group.visible) {
+    setTutorialPanelEnabled(false)
+    setStuckHintVisible(false)
+  }
 
     sceneManager.render()
   } catch (err) {
