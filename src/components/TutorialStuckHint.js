@@ -84,7 +84,7 @@ export function createStuckHintOverlay({ onClose }) {
     function updateFollow(camera) {
         camera.getWorldPosition(_tmpPos)
         camera.getWorldQuaternion(_tmpQuat)
-        _tmpOffset.set(0.05, -0.10, -0.70).applyQuaternion(_tmpQuat)
+        _tmpOffset.set(0.05, -0.10, -0.50).applyQuaternion(_tmpQuat)
         group.position.copy(_tmpPos).add(_tmpOffset)
         group.quaternion.copy(_tmpQuat)
     }
