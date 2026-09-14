@@ -2527,17 +2527,21 @@ export class InteractionSystem {
 
   cleanupDetachedHolds() {
     for (const h of this.hands) {
-      if (h.heldObject && this.getObjectOwner(h.heldObject) !== this.makeOwnerToken("hand", h.index)) {
+      // Red de seguridad: si el mesh sostenido fue destruido/removido de la escena por
+      // cualquier otro sistema mientras seguía "en la mano", esto libera la mano en vez
+      // de dejarla atorada para siempre sujetando una referencia fantasma.
+      if (h.heldObject && (!h.heldObject.parent || this.getObjectOwner(h.heldObject) !== this.makeOwnerToken("hand", h.index))) {
         h.heldObject = null
         h.isPinching = false
         h.openPinchMs = 0
         h.lostTrackingMs = 0
+        h.partialTrackMs = 0
         this.stopHoldTracking(h.hold)
       }
     }
 
     for (const c of this.controllers) {
-      if (c.userData?.heldObject && this.getObjectOwner(c.userData.heldObject) !== this.makeOwnerToken("controller", c.userData.sourceIndex ?? 0)) {
+      if (c.userData?.heldObject && (!c.userData.heldObject.parent || this.getObjectOwner(c.userData.heldObject) !== this.makeOwnerToken("controller", c.userData.sourceIndex ?? 0))) {
         c.userData.heldObject = null
         this.stopHoldTracking(c.userData.hold)
       }

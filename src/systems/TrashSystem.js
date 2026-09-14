@@ -103,8 +103,12 @@ export class TrashSystem {
     if (!this.trashGroup) return false
     if (!object?.userData?.componentId) return false
 
-    // ✅ Solo si está suelto (no agarrado)
-    if (object.parent !== this.scene) return false
+    // Antes solo revisaba object.parent !== this.scene, asumiendo que "agarrado" siempre
+    // reparenta el objeto — cierto para controles, pero NO para manos (un objeto
+    // sostenido con la mano sigue siendo hijo de la escena todo el tiempo). Eso permitía
+    // "borrar" un componente mientras seguía en la mano, dejando esa mano con una
+    // referencia fantasma que nunca se libera. heldBy es correcto para ambos casos.
+    if (object.userData?.heldBy) return false
 
     const id = object.userData.componentId
     if (!this.canDeleteNow(id)) return false

@@ -1066,11 +1066,13 @@ function validateSelection() {
   if (!getComponentById(selectedComponentId)) clearSelection()
 }
 
-// ───────────────────────────────────────────── — Hecho e implementado por LFTS
-// Loop principal — Hecho e implementado por LFTS
-// ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 renderer.setAnimationLoop(() => {
+  // Envolver el frame completo en try/catch: antes, cualquier excepción no atrapada
+  // aquí detenía el loop de animación PARA SIEMPRE (congelando toda la app, incluida
+  // la UI del tutorial), sin importar la causa. Ahora se registra el error y el loop
+  // sigue con normalidad en el siguiente frame.
+  try {
   const dt = Math.min(0.033, clock.getDelta())
 
   powerSupplyControls.update(electricalSystem.lastGraph)
@@ -1079,14 +1081,14 @@ renderer.setAnimationLoop(() => {
   physicsSystem.update(stateSyncSystem.meshById.values(), dt)
   trashSystem.update(stateSyncSystem.meshById.values())
 
-  // Sistema eléctrico — siempre activo — Hecho e implementado por LFTS
+  // Sistema eléctrico — siempre activo 
   electricalSystem.update(dt)
   multimeterSystem.update(electricalSystem.lastGraph)
   powerSupplyControls.update(electricalSystem.lastGraph)
 
-  // Diagnóstico y AlertPanel — siempre se actualiza — Hecho e implementado por LFTS
-  // En edición: solo muestra el modo sin analizar — Hecho e implementado por LFTS
-  // En simulación: analiza y muestra errores — Hecho e implementado por LFTS
+  // Diagnóstico y AlertPanel — siempre se actualiza 
+  // En edición: solo muestra el modo sin analizar
+  // En simulación: analiza y muestra errores
   if (electricalSystem.lastGraph) {
     const { alerts, hasErrors } = diagnosticSystem.analyze(
       electricalSystem.lastGraph,
@@ -1112,4 +1114,7 @@ renderer.setAnimationLoop(() => {
   }
 
   sceneManager.render()
+  } catch (err) {
+    console.error("⚠️ Error en el loop principal (frame ignorado):", err)
+  }
 })
