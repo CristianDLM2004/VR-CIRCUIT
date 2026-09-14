@@ -38,6 +38,7 @@ export class TutorialSystem {
 
     this._watchWasHeld = false
     this._watchLastHeldMs = 0
+    this._watchTargets = []
 
     this.steps = this.buildSteps()
   }
@@ -94,7 +95,9 @@ export class TutorialSystem {
 
           delete self.data["_grabCycle_practiceBattery"]
           delete self.data["_grabCycle_practiceBattery_done"]
-          self.applyHighlight(ctx.getMeshById(self.data.practiceBatteryId))
+          const mesh = ctx.getMeshById(self.data.practiceBatteryId)
+          self.applyHighlight(mesh)
+          self.setWatchTarget(mesh)
         },
         onExit: (ctx, self, direction) => {
 
@@ -121,6 +124,7 @@ export class TutorialSystem {
           }
           const batteryMesh = ctx.getMeshById(self.data.practiceBatteryId)
           self.applyHighlight([self.targets.trashBin, batteryMesh].filter(Boolean))
+          self.setWatchTarget(batteryMesh)
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.practiceBatteryId)
@@ -171,32 +175,26 @@ export class TutorialSystem {
       {
         id: "wire-edit-end",
         title: "Editar el final de un cable",
-        instruction: "Haz el gesto de pellizcar (o apunta con el control y usa el gatillo) sobre el extremo final del cable que acabas de crear — no el punto donde empezó — y muévelo a otro hoyo para reconectarlo ahí.",
+        instruction: "Haz el gesto de pellizcar (o apunta con el control y usa el gatillo) sobre el extremo final de un cable que ya exista — no el punto donde empezó — y muévelo a otro hoyo para reconectarlo ahí.",
         onEnter: (ctx, self) => {
-          const wires = ctx.appState.components.filter((c) => c.type === "wire")
-          self.data.wireBeforeEdit = wires[wires.length - 1]?.id ?? null
+          delete self.data._wireEditSeenId
+          delete self.data._wireEditGone
         },
         check: (ctx, self) => {
-          if (!self.data.wireBeforeEdit) return false
-          const stillThere = ctx.appState.components.some((c) => c.id === self.data.wireBeforeEdit)
-          if (stillThere) return false
-          const hasAnyWire = ctx.appState.components.some((c) => c.type === "wire")
-          if (hasAnyWire) self.rememberWireForCleanup(ctx)
-          return hasAnyWire
+          const done = self.trackWireCycleThenChange("wireEdit", ctx, self, { requireReappear: true })
+          if (done) self.rememberWireForCleanup(ctx)
+          return done
         },
       },
       {
         id: "wire-delete",
         title: "Borrar un cable",
-        instruction: "Haz el gesto de pellizcar (o apunta y usa el gatillo) sobre el inicio de ese mismo cable para borrarlo por completo.",
+        instruction: "Haz el gesto de pellizcar (o apunta y usa el gatillo) sobre el inicio de un cable existente para borrarlo por completo. Si no hay ninguno en este momento, crea uno rápido para practicar.",
         onEnter: (ctx, self) => {
-          const wires = ctx.appState.components.filter((c) => c.type === "wire")
-          self.data.wireBeforeDelete = wires[wires.length - 1]?.id ?? null
+          delete self.data._wireDeleteSeenId
+          delete self.data._wireDeleteGone
         },
-        check: (ctx, self) => {
-          if (!self.data.wireBeforeDelete) return false
-          return !ctx.appState.components.some((c) => c.id === self.data.wireBeforeDelete)
-        },
+        check: (ctx, self) => self.trackWireCycleThenChange("wireDelete", ctx, self, { requireReappear: false }),
       },
       {
         id: "wire-exit",
@@ -219,7 +217,9 @@ export class TutorialSystem {
           self.data.freshLedId = id
           self.data.freshLedInitialColor = 0xff3b3b
           ctx.selectComponent(id)
-          self.applyHighlight([ctx.getMeshById(id), self.targets.btnEdit].filter(Boolean))
+
+          self.applyHighlight(self.targets.btnEdit || null)
+          self.setWatchTarget(ctx.getMeshById(id))
         },
         onExit: (ctx, self, direction) => {
           if (direction === "backward" && self.data.freshLedId) {
@@ -237,9 +237,10 @@ export class TutorialSystem {
       {
         id: "edit-fresh-led-toss",
         title: "¡Se ve el cambio!",
-        instruction: "Con el LED ya sin el resaltado, deberías ver claramente su nuevo color. Termina llevándolo al bote de basura.",
+        instruction: "Termina llevándolo al bote de basura.",
         onEnter: (ctx, self) => {
           self.applyHighlight(self.targets.trashBin || null)
+          self.setWatchTarget(ctx.getMeshById(self.data.freshLedId))
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.freshLedId)
@@ -259,7 +260,8 @@ export class TutorialSystem {
           self.data.heldLedId = id
           self.data.heldLedInitialColor = 0x2ecc71
           ctx.clearSelection()
-          self.applyHighlight([ctx.getMeshById(id), self.targets.btnEdit].filter(Boolean))
+          self.applyHighlight(self.targets.btnEdit || null)
+          self.setWatchTarget(ctx.getMeshById(id))
         },
         onExit: (ctx, self, direction) => {
           if (direction === "backward" && self.data.heldLedId) {
@@ -280,6 +282,7 @@ export class TutorialSystem {
         instruction: "Termina llevando este LED al bote de basura también.",
         onEnter: (ctx, self) => {
           self.applyHighlight(self.targets.trashBin || null)
+          self.setWatchTarget(ctx.getMeshById(self.data.heldLedId))
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.heldLedId)
@@ -292,7 +295,7 @@ export class TutorialSystem {
       {
         id: "sim-edit-move",
         title: "Edición vs. Simulación",
-        instruction: "Aparece un botón de circuito. Estás en modo Edición: intenta tomarlo (pellizco o gatillo) — verás que en vez de accionarse, simplemente se mueve como cualquier otro objeto. Suéltalo cuando quieras.",
+        instruction: "Aparece un botón de circuito. Estás en modo Edición: intenta presionarlo (con el dedo, o apuntando y usando el gatillo) — verás que en vez de accionarse, simplemente se mueve como cualquier otro objeto. Esto pasa igual con switches u otros componentes de circuito: no reaccionan como tal hasta entrar a Simulación.",
         onEnter: (ctx, self) => {
           if (!self.data.circuitButtonId || !ctx.getMeshById(self.data.circuitButtonId)) {
             const { id } = ctx.spawnTutorialComponentOnProtoboard("button")
@@ -300,7 +303,9 @@ export class TutorialSystem {
           }
           delete self.data["_grabCycle_circuitButton"]
           delete self.data["_grabCycle_circuitButton_done"]
-          self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
+          const mesh = ctx.getMeshById(self.data.circuitButtonId)
+          self.applyHighlight(mesh)
+          self.setWatchTarget(mesh)
         },
         onExit: (ctx, self, direction) => {
           if (direction === "backward" && self.data.circuitButtonId) {
@@ -330,7 +335,9 @@ export class TutorialSystem {
             const { id } = ctx.spawnTutorialComponentOnProtoboard("button")
             self.data.circuitButtonId = id
           }
-          self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
+          const mesh = ctx.getMeshById(self.data.circuitButtonId)
+          self.applyHighlight(mesh)
+          self.setWatchTarget(mesh)
         },
         onExit: (ctx, self, direction) => {
           if (direction === "forward" && self.data.circuitButtonId) {
@@ -390,6 +397,25 @@ export class TutorialSystem {
     const ids = this.data._wiresToCleanup || ctx.appState.components.filter((c) => c.type === "wire").map((c) => c.id)
     for (const id of ids) ctx.removeTutorialComponent(id)
     delete this.data._wiresToCleanup
+  }
+
+
+  trackWireCycleThenChange(prefix, ctx, self, { requireReappear }) {
+    const seenKey = `_${prefix}SeenId`
+    const goneKey = `_${prefix}Gone`
+    const wires = ctx.appState.components.filter((c) => c.type === "wire")
+
+    if (!self.data[seenKey]) {
+      if (wires.length) self.data[seenKey] = wires[wires.length - 1].id
+      return false
+    }
+    if (!self.data[goneKey]) {
+      const stillThere = wires.some((w) => w.id === self.data[seenKey])
+      if (!stillThere) self.data[goneKey] = true
+      return false
+    }
+    if (!requireReappear) return true
+    return wires.length > 0
   }
 
   findNewComponent(type, dataKey) {
@@ -461,6 +487,8 @@ export class TutorialSystem {
     this._knownIdsAtStepStart = new Set(this.ctx.appState.components.map((c) => c.id))
     this.clearHighlight()
 
+    this._watchTargets = []
+
     const step = this.steps[index]
     if (step.onEnter) {
       step.onEnter(this.ctx, this)
@@ -510,6 +538,11 @@ export class TutorialSystem {
 
   // --- Loop principal ---
 
+  setWatchTarget(target) {
+    const meshes = Array.isArray(target) ? target : [target]
+    this._watchTargets = meshes.filter(Boolean)
+  }
+
   update(dtMs) {
     if (!this.active) return
 
@@ -528,10 +561,8 @@ export class TutorialSystem {
       }
     }
 
-    // Vigía de componente perdido: registra si el objeto resaltado se sostuvo alguna
-    // vez, y cuándo fue la última vez, para poder avisar si lleva mucho tiempo suelto. Hecho e implementado por LFTS
-    const watched = Array.isArray(this._highlighted) ? this._highlighted : [this._highlighted]
-    const watchedComponent = watched.find((m) => m?.userData?.componentId)
+  
+    const watchedComponent = this._watchTargets.find((m) => m?.userData?.componentId)
     if (watchedComponent?.userData?.heldBy) {
       this._watchWasHeld = true
       this._watchLastHeldMs = performance.now()
