@@ -452,8 +452,6 @@ export class TutorialSystem {
 
   manualAdvance() {
     if (!this.active) return
-    const step = this.steps[this.stepIndex]
-    if (!step?.manualAdvance) return
     this.advance()
   }
 
@@ -580,9 +578,10 @@ export class TutorialSystem {
   }
 
   getStuckHint() {
-    if (!this._watchWasHeld) return ""
-    if (performance.now() - this._watchLastHeldMs < 20000) return ""
-    return "💡 ¿No encuentras el componente? Puedes presionar \"Atrás\" para reiniciar este paso con uno nuevo."
+    const step = this.steps[this.stepIndex]
+    if (!step?.check) return ""
+    if (performance.now() - this._stepStartMs < 20000) return ""
+    return "💡 ¿Tienes problemas para continuar? Puedes presionar \"Atrás\" para reiniciar este paso, o \"Siguiente\" para saltarlo."
   }
 
   getPanelData() {
@@ -598,7 +597,7 @@ export class TutorialSystem {
       title,
       instruction,
       manualAdvance: !!step.manualAdvance,
-      primaryLabel: step.primaryLabel || "Listo",
+      primaryLabel: step.primaryLabel || "Siguiente",
       isFinal: !!step.isFinal,
       canGoBack: this.stepIndex > 0,
     }

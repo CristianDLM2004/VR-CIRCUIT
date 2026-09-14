@@ -114,7 +114,7 @@ export function createTutorialPanel({ position, rotationY = 0, onAdvance, onBack
     drawContent(ctx2, data)
     texture.needsUpdate = true
 
-    primaryButton.visible = data.manualAdvance
+    primaryButton.visible = true
     primaryButton.userData._setLabel(data.primaryLabel)
 
     backButton.visible = data.canGoBack
