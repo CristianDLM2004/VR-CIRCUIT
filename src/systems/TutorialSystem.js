@@ -34,12 +34,15 @@ export class TutorialSystem {
     this._stepStartMs = 0
     this._knownIdsAtStepStart = new Set()
 
+    this._checkArmed = true
+
+    this._watchWasHeld = false
+    this._watchLastHeldMs = 0
+
     this.steps = this.buildSteps()
   }
 
-  // --- Helpers de detección reutilizables ---
-  // Todos escriben banderas en this.data bajo una llave con prefijo, para no chocar
-  // entre pasos distintos. Hecho e implementado por LFTS
+
 
   trackGrabReleaseCycle(flagKey, mesh) {
     const key = `_grabCycle_${flagKey}`
@@ -87,14 +90,14 @@ export class TutorialSystem {
           if (!self.data.practiceBatteryId || !ctx.getMeshById(self.data.practiceBatteryId)) {
             const { id } = ctx.spawnTutorialComponent("battery5v")
             self.data.practiceBatteryId = id
-            delete self.data["_grabCycle_practiceBattery"]
-            delete self.data["_grabCycle_practiceBattery_done"]
           }
+
+          delete self.data["_grabCycle_practiceBattery"]
+          delete self.data["_grabCycle_practiceBattery_done"]
           self.applyHighlight(ctx.getMeshById(self.data.practiceBatteryId))
         },
         onExit: (ctx, self, direction) => {
-          // Solo se destruye si de verdad ya no hará falta (retrocediendo más allá de
-          // este paso); si avanzas al de la basura, la misma batería se reutiliza. Hecho e implementado por LFTS
+
           if (direction === "backward" && self.data.practiceBatteryId) {
             ctx.removeTutorialComponent(self.data.practiceBatteryId)
             delete self.data.practiceBatteryId
@@ -162,6 +165,7 @@ export class TutorialSystem {
         id: "wire-create",
         title: "Crear un cable",
         instruction: "Con la mano: haz el gesto de pellizcar cerca de un hoyo de la protoboard para iniciar el cable (punto A) — no hace falta tocarlo, solo estar cerca. Pellizca en el aire para agregar un doblez, y pellizca sobre otro hoyo para cerrar el cable (punto B). Con el control: apunta con el rayo y usa el gatillo en cada uno de esos momentos.",
+        onEnter: (ctx, self) => { delete self.data.wireCreated },
         check: (ctx, self) => self.findNewComponent("wire", "wireCreated"),
       },
       {
@@ -209,13 +213,13 @@ export class TutorialSystem {
         title: "Editar un componente recién creado",
         instruction: "Este LED aparece ya seleccionado, por ser el más reciente. Abre el panel Editor, elige un color distinto y confirma el cambio. (Esto mismo aplica para el valor de una resistencia.)",
         onEnter: (ctx, self) => {
-          if (!self.data.freshLedId || !ctx.getMeshById(self.data.freshLedId)) {
-            const { id } = ctx.spawnTutorialComponent("led", { color: 0xff3b3b })
-            self.data.freshLedId = id
-            self.data.freshLedInitialColor = 0xff3b3b
-          }
-          ctx.selectComponent(self.data.freshLedId)
-          self.applyHighlight([ctx.getMeshById(self.data.freshLedId), self.targets.btnEdit].filter(Boolean))
+
+          if (self.data.freshLedId) ctx.removeTutorialComponent(self.data.freshLedId)
+          const { id } = ctx.spawnTutorialComponent("led", { color: 0xff3b3b })
+          self.data.freshLedId = id
+          self.data.freshLedInitialColor = 0xff3b3b
+          ctx.selectComponent(id)
+          self.applyHighlight([ctx.getMeshById(id), self.targets.btnEdit].filter(Boolean))
         },
         onExit: (ctx, self, direction) => {
           if (direction === "backward" && self.data.freshLedId) {
@@ -235,7 +239,7 @@ export class TutorialSystem {
         title: "¡Se ve el cambio!",
         instruction: "Con el LED ya sin el resaltado, deberías ver claramente su nuevo color. Termina llevándolo al bote de basura.",
         onEnter: (ctx, self) => {
-          self.applyHighlight([ctx.getMeshById(self.data.freshLedId), self.targets.trashBin].filter(Boolean))
+          self.applyHighlight(self.targets.trashBin || null)
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.freshLedId)
@@ -250,13 +254,12 @@ export class TutorialSystem {
         title: "Editar un componente que ya estaba ahí",
         instruction: "Este otro LED no está seleccionado. Tómalo con la mano o el control y, mientras lo sostienes, usa la opción del panel Editor para seleccionar \"el que tienes en la mano\"; cambia su color y confirma.",
         onEnter: (ctx, self) => {
-          if (!self.data.heldLedId || !ctx.getMeshById(self.data.heldLedId)) {
-            const { id } = ctx.spawnTutorialComponent("led", { color: 0x2ecc71 })
-            self.data.heldLedId = id
-            self.data.heldLedInitialColor = 0x2ecc71
-          }
+          if (self.data.heldLedId) ctx.removeTutorialComponent(self.data.heldLedId)
+          const { id } = ctx.spawnTutorialComponent("led", { color: 0x2ecc71 })
+          self.data.heldLedId = id
+          self.data.heldLedInitialColor = 0x2ecc71
           ctx.clearSelection()
-          self.applyHighlight([ctx.getMeshById(self.data.heldLedId), self.targets.btnEdit].filter(Boolean))
+          self.applyHighlight([ctx.getMeshById(id), self.targets.btnEdit].filter(Boolean))
         },
         onExit: (ctx, self, direction) => {
           if (direction === "backward" && self.data.heldLedId) {
@@ -276,7 +279,7 @@ export class TutorialSystem {
         title: "¡Se ve el cambio!",
         instruction: "Termina llevando este LED al bote de basura también.",
         onEnter: (ctx, self) => {
-          self.applyHighlight([ctx.getMeshById(self.data.heldLedId), self.targets.trashBin].filter(Boolean))
+          self.applyHighlight(self.targets.trashBin || null)
         },
         check: (ctx, self) => {
           const done = !ctx.appState.components.some((c) => c.id === self.data.heldLedId)
@@ -292,11 +295,11 @@ export class TutorialSystem {
         instruction: "Aparece un botón de circuito. Estás en modo Edición: intenta tomarlo (pellizco o gatillo) — verás que en vez de accionarse, simplemente se mueve como cualquier otro objeto. Suéltalo cuando quieras.",
         onEnter: (ctx, self) => {
           if (!self.data.circuitButtonId || !ctx.getMeshById(self.data.circuitButtonId)) {
-            const { id } = ctx.spawnTutorialComponent("button")
+            const { id } = ctx.spawnTutorialComponentOnProtoboard("button")
             self.data.circuitButtonId = id
-            delete self.data["_grabCycle_circuitButton"]
-            delete self.data["_grabCycle_circuitButton_done"]
           }
+          delete self.data["_grabCycle_circuitButton"]
+          delete self.data["_grabCycle_circuitButton_done"]
           self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
         },
         onExit: (ctx, self, direction) => {
@@ -320,8 +323,13 @@ export class TutorialSystem {
       {
         id: "sim-press",
         title: "¡Ahora sí funciona!",
-        instruction: "Presiona el botón de circuito con el dedo, o apúntale y usa el gatillo — en Simulación reacciona de verdad en vez de moverse.",
+        instruction: "Presiona el botón de circuito con el dedo, o apúntale y usa el gatillo. Tómate tu tiempo para sentir cómo, en Simulación, reacciona de verdad en vez de moverse. Cuando lo hayas probado, continúa.",
         onEnter: (ctx, self) => {
+
+          if (!self.data.circuitButtonId || !ctx.getMeshById(self.data.circuitButtonId)) {
+            const { id } = ctx.spawnTutorialComponentOnProtoboard("button")
+            self.data.circuitButtonId = id
+          }
           self.applyHighlight(ctx.getMeshById(self.data.circuitButtonId))
         },
         onExit: (ctx, self, direction) => {
@@ -330,10 +338,8 @@ export class TutorialSystem {
             delete self.data.circuitButtonId
           }
         },
-        check: (ctx, self) => {
-          const mesh = ctx.getMeshById(self.data.circuitButtonId)
-          return !!mesh?.userData?.buttonState
-        },
+        manualAdvance: true,
+        primaryLabel: "Listo, continuar",
       },
 
       // --- Utilidades ---
@@ -461,6 +467,12 @@ export class TutorialSystem {
     } else if (step.targetKey) {
       this.applyHighlight(this.targets[step.targetKey] || null)
     }
+
+
+    this._checkArmed = step.check ? !step.check(this.ctx, this) : true
+
+    this._watchWasHeld = false
+    this._watchLastHeldMs = performance.now()
   }
 
   setTargets(targets) {
@@ -516,14 +528,38 @@ export class TutorialSystem {
       }
     }
 
+    // Vigía de componente perdido: registra si el objeto resaltado se sostuvo alguna
+    // vez, y cuándo fue la última vez, para poder avisar si lleva mucho tiempo suelto. Hecho e implementado por LFTS
+    const watched = Array.isArray(this._highlighted) ? this._highlighted : [this._highlighted]
+    const watchedComponent = watched.find((m) => m?.userData?.componentId)
+    if (watchedComponent?.userData?.heldBy) {
+      this._watchWasHeld = true
+      this._watchLastHeldMs = performance.now()
+    }
+
     const step = this.steps[this.stepIndex]
-    if (step.check && step.check(this.ctx, this)) this.advance()
+    if (step.check) {
+      const result = step.check(this.ctx, this)
+      if (!this._checkArmed) {
+        if (!result) this._checkArmed = true
+      } else if (result) {
+        this.advance()
+      }
+    }
+  }
+
+  getStuckHint() {
+    if (!this._watchWasHeld) return ""
+    if (performance.now() - this._watchLastHeldMs < 20000) return ""
+    return "💡 ¿No encuentras el componente? Puedes presionar \"Atrás\" para reiniciar este paso con uno nuevo."
   }
 
   getPanelData() {
     const step = this.steps[this.stepIndex]
-    const instruction = typeof step.instruction === "function" ? step.instruction(this.ctx, this) : step.instruction
+    let instruction = typeof step.instruction === "function" ? step.instruction(this.ctx, this) : step.instruction
     const title = typeof step.title === "function" ? step.title(this.ctx, this) : step.title
+    const stuckHint = this.getStuckHint()
+    if (stuckHint) instruction = `${instruction}\n\n${stuckHint}`
     return {
       active: this.active,
       stepIndex: this.stepIndex,

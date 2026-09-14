@@ -53,9 +53,9 @@ new VRManager(renderer)
 // Estado y sistemas de sincronización — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
-const appState          = new AppState()
+const appState = new AppState()
 const interactionSystem = new InteractionSystem(sceneManager, appState)
-const stateSyncSystem   = new StateSyncSystem(scene, appState, interactionSystem)
+const stateSyncSystem = new StateSyncSystem(scene, appState, interactionSystem)
 interactionSystem.setStateSyncSystem(stateSyncSystem)
 const powerSupplyControls = new PowerSupplyInteractionSystem(interactionSystem, appState, stateSyncSystem, () => closeAllPanels())
 interactionSystem.powerSupplyControls = powerSupplyControls
@@ -67,7 +67,7 @@ interactionSystem.multimeterSystem = multimeterSystem
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 scene.background = new THREE.Color(0xcfc78a)
-scene.fog        = new THREE.Fog(0xcfc78a, 14, 28)
+scene.fog = new THREE.Fog(0xcfc78a, 14, 28)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.95))
 
@@ -102,7 +102,7 @@ const floor = new THREE.Mesh(
   })
 )
 floor.rotation.x = -Math.PI / 2
-floor.visible    = false
+floor.visible = false
 scene.add(floor)
 interactionSystem.registerSurface(floor, { type: "floor" })
 
@@ -110,12 +110,12 @@ interactionSystem.registerSurface(floor, { type: "floor" })
 // Variables de entorno (asignadas al cargar GLB) — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
-let table       = null
-let protoboard  = null
+let table = null
+let protoboard = null
 let protoSurface = null
-let layout      = null
-let holeSystem  = null
-let holeDots    = null
+let layout = null
+let holeSystem = null
+let holeDots = null
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 // Sistema eléctrico y de diagnóstico — Hecho e implementado por LFTS
@@ -130,7 +130,7 @@ const diagnosticSystem = new CircuitDiagnosticSystem(appState, stateSyncSystem, 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const { group: alertPanelGroup, update: updateAlertPanel } = createAlertPanel({
-  position:  new THREE.Vector3(0.55, 1.38, -0.50),
+  position: new THREE.Vector3(0.55, 1.38, -0.50),
   rotationY: -Math.PI / 6,
 })
 scene.add(alertPanelGroup)
@@ -148,7 +148,7 @@ alertPanelGroup.traverse((o) => {
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const classroomRoot = new THREE.Group()
-classroomRoot.name  = "MrsPuffsClassroomRoot"
+classroomRoot.name = "MrsPuffsClassroomRoot"
 scene.add(classroomRoot)
 
 // Mesa helper invisible alineada al escritorio del GLB — Hecho e implementado por LFTS
@@ -161,7 +161,7 @@ const tableHelper = new THREE.Mesh(
     depthWrite: false,
   })
 )
-tableHelper.name    = "TeacherDeskHelper"
+tableHelper.name = "TeacherDeskHelper"
 tableHelper.visible = false
 scene.add(tableHelper)
 
@@ -176,7 +176,7 @@ scene.add(tableHelper)
 function updateTableSurfaceBounds() {
   if (!table) return
   table.updateMatrixWorld(true)
-  const tableBox    = new THREE.Box3().setFromObject(table)
+  const tableBox = new THREE.Box3().setFromObject(table)
   const tableMargin = 0.10
   interactionSystem.registerSurface(table, {
     type: "table",
@@ -198,7 +198,7 @@ function rebuildProtoboardOnDesk() {
   if (!table) return
 
   if (protoboard) { scene.remove(protoboard); protoboard = null }
-  if (holeDots)   { scene.remove(holeDots);   holeDots   = null }
+  if (holeDots) { scene.remove(holeDots); holeDots = null }
 
   const tableTopY = table.position.y + 0.04
 
@@ -210,9 +210,9 @@ function rebuildProtoboardOnDesk() {
     ),
   })
 
-  protoboard   = protoData.group
+  protoboard = protoData.group
   protoSurface = protoData.surfaceMesh
-  layout       = protoData.layout
+  layout = protoData.layout
 
   scene.add(protoboard)
   interactionSystem.registerSurface(protoSurface, { type: "protoboard" })
@@ -220,13 +220,13 @@ function rebuildProtoboardOnDesk() {
   // Inyectar holeSystem en sistemas que lo necesitan — Hecho e implementado por LFTS
   holeSystem = new HoleSystem(protoboard, layout)
   interactionSystem.setHoleSystem(holeSystem)
-  electricalSystem.holeSystem  = holeSystem
+  electricalSystem.holeSystem = holeSystem
   diagnosticSystem.setHoleSystem(holeSystem)
 
   // Visualización de holes — Hecho e implementado por LFTS
   const holeGeo = new THREE.SphereGeometry(0.0025, 6, 6)
   const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-  holeDots      = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
+  holeDots = new THREE.InstancedMesh(holeGeo, holeMat, holeSystem.holes.length)
   holeDots.name = "ProtoboardHoleDots"
 
   const holeMatrix = new THREE.Matrix4()
@@ -248,20 +248,20 @@ function rebuildProtoboardOnDesk() {
 
 
 const classroomModelUrl = `${import.meta.env.BASE_URL}models/mrs-puffs-classroom.glb`
-const classroomLoader   = new GLTFLoader()
+const classroomLoader = new GLTFLoader()
 
 classroomLoader.load(
   classroomModelUrl,
   (gltf) => {
     const classroom = gltf.scene
-    classroom.name  = "MrsPuffsClassroom"
+    classroom.name = "MrsPuffsClassroom"
 
     classroomRoot.clear()
     classroomRoot.add(classroom)
 
     classroom.traverse((obj) => {
       if (!obj.isMesh) return
-      obj.castShadow    = false
+      obj.castShadow = false
       obj.receiveShadow = true
       if (obj.material) {
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
@@ -269,19 +269,19 @@ classroomLoader.load(
       }
     })
 
-    const rawBox      = new THREE.Box3().setFromObject(classroom)
-    const rawSize     = rawBox.getSize(new THREE.Vector3())
+    const rawBox = new THREE.Box3().setFromObject(classroom)
+    const rawSize = rawBox.getSize(new THREE.Vector3())
     const scaleFactor = rawSize.x > 0 ? 7.2 / rawSize.x : 1
 
     classroom.scale.setScalar(scaleFactor)
     classroom.updateMatrixWorld(true)
 
-    const scaledBox    = new THREE.Box3().setFromObject(classroom)
+    const scaledBox = new THREE.Box3().setFromObject(classroom)
     const scaledCenter = scaledBox.getCenter(new THREE.Vector3())
 
     classroom.position.x -= scaledCenter.x
     classroom.position.y -= scaledBox.min.y
-    classroom.position.z  = -2.72
+    classroom.position.z = -2.72
     classroom.position.x += 0.07
     classroom.updateMatrixWorld(true)
 
@@ -341,10 +341,10 @@ function normalizeColorValue(value, fallback = 0xffffff) {
 
 function resistanceToBands(value) {
   const ohms = Math.max(10, Math.round(Number(value) || 220))
-  const colorDigits = ["black","brown","red","orange","yellow","green","blue","purple","gray","white"]
-  const s   = String(ohms)
-  const d1  = Number(s[0] || 2)
-  const d2  = Number(s[1] || 2)
+  const colorDigits = ["black", "brown", "red", "orange", "yellow", "green", "blue", "purple", "gray", "white"]
+  const s = String(ohms)
+  const d1 = Number(s[0] || 2)
+  const d2 = Number(s[1] || 2)
   const mult = Math.max(0, s.length - 2)
   return [colorDigits[d1], colorDigits[d2], colorDigits[mult] || "black", "gold"]
 }
@@ -402,7 +402,7 @@ function getHeldComponentId() {
 }
 
 function getHeldComponent() { const id = getHeldComponentId(); return id ? getComponentById(id) : null }
-function getHeldMesh()      { const id = getHeldComponentId(); return id ? stateSyncSystem.getMeshById(id) : null }
+function getHeldMesh() { const id = getHeldComponentId(); return id ? stateSyncSystem.getMeshById(id) : null }
 
 function getEditingTargetComponent() {
   const held = getHeldComponent()
@@ -421,7 +421,7 @@ function getEditingTargetMesh() {
 function applyLedColorToMesh(mesh, hex) {
   if (!mesh) return
   const safeHex = normalizeColorValue(hex, 0xff3b3b)
-  mesh.userData.meta         = { ...(mesh.userData.meta || {}), color: safeHex }
+  mesh.userData.meta = { ...(mesh.userData.meta || {}), color: safeHex }
   mesh.userData.baseLedColor = safeHex
   mesh.traverse((child) => {
     if (!child.isMesh) return
@@ -438,7 +438,7 @@ function applyWireColorToMesh(mesh, hex) {
   if (!mesh?.userData?.rebuildWireGeometry) return
   const safeHex = normalizeColorValue(hex, 0x111111)
   mesh.userData.wireColor = safeHex
-  mesh.userData.meta      = { ...(mesh.userData.meta || {}), color: safeHex }
+  mesh.userData.meta = { ...(mesh.userData.meta || {}), color: safeHex }
   const points = Array.isArray(mesh.userData.fixedPoints) ? mesh.userData.fixedPoints.map((p) => p.clone()) : []
   if (points.length >= 2) mesh.userData.rebuildWireGeometry(points)
 }
@@ -458,15 +458,15 @@ function applyResistorBandsToMesh(mesh, resistance) {
 // Sistema de selección y edición — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
-let selectedComponentId    = null
-let pendingColorHex        = null
+let selectedComponentId = null
+let pendingColorHex = null
 let pendingResistanceValue = null
 
 function getSelectedComponent() { return selectedComponentId ? getComponentById(selectedComponentId) : null }
-function clearPendingChanges()  { pendingColorHex = null; pendingResistanceValue = null }
+function clearPendingChanges() { pendingColorHex = null; pendingResistanceValue = null }
 
 function selectComponent(id) { selectedComponentId = id || null; clearPendingChanges(); refreshEditPanel() }
-function clearSelection()    { selectedComponentId = null; clearPendingChanges(); refreshEditPanel() }
+function clearSelection() { selectedComponentId = null; clearPendingChanges(); refreshEditPanel() }
 
 function selectHeldComponent() {
   const heldId = getHeldComponentId()
@@ -547,7 +547,7 @@ function applyPendingChanges() {
   }
 
   if (comp.type === "resistor" && pendingResistanceValue !== null) {
-    const next      = Math.max(10, Math.round(Number(pendingResistanceValue) || 220))
+    const next = Math.max(10, Math.round(Number(pendingResistanceValue) || 220))
     const nextBands = resistanceToBands(next)
     appState.updateComponent(comp.id, { meta: { ...comp.meta, resistance: next, bands: nextBands } })
     applyResistorBandsToMesh(mesh, next)
@@ -567,7 +567,7 @@ function addMultimeter() {
 function addPowerSupply() {
   const id = genId("powerSupply")
   const p = getSpawnBasePosition(); p.x -= 0.34; p.y += 0.12; p.z += 0.14
-  const data = { id, type: "powerSupply", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { voltage: 5, currentLimit: 0.02 } }
+  const data = { id, type: "powerSupply", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { voltage: 5, currentLimit: 0.02 } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   interactionSystem.tryPlaceObjectDirectly(mesh)
@@ -576,8 +576,8 @@ function addPowerSupply() {
 
 function addBattery5V() {
   const id = genId("battery5v")
-  const p  = getSpawnBasePosition(); p.y += 0.15; p.z += 0.12
-  const data = { id, type: "battery5v", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { voltage: 5 } }
+  const p = getSpawnBasePosition(); p.y += 0.15; p.z += 0.12
+  const data = { id, type: "battery5v", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { voltage: 5 } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   syncSpecialRefs(mesh); selectComponent(id)
@@ -585,8 +585,8 @@ function addBattery5V() {
 
 function addLed() {
   const id = genId("led")
-  const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.12
-  const data = { id, type: "led", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { color: 0xff3b3b } }
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.12
+  const data = { id, type: "led", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { color: 0xff3b3b } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   syncSpecialRefs(mesh); selectComponent(id)
@@ -594,9 +594,9 @@ function addLed() {
 
 function addResistor() {
   const id = genId("resistor")
-  const p  = getSpawnBasePosition(); p.y += 0.32; p.z += 0.12
+  const p = getSpawnBasePosition(); p.y += 0.32; p.z += 0.12
   const resistance = 220
-  const data = { id, type: "resistor", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { resistance, bands: resistanceToBands(resistance) } }
+  const data = { id, type: "resistor", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { resistance, bands: resistanceToBands(resistance) } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   syncSpecialRefs(mesh); selectComponent(id)
@@ -604,8 +604,8 @@ function addResistor() {
 
 function addButton() {
   const id = genId("button")
-  const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.20
-  const data = { id, type: "button", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: {} }
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.20
+  const data = { id, type: "button", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: {} }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   syncSpecialRefs(mesh); selectComponent(id)
@@ -613,8 +613,8 @@ function addButton() {
 
 function addSwitch() {
   const id = genId("switch")
-  const p  = getSpawnBasePosition(); p.y += 0.25; p.z += 0.28
-  const data = { id, type: "switch", transform: { x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1 }, meta: { switchState: false } }
+  const p = getSpawnBasePosition(); p.y += 0.25; p.z += 0.28
+  const data = { id, type: "switch", transform: { x: p.x, y: p.y, z: p.z, qx: 0, qy: 0, qz: 0, qw: 1 }, meta: { switchState: false } }
   appState.addComponent(data)
   const mesh = stateSyncSystem.addMeshFromComponent(data)
   syncSpecialRefs(mesh); selectComponent(id)
@@ -642,7 +642,7 @@ function loadState() {
 }
 
 function clearScene() {
-  appState.components  = []
+  appState.components = []
   appState.connections = []
   physicsSystem.clearAllBodies()
   stateSyncSystem.rebuildFromState()
@@ -656,7 +656,7 @@ function clearScene() {
 // Modo cable — toggle con feedback visual — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
-let wireModeActive     = false
+let wireModeActive = false
 let setWireModeVisualFn = null
 
 function toggleWireMode() {
@@ -670,7 +670,7 @@ function toggleWireMode() {
 // Modo app — edición / simulación — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
-let isSimMode         = false
+let isSimMode = false
 let setSimModeVisualFn = null
 
 /**
@@ -705,7 +705,7 @@ function toggleAppMode() {
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
 const panelWorldPos = new THREE.Vector3(0.55, 1.15, -0.50)
-const panelRotY     = -Math.PI / 6
+const panelRotY = -Math.PI / 6
 
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
@@ -721,17 +721,17 @@ const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVis
 })
 
 setWireModeVisualFn = setWireModeVisual
-setSimModeVisualFn  = setSimModeVisual
+setSimModeVisualFn = setSimModeVisual
 
 const editPanelApi = createEditPanel({
-  position:          new THREE.Vector3(-0.62, 1.15, -0.48),
-  rotationY:         Math.PI / 6,
-  onSelectHeld:      selectHeldComponent,
-  onSelectLastWire:  selectLastWire,
-  onClearSelection:  clearSelection,
+  position: new THREE.Vector3(-0.62, 1.15, -0.48),
+  rotationY: Math.PI / 6,
+  onSelectHeld: selectHeldComponent,
+  onSelectLastWire: selectLastWire,
+  onClearSelection: clearSelection,
   onResistanceDelta: queueResistanceDelta,
-  onColorPicked:     queueColorPicked,
-  onAcceptChanges:   applyPendingChanges,
+  onColorPicked: queueColorPicked,
+  onAcceptChanges: applyPendingChanges,
 })
 
 scene.add(spawnPanel, modePanel, editPanelApi.group)
@@ -757,26 +757,26 @@ function setPanelEnabled(group, buttons, enabled) {
   }
 }
 
-setPanelEnabled(spawnPanel,           spawnButtons,           false)
-setPanelEnabled(modePanel,            modeButtons,            false)
-setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   false)
+setPanelEnabled(spawnPanel, spawnButtons, false)
+setPanelEnabled(modePanel, modeButtons, false)
+setPanelEnabled(editPanelApi.group, editPanelApi.buttons, false)
 
 let openPanelKey = null
 
 function closeAllPanels() {
   powerSupplyControls.closeKeyboard()
-  setPanelEnabled(spawnPanel,           spawnButtons,           false)
-  setPanelEnabled(modePanel,            modeButtons,            false)
-  setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   false)
+  setPanelEnabled(spawnPanel, spawnButtons, false)
+  setPanelEnabled(modePanel, modeButtons, false)
+  setPanelEnabled(editPanelApi.group, editPanelApi.buttons, false)
   openPanelKey = null
 }
 
 function togglePanel(panelKey) {
   if (openPanelKey === panelKey) { closeAllPanels(); return }
   closeAllPanels()
-  if (panelKey === "spawn") { setPanelEnabled(spawnPanel,           spawnButtons,           true); openPanelKey = "spawn"; return }
-  if (panelKey === "mode")  { setPanelEnabled(modePanel,            modeButtons,            true); openPanelKey = "mode";  return }
-  if (panelKey === "edit")  { setPanelEnabled(editPanelApi.group,   editPanelApi.buttons,   true); openPanelKey = "edit" }
+  if (panelKey === "spawn") { setPanelEnabled(spawnPanel, spawnButtons, true); openPanelKey = "spawn"; return }
+  if (panelKey === "mode") { setPanelEnabled(modePanel, modeButtons, true); openPanelKey = "mode"; return }
+  if (panelKey === "edit") { setPanelEnabled(editPanelApi.group, editPanelApi.buttons, true); openPanelKey = "edit" }
 }
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
@@ -800,9 +800,9 @@ function createTableToggleButton({ name, label, color, position, onPress }) {
     new THREE.MeshStandardMaterial({ color, roughness: 0.55 })
   )
   button.position.y = 0.034
-  button.userData.isUI         = true
+  button.userData.isUI = true
   button.userData._lastPressMs = 0
-  button.userData._cooldownMs  = 250
+  button.userData._cooldownMs = 250
   button.userData.onPress = () => {
     const now = performance.now()
     if (now - button.userData._lastPressMs < button.userData._cooldownMs) return
@@ -891,6 +891,17 @@ function spawnTutorialComponent(type, meta = {}) {
   return { id, mesh }
 }
 
+function spawnTutorialComponentOnProtoboard(type, meta = {}) {
+  const { id, mesh } = spawnTutorialComponent(type, meta)
+  if (protoboard && Array.isArray(mesh?.userData?.pins) && mesh.userData.pins.length === 2) {
+    mesh.position.copy(protoboard.position)
+    mesh.position.y += 0.05
+    mesh.updateMatrixWorld(true)
+    interactionSystem.trySnapComponentPinsToHoles(mesh, 0.6)
+  }
+  return { id, mesh }
+}
+
 function removeTutorialComponent(id) {
   if (!id || !getComponentById(id)) return
   if (selectedComponentId === id) clearSelection()
@@ -949,6 +960,7 @@ const tutorialSystem = new TutorialSystem({
   clearSelection,
   spawnDemoButton,
   removeDemoButton,
+  spawnTutorialComponentOnProtoboard,
 })
 
 const tutorialPanelApi = createTutorialPanel({
@@ -995,7 +1007,7 @@ renderer.xr.addEventListener("sessionstart", () => {
 
 
 const trashSystem = new TrashSystem(scene, appState, stateSyncSystem)
-const trashBin    = trashSystem.createTrashBin({
+const trashBin = trashSystem.createTrashBin({
   parent: scene, position: new THREE.Vector3(-0.55, 0.20, -1.40),
 })
 
@@ -1077,47 +1089,47 @@ renderer.setAnimationLoop(() => {
   // la UI del tutorial), sin importar la causa. Ahora se registra el error y el loop
   // sigue con normalidad en el siguiente frame.
   try {
-  const dt = Math.min(0.033, clock.getDelta())
+    const dt = Math.min(0.033, clock.getDelta())
 
-  powerSupplyControls.update(electricalSystem.lastGraph)
-  interactionSystem.update()
-  multimeterSystem.update(electricalSystem.lastGraph)
-  physicsSystem.update(stateSyncSystem.meshById.values(), dt)
-  trashSystem.update(stateSyncSystem.meshById.values())
+    powerSupplyControls.update(electricalSystem.lastGraph)
+    interactionSystem.update()
+    multimeterSystem.update(electricalSystem.lastGraph)
+    physicsSystem.update(stateSyncSystem.meshById.values(), dt)
+    trashSystem.update(stateSyncSystem.meshById.values())
 
-  // Sistema eléctrico — siempre activo 
-  electricalSystem.update(dt)
-  multimeterSystem.update(electricalSystem.lastGraph)
-  powerSupplyControls.update(electricalSystem.lastGraph)
+    // Sistema eléctrico — siempre activo 
+    electricalSystem.update(dt)
+    multimeterSystem.update(electricalSystem.lastGraph)
+    powerSupplyControls.update(electricalSystem.lastGraph)
 
-  // Diagnóstico y AlertPanel — siempre se actualiza 
-  // En edición: solo muestra el modo sin analizar
-  // En simulación: analiza y muestra errores
-  if (electricalSystem.lastGraph) {
-    const { alerts, hasErrors } = diagnosticSystem.analyze(
-      electricalSystem.lastGraph,
-      isSimMode ? "sim" : "edit"
-    )
-    const meterAlerts = multimeterSystem.alerts
-    updateAlertPanel([...alerts, ...meterAlerts], hasErrors || meterAlerts.length > 0, isSimMode ? "sim" : "edit")
-  } else {
-    // Antes de que cargue el grafo, mostrar solo el modo — Hecho e implementado por LFTS
-    updateAlertPanel([], false, isSimMode ? "sim" : "edit")
-  }
+    // Diagnóstico y AlertPanel — siempre se actualiza 
+    // En edición: solo muestra el modo sin analizar
+    // En simulación: analiza y muestra errores
+    if (electricalSystem.lastGraph) {
+      const { alerts, hasErrors } = diagnosticSystem.analyze(
+        electricalSystem.lastGraph,
+        isSimMode ? "sim" : "edit"
+      )
+      const meterAlerts = multimeterSystem.alerts
+      updateAlertPanel([...alerts, ...meterAlerts], hasErrors || meterAlerts.length > 0, isSimMode ? "sim" : "edit")
+    } else {
+      // Antes de que cargue el grafo, mostrar solo el modo — Hecho e implementado por LFTS
+      updateAlertPanel([], false, isSimMode ? "sim" : "edit")
+    }
 
-  detectNewComponents()
-  validateSelection()
+    detectNewComponents()
+    validateSelection()
 
-  const dtMs = dt * 1000
-  tutorialSystem.update(dtMs)
-  if (tutorialSystem.active) {
-    tutorialPanelApi.updateContent(tutorialSystem.getPanelData())
-    if (!tutorialPanelApi.group.visible) setTutorialPanelEnabled(true)
-  } else if (tutorialPanelApi.group.visible) {
-    setTutorialPanelEnabled(false)
-  }
+    const dtMs = dt * 1000
+    tutorialSystem.update(dtMs)
+    if (tutorialSystem.active) {
+      tutorialPanelApi.updateContent(tutorialSystem.getPanelData())
+      if (!tutorialPanelApi.group.visible) setTutorialPanelEnabled(true)
+    } else if (tutorialPanelApi.group.visible) {
+      setTutorialPanelEnabled(false)
+    }
 
-  sceneManager.render()
+    sceneManager.render()
   } catch (err) {
     console.error("⚠️ Error en el loop principal (frame ignorado):", err)
   }
