@@ -601,7 +601,7 @@ export class TutorialSystem {
     const step = this.steps[this.stepIndex]
     if (!step?.check) return ""
     if (performance.now() - this._stepStartMs < 20000) return ""
-    return "💡 ¿Tienes problemas para continuar? Puedes presionar \"Atrás\" para reiniciar este paso, o \"Siguiente\" para saltarlo."
+    return "💡 ¿Tienes problemas para continuar? Puedes presionar \"Atrás\" para reiniciar este paso, o \"Siguiente\" para saltarlo :)."
   }
 
   getPanelData() {
