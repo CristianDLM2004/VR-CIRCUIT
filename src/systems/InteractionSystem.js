@@ -1,3 +1,4 @@
+import { snapESP32 } from "./ESP32Insertion.js"
 //InteractionSystem
 // Hecho e implementado por LFTS
 import * as THREE from "three"
@@ -2056,7 +2057,7 @@ export class InteractionSystem {
   }
 
   getBestSurfaceBelow(object) {
-    if (["powerSupply", "multimeter", "meterProbe", "arduinoUno"].includes(object?.userData?.componentType)) return this.getPowerSupplySurfaceBelow(object)
+    if (["powerSupply", "multimeter", "meterProbe", "arduinoUno", "esp32"].includes(object?.userData?.componentType)) return this.getPowerSupplySurfaceBelow(object)
     if (!object || this.surfaces.length === 0) return null
     const origin = object.position.clone()
     origin.y += 2
@@ -2124,6 +2125,18 @@ export class InteractionSystem {
   }
 
   trySnapComponentPinsToHoles(object, maxDist = 0.05) {
+    if(object?.userData?.componentType === "esp32") {
+      const snap=snapESP32(object,this.holeSystem,this.appState.components,maxDist)
+      if(!snap)return false
+      const parentQ=object.parent?.getWorldQuaternion(new THREE.Quaternion())||new THREE.Quaternion()
+      object.quaternion.copy(parentQ.invert().multiply(snap.quaternion))
+      object.position.copy(object.parent?object.parent.worldToLocal(snap.position.clone()):snap.position)
+      object.updateMatrixWorld(true)
+      object.userData.inserted=true;object.userData.pinConnections=snap.pinConnections;object.userData.physics=null
+      const p=object.position,q=object.quaternion
+      this.appState.updateComponent(object.userData.componentId,{inserted:true,pinConnections:{...snap.pinConnections},transform:{x:p.x,y:p.y,z:p.z,qx:q.x,qy:q.y,qz:q.z,qw:q.w}})
+      return true
+    }
     const matches = this.getPinSnapMatches(object, maxDist)
     if (matches.length !== 2) return false
     const [pinA, pinB] = object.userData.pins
@@ -2170,11 +2183,11 @@ export class InteractionSystem {
     bbox.getCenter(center)
     const halfY = size.y * 0.5
     const drop = (center.y - halfY) - best.point.y
-    const maxDrop = ["powerSupply", "multimeter", "arduinoUno"].includes(object.userData?.componentType) ? 0.30 : this.directPlaceMaxDrop
+    const maxDrop = ["powerSupply", "multimeter", "arduinoUno", "esp32"].includes(object.userData?.componentType) ? 0.30 : this.directPlaceMaxDrop
     if (drop < -0.03 || drop > maxDrop) return false
     object.position.y += (best.point.y + halfY - center.y)
     if (this.holeSystem && Array.isArray(object.userData?.pins)) this.holeSystem.trySnapObject(object, 0.03)
-    if (["powerSupply", "multimeter", "arduinoUno"].includes(object.userData?.componentType)) object.userData.physics = null
+    if (["powerSupply", "multimeter", "arduinoUno", "esp32"].includes(object.userData?.componentType)) object.userData.physics = null
     this.persistMeshTransform(object)
     return true
   }
@@ -2183,7 +2196,7 @@ export class InteractionSystem {
     if (!object) return
     this.updateHoldVelocity(hs)
     // La fuente se coloca sin impulso para evitar que resbale fuera del apoyo. Hecho e implementado por LFTS
-    const placeSupply = ["powerSupply", "multimeter", "arduinoUno"].includes(object.userData?.componentType)
+    const placeSupply = ["powerSupply", "multimeter", "arduinoUno", "esp32"].includes(object.userData?.componentType)
     const vel = this.getReleaseVelocity(hs, options.forceZeroVelocity ?? placeSupply)
     this.scene.attach(object)
     this.clearObjectOwner(object)

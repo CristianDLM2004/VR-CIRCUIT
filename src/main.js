@@ -563,6 +563,11 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+function addESP32() {
+  const p = getSpawnBasePosition(); p.x -= 0.25; p.y += 0.08; p.z += 0.25
+  selectComponent(arduinoSystem.spawn(p,"esp32"))
+}
+
 function addArduino() {
   const p = getSpawnBasePosition(); p.x -= 0.25; p.y += 0.08; p.z += 0.25
   selectComponent(arduinoSystem.spawn(p))
@@ -719,7 +724,7 @@ const panelRotY = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({

@@ -1,3 +1,4 @@
+import { createESP32 } from "./ESP32.js"
 import { createArduinoUno } from "./ArduinoUno.js"
 import { createMultimeterPart } from "./Multimeter.js"
 // Hecho e implementado por LFTS
@@ -180,6 +181,7 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "esp32": { mesh = createESP32(); break }
       case "arduinoUno": { mesh = createArduinoUno(); break }
       case "multimeter":
       case "meterProbe": { mesh = createMultimeterPart(data); break }

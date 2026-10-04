@@ -1,3 +1,4 @@
+import { ESP_PINS, espNode, espBranches } from "../core/BoardProfiles.js"
 import { arduinoBranches, UNO_PINS, unoNode } from "../core/ArduinoPins.js"
 // Hecho e implementado por LFTS
 import { supplySettings } from "../core/PowerSupplySettings.js"
@@ -32,6 +33,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
     if (a?.kind === "hole" && a.holeId && groups.has(a.holeId)) return holeNode(a.holeId)
     const c = byId.get(a?.componentId)
     if (!c) return null
+    if (c.type === "esp32" && a.kind === "pin" && ESP_PINS.includes(a.id) && a.id !== "EN") return espNode(c.id,a.id)
     if (c.type === "arduinoUno" && a.kind === "pin" && UNO_PINS.includes(a.id)) return unoNode(c.id, a.id)
     if (a.kind === "terminal" && ["battery5v", "powerSupply"].includes(c.type)
       && ["positive", "negative"].includes(a.id)) return `terminal:${c.id}:${a.id}`
@@ -43,6 +45,12 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
   const invalidWires = []
   for (const c of components) {
     const mesh = stateSyncSystem?.getMeshById(c.id)
+    if (c.type === "esp32") { branches.push(...espBranches(c,mesh));
+      if(c.inserted)for(const pin of ESP_PINS){
+        const hole=c.pinConnections?.[pin]
+        if(pin!=="EN"&&hole&&groups.has(hole))branches.push({id:c.id+":contact:"+pin,a:espNode(c.id,pin),b:holeNode(hole),type:"esp32",ownerId:c.id,component:c,closed:true,resistance:.001})
+      }
+      continue }
     if (c.type === "arduinoUno") { branches.push(...arduinoBranches(c, mesh)); continue }
     const b = { id: c.id, type: c.type, component: c, closed: true }
     if (c.type === "battery5v" || c.type === "powerSupply") {

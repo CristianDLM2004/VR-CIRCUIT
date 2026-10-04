@@ -15,7 +15,7 @@ export class ArduinoEditor {
     this.textarea.addEventListener("input",()=>this.save(this.textarea.value))
     this.element.addEventListener("keydown",e=>e.stopPropagation())
     this.element.addEventListener("beforexrselect",e=>e.preventDefault())
-    const actions={"Verificar":()=>this.verify(),"Ejecutar":()=>system.run(this.id),"Detener":()=>system.stop(this.id),"Reiniciar":()=>system.run(this.id),"Guardar circuito":()=>this.saveCircuit(),"Copiar":()=>this.copy(),"Pegar":()=>this.paste(),"Importar archivo":()=>this.file.click(),"Descargar .ino":()=>this.download(),"Ejemplo Blink":()=>{this.save(BLINK_SKETCH);this.refreshText()},"Cerrar":()=>this.close()}
+    const actions={"Verificar":()=>this.verify(),"Ejecutar":()=>system.run(this.id),"Detener":()=>system.stop(this.id),"Reiniciar":()=>system.run(this.id),"Guardar circuito":()=>this.saveCircuit(),"Copiar":()=>this.copy(),"Pegar":()=>this.paste(),"Importar archivo":()=>this.file.click(),"Descargar .ino":()=>this.download(),"Ejemplo Blink":()=>{this.save(this.profile().blink);this.refreshText()},"Cerrar":()=>this.close()}
     for(const [label,fn] of Object.entries(actions)){
       const button=document.createElement("button");button.textContent=label
       button.style.cssText="margin:4px;padding:10px;background:#daf6ed;border:0;border-radius:5px;color:#14232f"
@@ -42,7 +42,8 @@ export class ArduinoEditor {
     system.interaction.renderer.xr.addEventListener("sessionend",()=>{this.lineInput.blur();if(this.id){this.disposePanel();this.element.style.display="block";this.refreshText()}})
     system.interaction.renderer.xr.addEventListener("sessionstart",()=>{if(this.id){this.element.style.display="none";this.createPanel()}})
   }
-  source(){return this.system.component(this.id)?.meta?.source??BLINK_SKETCH}
+  profile(){return this.system.profile?.(this.id)??{name:"Arduino Uno",blink:BLINK_SKETCH,help:ARDUINO_HELP,type:"arduinoUno"}}
+  source(){return this.system.component(this.id)?.meta?.source??this.profile().blink}
   save(source) {
     if(source.length>32768){this.message("El límite es 32 KB.");return}
     const c=this.system.component(this.id);if(!c)return
@@ -53,7 +54,7 @@ export class ArduinoEditor {
   message(text){this.notice=text;this.status.textContent=text;this.lastView=""}
   verify(){try{this.system.verify(this.source());this.message("Sintaxis compatible. Los errores de ejecución aparecerán al iniciar.")}catch(e){this.message(e.message)}}
   open(id){
-    this.close();this.id=id;this.line=0;this.notice="";this.refreshText()
+    this.close();this.id=id;this.element.querySelector("h2").textContent=this.profile().name+" · editor educativo .ino";this.element.querySelector("details").textContent=this.profile().help;this.line=0;this.notice="";this.refreshText()
     if(this.system.interaction.renderer.xr.isPresenting)this.createPanel();else this.element.style.display="block"
   }
   async browser(){
@@ -76,7 +77,7 @@ export class ArduinoEditor {
   }
   download(){
     const url=URL.createObjectURL(new Blob([this.source()],{type:"text/plain;charset=utf-8"}))
-    const link=document.createElement("a");link.href=url;link.download="circuito-uno.ino";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+    const link=document.createElement("a");link.href=url;link.download="circuito-"+this.profile().type+".ino";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
   }
   changeLine(delta){this.lineInput.blur();this.line=Math.max(0,Math.min(this.source().split("\n").length-1,this.line+delta));this.lastView=""}
   insertLine(){this.lineInput.blur();const lines=this.source().split("\n");lines.splice(++this.line,0,"");this.save(lines.join("\n"));this.refreshText()}
@@ -112,7 +113,7 @@ export class ArduinoEditor {
     const text=this.source(),view=JSON.stringify([text,this.line,status,serial])
     if(view===this.lastView)return;this.lastView=view
     const ctx=this.panel.canvas.getContext("2d");ctx.fillStyle="#102331";ctx.fillRect(0,0,1536,1024)
-    ctx.fillStyle="#83ead6";ctx.font="bold 44px Arial";ctx.fillText("UNO · .ino educativo · línea "+(this.line+1),28,58)
+    ctx.fillStyle="#83ead6";ctx.font="bold 44px Arial";ctx.fillText(this.profile().name+" · .ino educativo · línea "+(this.line+1),28,58)
     ctx.font="27px Arial";ctx.fillText("Edición por líneas · Archivos abre el navegador · PWM aproximado",28,100)
     const lines=text.split("\n"),first=Math.max(0,this.line-6)
     ctx.font="32px monospace"

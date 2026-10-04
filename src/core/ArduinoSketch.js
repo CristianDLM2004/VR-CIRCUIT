@@ -102,7 +102,7 @@ export function compileSketch(source) {
 
 export class ArduinoSketch {
   constructor(source, io) {
-    this.program=compileSketch(source);this.io=io;this.scopes=[new Map()]
+    this.constants=io.constants??constants;this.intBits=io.intBits??16;this.program=compileSketch(source);this.io=io;this.scopes=[new Map()]
     this.time=0;this.waitUntil=0;this.running=true;this.error="";this.instructions=0
     this.iterator=this.execute()
   }
@@ -114,13 +114,13 @@ export class ArduinoSketch {
     if(typeof value!=="number" || !Number.isFinite(value))throw Error("Valor numérico inválido")
     if(type==="bool")return value?1:0
     if(type==="byte")return (Math.trunc(value)%256+256)%256
-    if(type==="int")return (Math.trunc(value)<<16)>>16
+    if(type==="int")return this.intBits===32?Math.trunc(value)|0:(Math.trunc(value)<<16)>>16
     if(type==="long")return Math.trunc(value)|0
     return value
   }
   value(node) {
     if(node.kind==="literal")return node.value
-    if(node.kind==="name")return Object.hasOwn(constants,node.id)?constants[node.id]:this.entry(node.id).value
+    if(node.kind==="name")return Object.hasOwn(this.constants,node.id)?this.constants[node.id]:this.entry(node.id).value
     if(node.kind==="call"){
       if(node.id==="delay")throw Error("delay debe ser una instrucción independiente.")
       if(node.id==="millis")return Math.floor(this.time)
@@ -143,7 +143,7 @@ export class ArduinoSketch {
   }
   integerExpression(node) {
     if(node.kind==="literal")return !node.floating && typeof node.value==="number"
-    if(node.kind==="name")return Object.hasOwn(constants,node.id) || this.entry(node.id).type!=="float"
+    if(node.kind==="name")return Object.hasOwn(this.constants,node.id) || this.entry(node.id).type!=="float"
     if(node.kind==="call")return true
     if(node.kind==="unary")return this.integerExpression(node.value)
     return this.integerExpression(node.left)&&this.integerExpression(node.right)
@@ -154,7 +154,7 @@ export class ArduinoSketch {
       this.scopes.push(new Map());try{for(const s of node.body)yield* this.statement(s)}finally{this.scopes.pop()}
     } else if(node.kind==="declare"){
       const scope=this.scopes.at(-1)
-      if(scope.has(node.id)||Object.hasOwn(constants,node.id))throw Error("Nombre duplicado o reservado: "+node.id)
+      if(scope.has(node.id)||Object.hasOwn(this.constants,node.id))throw Error("Nombre duplicado o reservado: "+node.id)
       scope.set(node.id,{type:node.type,constant:node.constant,value:this.cast(node.type,this.value(node.value))})
     } else if(node.kind==="assign"){
       const target=this.entry(node.id);if(target.constant)throw Error("No puedes modificar una constante.")

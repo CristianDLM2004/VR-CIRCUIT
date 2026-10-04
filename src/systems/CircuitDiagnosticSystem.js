@@ -43,10 +43,10 @@ export class CircuitDiagnosticSystem {
     }
     if (!graph) add("⚠ Sin datos de circuito")
     else {
-      if (!graph.sources.length && graph.branches.some(b => b.type !== "arduinoUno")) add("⚠ No hay fuente de alimentación")
+      if (!graph.sources.length && graph.branches.some(b => !["arduinoUno","esp32"].includes(b.type))) add("⚠ No hay fuente de alimentación")
       for (const fault of graph.faults) add("🔴 " + fault.message, fault.ids)
       for (const b of graph.branches) {
-        if (b.type === "arduinoUno") continue
+        if (["arduinoUno","esp32"].includes(b.type)) continue
         const r = graph.readings.get(b.id)
         if (!r || r.invalid) continue
         const label = this.label(b.component)

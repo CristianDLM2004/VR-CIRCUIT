@@ -33,6 +33,7 @@ export function createSpawnPanel({
   onPowerSupply = () => {},
   onMultimeter = () => {},
   onArduino = () => {},
+  onESP32 = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "SpawnPanel"
@@ -41,7 +42,7 @@ export function createSpawnPanel({
   group.visible = false
 
   const base = new THREE.Mesh(
-    new THREE.BoxGeometry(0.52, 0.34, 0.015),
+    new THREE.BoxGeometry(0.52, 0.46, 0.015),
     new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   )
   base.name = "SpawnPanelBase"
@@ -168,6 +169,8 @@ export function createSpawnPanel({
   makeButton({ name: "SpawnMultimeter", x: colX[2], y: -0.04, color: 0xb78416, label: "Tester", iconType: "powerSupply", onPress: onMultimeter })
 
   makeButton({ name: "SpawnArduino", x: colX[3], y: -0.04, color: 0x087b82, label: "Arduino", iconType: "powerSupply", onPress: onArduino })
+
+  makeButton({ name: "SpawnESP32", x: colX[0], y: -0.16, color: 0x333c48, label: "ESP32", iconType: "powerSupply", onPress: onESP32 })
 
   return { group, buttons }
 }
