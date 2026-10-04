@@ -1,3 +1,4 @@
+import { settleLogic } from "./LogicGateSimulation.js"
 //ElectricalSystem
 // Hecho e implementado por LFTS
 import { buildCircuit, solveCircuit } from "./CircuitSolver.js"
@@ -106,7 +107,7 @@ export class ElectricalSystem {
       b.id, b.a, b.b, b.type, b.closed, b.resistance, b.voltage, b.currentLimit, b.vf, b.component.meta?.ratings,
     ]), netlist.invalidWires])
     if (signature !== this._signature) {
-      this.lastGraph = solveCircuit(netlist)
+      this.lastGraph = this.appState.components.some(c=>c.type==="logicGate") ? settleLogic(this.appState.components,this.holeSystem,this.stateSyncSystem) : solveCircuit(netlist)
       this.lastGraph.revision = ++this._revision
       this._signature = signature
     }

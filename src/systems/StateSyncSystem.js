@@ -18,6 +18,8 @@ export class StateSyncSystem {
     if (!mesh) return
 
     this.interactionSystem?.arduinoSystem?.unregister(mesh)
+    for(const button of mesh.userData?.logicButtons||[])this.interactionSystem?.unregister(button)
+    mesh.userData?.disposeLogic?.()
     mesh.userData?.disposeArduino?.()
     this.interactionSystem?.multimeterSystem?.unregister(mesh)
     mesh.userData?.disposeMeter?.()
@@ -54,6 +56,7 @@ export class StateSyncSystem {
       this.interactionSystem.register(mesh)
       this.interactionSystem.multimeterSystem?.register(mesh)
       this.interactionSystem.arduinoSystem?.register(mesh)
+      for(const button of mesh.userData?.logicButtons||[])this.interactionSystem.register(button)
     }
 
       // Recolocar componentes insertados de 2 pines usando holes guardados — Hecho e implementado por LFTS
@@ -112,6 +115,7 @@ export class StateSyncSystem {
       this.interactionSystem.register(mesh)
       this.interactionSystem.multimeterSystem?.register(mesh)
       this.interactionSystem.arduinoSystem?.register(mesh)
+      for(const button of mesh.userData?.logicButtons||[])this.interactionSystem.register(button)
     }
     return mesh
   }

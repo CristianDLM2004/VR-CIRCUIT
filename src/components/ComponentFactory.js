@@ -1,3 +1,4 @@
+import { createLogicGate } from "./LogicGate.js"
 import { createESP32 } from "./ESP32.js"
 import { createArduinoUno } from "./ArduinoUno.js"
 import { createMultimeterPart } from "./Multimeter.js"
@@ -181,6 +182,7 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "logicGate": { mesh = createLogicGate(data); break }
       case "esp32": { mesh = createESP32(); break }
       case "arduinoUno": { mesh = createArduinoUno(); break }
       case "multimeter":

@@ -563,6 +563,12 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+function addLogicGate(kind) {
+  const p=getSpawnBasePosition();p.y+=0.08;p.z+=0.20
+  const data={id:genId("logic"),type:"logicGate",meta:{gate:kind},transform:{x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1}}
+  appState.addComponent(data);stateSyncSystem.addMeshFromComponent(data);selectComponent(data.id)
+}
+
 function addESP32() {
   const p = getSpawnBasePosition(); p.x -= 0.25; p.y += 0.08; p.z += 0.25
   selectComponent(arduinoSystem.spawn(p,"esp32"))
@@ -724,7 +730,7 @@ const panelRotY = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32, onLogicGate: addLogicGate,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -1132,6 +1138,7 @@ renderer.setAnimationLoop(() => {
     trashSystem.update(stateSyncSystem.meshById.values())
 
     // Sistema eléctrico — siempre activo 
+    for(const mesh of stateSyncSystem.meshById.values())mesh.userData.updateLogicPanel?.(camera)
     arduinoSystem.tick(dt)
     electricalSystem.update(dt)
     arduinoSystem.observe(electricalSystem.lastGraph)
@@ -1183,3 +1190,4 @@ renderer.setAnimationLoop(() => {
     console.error("⚠️ Error en el loop principal (frame ignorado):", err)
   }
 })
+

@@ -2,14 +2,15 @@
 import * as THREE from 'three'
 export function snapESP32(object,holeSystem,components,maxDist=.05){
   const pins=object?.userData?.insertionPins
-  if(!holeSystem||pins?.length!==30)return null
+  if(!holeSystem||pins?.length!==(object.userData.insertionCount||30))return null
   holeSystem.updateWorldPositions();object.updateWorldMatrix(true,false)
   const board=holeSystem.protoboardGroup
   if(!board)return null
   board.updateWorldMatrix(true,false)
   const occupied=new Set()
   for(const c of components||[])if(c.id!==object.userData.componentId&&c.inserted)for(const h of Object.values(c.pinConnections||{}))occupied.add(h)
-  const holes=holeSystem.holes.filter(h=>/^[dg]\d+$/.test(h.id))
+  const rows=new RegExp("^["+(object.userData.insertionRows||"dg")+"]\\d+$")
+  const holes=holeSystem.holes.filter(h=>rows.test(h.id))
   const normal=new THREE.Vector3(0,1,0).applyQuaternion(board.getWorldQuaternion(new THREE.Quaternion()))
   const currentQ=object.getWorldQuaternion(new THREE.Quaternion()),scale=object.getWorldScale(new THREE.Vector3())
   const worldPins=pins.map(p=>object.localToWorld(p.localPos.clone()))
