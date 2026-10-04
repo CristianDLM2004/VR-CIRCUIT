@@ -1,3 +1,4 @@
+//ModePanel
 import * as THREE from "three"
 
 function makeTextTexture(text, width = 256, height = 128) {
@@ -23,11 +24,12 @@ function makeTextTexture(text, width = 256, height = 128) {
 export function createModePanel({
   position = new THREE.Vector3(0.55, 1.15, -0.50),
   rotationY = -Math.PI / 6,
-  onWire = () => {},
-  onSave = () => {},
-  onLoad = () => {},
-  onMode = () => {},
-  onClear = () => {},
+  onWire = () => { },
+  onSave = () => { },
+  onLoad = () => { },
+  onMode = () => { },
+  onClear = () => { },
+  onTutorial = () => { },
 } = {}) {
   const group = new THREE.Group()
   group.name = "ModePanel"
@@ -36,7 +38,7 @@ export function createModePanel({
   group.visible = false
 
   const base = new THREE.Mesh(
-    new THREE.BoxGeometry(0.52, 0.34, 0.015),
+    new THREE.BoxGeometry(0.52, 0.42, 0.015), // antes 0.34 de alto: se agranda para dar espacio al botón de Tutorial
     new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })
   )
   base.name = "ModePanelBase"
@@ -101,6 +103,12 @@ export function createModePanel({
       bar1.rotation.z = Math.PI / 4
       bar2.rotation.z = -Math.PI / 4
       g.add(bar1, bar2)
+    } else if (type === "tutorial") {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.010, 0.0025, 8, 16, Math.PI * 1.5), whiteMat)
+      ring.rotation.z = Math.PI / 6
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 8, 8), whiteMat)
+      dot.position.set(0, -0.010, 0)
+      g.add(ring, dot)
     }
 
     return g
@@ -156,7 +164,8 @@ export function createModePanel({
 
   makeButton({ name: "ModeToggle", x: -0.07, y: -0.05, w: 0.16, h: 0.055, color: MODE_EDIT_COLOR, label: "Modo", iconType: "mode-edit", onPress: onMode, action: "mode" })
   makeButton({ name: "ModeClear", x: 0.11, y: -0.05, w: 0.16, h: 0.055, color: 0xc0392b, label: "Limpiar", iconType: "clear", onPress: onClear, action: "clear" })
-
+  makeButton({ name: "ModeTutorial", x: 0, y: -0.15, w: 0.22, h: 0.045, color: 0x16a085, label: "Tutorial", iconType: "tutorial", onPress: onTutorial, action: "tutorial" })
+  
   function setWireModeVisual(isActive) {
     if (!wireBtnMesh) return
     wireBtnMesh.material.color.setHex(isActive ? WIRE_COLOR_ON : WIRE_COLOR_OFF)

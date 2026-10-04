@@ -1,3 +1,4 @@
+//PowerSupplyInteractionSystem
 // Hecho e implementado por LFTS
 import * as THREE from "three"
 import { SUPPLY_FIELDS, normalizeSupplyValue, parseSupplyInput, supplySettings } from "../core/PowerSupplySettings.js"

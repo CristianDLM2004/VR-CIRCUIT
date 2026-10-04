@@ -1,3 +1,4 @@
+//InteractionSystem
 // Hecho e implementado por LFTS
 import * as THREE from "three"
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js"
@@ -30,18 +31,18 @@ export class InteractionSystem {
     this.controllerRayMinLength = 0.08
 
     this.nearEnabled = true
-    this.nearRadius = 0.24
+    this.nearRadius = 0.09
 
-    this.handGrabSurfaceMaxDist = 0.115
-    this.handGrabSurfaceSlack = 0.065
-    this.handHoverSurfaceMaxDist = 0.125
+    this.handGrabSurfaceMaxDist = 0.05
+    this.handGrabSurfaceSlack = 0.03
+    this.handHoverSurfaceMaxDist = 0.055
 
-    this.handGrabExpandedBoxMargin = 0.042
-    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.052
-    this.handHoverExpandedBoxMargin = 0.034
+    this.handGrabExpandedBoxMargin = 0.02
+    this.handGrabExpandedBoxMarginWhenOtherHandBusy = 0.028
+    this.handHoverExpandedBoxMargin = 0.018
 
-    this.handGrabExpandedSphereMargin = 0.048
-    this.handHoverExpandedSphereMargin = 0.038
+    this.handGrabExpandedSphereMargin = 0.026
+    this.handHoverExpandedSphereMargin = 0.02
 
     this.insertedGrabBonusBoxMargin = 0.012
     this.insertedGrabBonusSphereMargin = 0.016
@@ -50,9 +51,9 @@ export class InteractionSystem {
     this.surfaceAssistMaxGap = 0.028
 
     // Medir la pinza entre las puntas permite abrir, soltar y volver a agarrar. Hecho e implementado por LFTS
-    this.pinchStartDist = 0.030
-    this.pinchEndDist = 0.045
-    this.pinchReleaseResetDist = 0.050
+    this.pinchStartDist = 0.018
+    this.pinchEndDist = 0.032
+    this.pinchReleaseResetDist = 0.038
 
     this.uiPokeRadius = 0.028
     this.uiReleaseRadius = 0.048
@@ -63,6 +64,7 @@ export class InteractionSystem {
 
     this.handTrackingReleaseGraceMs = 520
     this.handOpenReleaseGraceMs = 50
+    this.partialTrackReleaseGraceMs = 600
 
     this.appMode = "edit"
 
@@ -78,7 +80,7 @@ export class InteractionSystem {
 
     this.wireHoverMaxDist = 0.018
     this.wireHoverReleaseDist = 0.034
-    this.wireEndpointHoverMaxDist = 0.012
+    this.wireEndpointHoverMaxDist = 0.020
     this.wirePinchStartDist = 0.014
     this.wirePinchEndDist = 0.028
     this.wirePinchConfirmMs = 95
@@ -119,6 +121,9 @@ export class InteractionSystem {
 
     this.wireActionCooldownMs = 90
     this._lastWireActionMs = 0
+
+    // Cadena de joints de referencia para rotación — más resiliente que depender solo de "wrist". Hecho e implementado por LFTS
+    this.rotationReferenceJoints = ["wrist", "index-finger-metacarpal", "middle-finger-metacarpal", "pinky-finger-metacarpal"]
 
     this._tmpA = new THREE.Vector3()
     this._tmpB = new THREE.Vector3()
@@ -293,6 +298,7 @@ export class InteractionSystem {
         hold: this.createHoldState("hand", null),
         lostTrackingMs: 0,
         openPinchMs: 0,
+        partialTrackMs: 0,
         wirePinchCloseMs: 0,
       })
     }
@@ -312,6 +318,7 @@ export class InteractionSystem {
       grabOffset: new THREE.Vector3(),
       grabLocalPoint: new THREE.Vector3(),
       handRotationOffset: null,
+      rotationRefName: null,
       holdDistance: 0,
     }
   }
@@ -529,36 +536,22 @@ export class InteractionSystem {
   }
 
   getSurfaceGrabAssist(object) {
+    if (object?.userData?.componentType !== "resistor") {
+      return { gap: Infinity, active: false, scoreBonus: 0, distBonus: 0, radiusBonus: 0 }
+    }
+
     const gap = this.getObjectSurfaceGap(object)
     if (!isFinite(gap) || gap > this.surfaceAssistMaxGap) {
-      return {
-        gap,
-        active: false,
-        scoreBonus: 0,
-        distBonus: 0,
-        radiusBonus: 0,
-      }
+      return { gap, active: false, scoreBonus: 0, distBonus: 0, radiusBonus: 0 }
     }
 
     const t = 1 - THREE.MathUtils.clamp(gap / this.surfaceAssistMaxGap, 0, 1)
 
-    let scoreBonus = 0.020 + t * 0.045
-    let distBonus = 0.012 + t * 0.018
-    let radiusBonus = 0.008 + t * 0.010
+    const scoreBonus = 0.012 + t * 0.018
+    const distBonus = 0.006 + t * 0.010
+    const radiusBonus = 0.004 + t * 0.008
 
-    if (object?.userData?.componentType === "resistor") {
-      scoreBonus += 0.040
-      distBonus += 0.020
-      radiusBonus += 0.016
-    }
-
-    return {
-      gap,
-      active: true,
-      scoreBonus,
-      distBonus,
-      radiusBonus,
-    }
+    return { gap, active: true, scoreBonus, distBonus, radiusBonus }
   }
 
   getGrabCandidateScore(obj, pt, baseBoxMargin, baseSphereMargin) {
@@ -849,6 +842,25 @@ export class InteractionSystem {
     return out
   }
 
+  // Prueba varios joints en orden hasta encontrar uno trackeado; evita que la rotación se congele
+  getRotationReferenceJoint(hand) {
+    for (const name of this.rotationReferenceJoints) {
+      const j = hand.joints?.[name]
+      if (this.isJointTracked(j)) return { name, joint: j }
+    }
+    return null
+  }
+
+  // Referencia estable para medir velocidad al soltar. La muñeca no se mueve solo por
+  // abrir los dedos, así que evita que un pinch rápido se sienta como un lanzamiento.
+  getHandVelocityReferenceWorld(he, out) {
+    const wrist = this.getJointWorld(he.hand, "wrist", out)
+    if (wrist) return wrist
+    he.pinchPoint.getWorldPosition(out)
+    return out
+  }
+
+
   getIndexTipWorld(he, out) {
     const p = this.getJointWorld(he.hand, "index-finger-tip", out)
     if (p) return p
@@ -1047,7 +1059,8 @@ export class InteractionSystem {
   }
 
   findBestWireAnchorForHand(he, maxDist = this.wireHoverMaxDist) {
-    if (!he || !this.isHandEntryTracked(he) || he.heldObject) return null
+
+    if (!he || !this.isHandTrackedForHold(he) || he.heldObject) return null
 
     this.getWireHandPointerWorld(he, this._tmpC)
 
@@ -1173,7 +1186,7 @@ export class InteractionSystem {
   }
 
   findBestWireEndpointForHand(he, maxDist = this.wireEndpointHoverMaxDist) {
-    if (!he || !this.isHandEntryTracked(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
+    if (!he || !this.isHandTrackedForHold(he) || he.heldObject || !this.stateSyncSystem || this.wireDraftStartAnchor) return null
 
     this.getWireHandPointerWorld(he, this._tmpC)
 
@@ -1569,6 +1582,7 @@ export class InteractionSystem {
 
     this.appState.addComponent(data)
     this.stateSyncSystem.addMeshFromComponent(data)
+    this.markWireCachesDirty()
     this.clearWireDraft()
     this.clearWireHoverAnchor()
 
@@ -1627,6 +1641,7 @@ export class InteractionSystem {
     if (!id || !this.stateSyncSystem) return false
     this.appState.removeComponent(id)
     this.stateSyncSystem.removeMeshById(id)
+    this.markWireCachesDirty()
     return true
   }
 
@@ -1714,26 +1729,34 @@ export class InteractionSystem {
     if (!this.isHandTrackedForHold(he)) return
 
     const obj = he.heldObject
-
-    // Mantener el giro relativo a la muñeca sin cambiar el punto sujetado. Hecho e implementado por LFTS
-    const wrist = he.hand?.joints?.wrist
-    if (this.isJointTracked(wrist)) {
-      const orientation = wrist.getWorldQuaternion(new THREE.Quaternion())
-      if (!he.hold.handRotationOffset) {
+    // Mantener el giro relativo a la mano sin cambiar el punto sujetado.
+    // Usa una cadena de joints de respaldo si "wrist" se pierde. Hecho e implementado por LFTS
+    const ref = this.getRotationReferenceJoint(he.hand)
+    if (ref) {
+      const orientation = ref.joint.getWorldQuaternion(new THREE.Quaternion())
+      if (!he.hold.handRotationOffset || he.hold.rotationRefName !== ref.name) {
         he.hold.handRotationOffset = orientation.clone().invert().multiply(obj.getWorldQuaternion(new THREE.Quaternion()))
+        he.hold.rotationRefName = ref.name
       }
       const worldRotation = orientation.multiply(he.hold.handRotationOffset)
       const parentRotation = obj.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
-      obj.quaternion.copy(parentRotation.invert().multiply(worldRotation))
+      const targetLocal = parentRotation.invert().multiply(worldRotation)
+      obj.quaternion.slerp(targetLocal, 0.6)
       obj.updateMatrixWorld(true)
     } else {
       he.hold.handRotationOffset = null
+      he.hold.rotationRefName = null
     }
 
     this.getHoldReferenceWorld(he, obj, this._tmpA)
 
     obj.localToWorld(this._tmpB.copy(he.hold.grabLocalPoint))
     this._tmpC.copy(this._tmpA).sub(this._tmpB)
+
+
+    const deltaLen = this._tmpC.length()
+    const maxStepPerFrame = 0.35
+    if (deltaLen > maxStepPerFrame) this._tmpC.multiplyScalar(maxStepPerFrame / deltaLen)
 
     obj.position.add(this._tmpC)
     obj.updateMatrixWorld(true)
@@ -1780,7 +1803,6 @@ export class InteractionSystem {
   }
 
   updateUIPoke() {
-    if (this.hands.some((h) => h.heldObject)) return
 
     for (const [handIndex, pressed] of this._handHeldButton.entries()) {
       const he = this.hands.find((h) => h.index === handIndex)
@@ -1873,26 +1895,24 @@ export class InteractionSystem {
   canHandGrabObject(he, obj) {
     if (!obj?.userData?.componentId || !this.isObjectFreeForGrab(obj)) return false
 
-    const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
     const busyOffset = this.isAnyOtherHandHolding(he) ? 0.006 : 0.0
     const baseBoxMargin = this.handGrabExpandedBoxMargin + busyOffset
     const baseSphereMargin = this.handGrabExpandedSphereMargin + busyOffset
 
     this.getBestHandProbePointWorld(he, obj, this._tmpC)
-    const { grabD, sd, cd, ed, sphereD, adaptiveBoxMargin, surfaceAssist } =
+    const { grabD, sd, ed, surfaceAssist } =
       this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-    const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
     const surfaceLimit = this.handGrabSurfaceMaxDist + surfaceAssist.distBonus
     const slackLimit = this.handGrabSurfaceSlack + surfaceAssist.distBonus * 0.55
 
-    if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) return false
-    if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001 && sd > surfaceLimit + slackLimit) return false
+    if (ed > 0.0001) return false
+    if (grabD > surfaceLimit && sd > surfaceLimit + slackLimit) return false
 
     return true
   }
 
-  findNearestComponentToHand(he, maxDist) {
+  findNearestComponentToHand(he) {
     let best = null
     let bestScore = Infinity
 
@@ -1906,15 +1926,13 @@ export class InteractionSystem {
 
       this.getBestHandProbePointWorld(he, obj, this._tmpC)
 
-      const inserted = !!obj.userData?.inserted || !!obj.userData?.pinConnections
-      const { grabD, cd, ed, sphereD, adaptiveBoxMargin, score, surfaceAssist } =
+      const { grabD, ed, score, surfaceAssist } =
         this.getGrabCandidateScore(obj, this._tmpC, baseBoxMargin, baseSphereMargin)
 
-      const centerLimit = maxDist + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
       const surfaceLimit = this.handGrabSurfaceMaxDist + surfaceAssist.distBonus
 
-      if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-      if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001) continue
+      if (ed > 0.0001) continue
+      if (grabD > surfaceLimit) continue
 
       if (score < bestScore) {
         bestScore = score
@@ -1950,12 +1968,14 @@ export class InteractionSystem {
     if (sourceType === "controller") {
       source.getWorldPosition(hs.lastPos)
     } else {
-      this.getHoldReferenceWorld(source, source.heldObject || null, hs.lastPos)
+      this.getHandVelocityReferenceWorld(source, hs.lastPos)
     }
   }
 
+  //Cambio de prueba
   stopHoldTracking(hs) {
     hs.handRotationOffset = null
+    hs.rotationRefName = null
     hs.active = false
     hs.sourceType = null
     hs.source = null
@@ -1976,9 +1996,8 @@ export class InteractionSystem {
     if (hs.sourceType === "controller") {
       hs.source.getWorldPosition(this._tmpA)
     } else {
-      this.getHoldReferenceWorld(hs.source, hs.source.heldObject || null, this._tmpA)
+      this.getHandVelocityReferenceWorld(hs.source, this._tmpA)
     }
-
     const v = this._tmpA.clone().sub(hs.lastPos).multiplyScalar(1 / dt)
     hs.samples.push({ v, t: now })
     while (hs.samples.length > hs.maxSamples) hs.samples.shift()
@@ -2061,7 +2080,8 @@ export class InteractionSystem {
     const halfY = this._tmpSize.y * 0.5
     if (center.y - halfY < best.point.y) {
       object.position.y += (best.point.y + halfY - center.y) + 0.001
-      if (object.userData?.surfaceUpright) {
+
+      if (["powerSupply", "multimeter"].includes(object.userData?.componentType)) {
         const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
         let yaw = object.rotation.y
         if (fwd.lengthSq() > 1e-8) {
@@ -2131,7 +2151,8 @@ export class InteractionSystem {
     if (!object) return false
     const best = this.getBestSurfaceBelow(object)
     if (!best) return false
-    if (object.userData?.surfaceUpright) {
+
+    if (["powerSupply", "multimeter"].includes(object.userData?.componentType)) {
       const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(object.quaternion).setY(0)
       let yaw = object.rotation.y
       if (fwd.lengthSq() > 1e-8) {
@@ -2195,6 +2216,7 @@ export class InteractionSystem {
     he.pinchArmed = false
     he.lostTrackingMs = 0
     he.openPinchMs = 0
+    he.partialTrackMs = 0
 
     if (this.toolMode === "wire") {
       const hoverMatchesThisHand =
@@ -2248,7 +2270,7 @@ export class InteractionSystem {
       return
     }
 
-    const target = this.findNearestComponentToHand(he, this.nearRadius)
+    const target = this.findNearestComponentToHand(he)
     if (!target || (this.isSimMode() && !this.isMeterPart(target)) || !this.canHandGrabObject(he, target)) return
     this.multimeterSystem?.detach(target)
 
@@ -2287,6 +2309,7 @@ export class InteractionSystem {
     he.isPinching = false
     he.openPinchMs = 0
     he.lostTrackingMs = 0
+    he.partialTrackMs = 0
     if (this.toolMode === "wire" || !he.heldObject) return
     this.releaseHeldObject(he.heldObject, he.hold, () => { he.heldObject = null }, options)
   }
@@ -2296,6 +2319,7 @@ export class InteractionSystem {
     he.isPinching = false
     he.openPinchMs = 0
     he.lostTrackingMs = 0
+    he.partialTrackMs = 0
     if (this.toolMode === "wire") {
       this.stopHoldTracking(he.hold)
       return
@@ -2463,14 +2487,13 @@ export class InteractionSystem {
         }
 
         this.getBestHandProbePointWorld(h, obj, this._tmpA)
-        const { grabD, cd, ed, sphereD, adaptiveBoxMargin, inserted, score, surfaceAssist } =
+        const { grabD, ed, score, surfaceAssist } =
           this.getGrabCandidateScore(obj, this._tmpA, this.handHoverExpandedBoxMargin, this.handHoverExpandedSphereMargin)
 
-        const centerLimit = this.nearRadius + adaptiveBoxMargin * 1.1 + (inserted ? this.insertedGrabBonusRadius : 0) + surfaceAssist.distBonus
         const surfaceLimit = this.handHoverSurfaceMaxDist + surfaceAssist.distBonus
 
-        if (cd > centerLimit && ed > 0.0001 && sphereD > 0.0001) continue
-        if (grabD > surfaceLimit && ed > 0.0001 && sphereD > 0.0001) continue
+        if (ed > 0.0001) continue
+        if (grabD > surfaceLimit) continue
 
         if (score < bestScore) {
           bestScore = score
@@ -2506,17 +2529,21 @@ export class InteractionSystem {
 
   cleanupDetachedHolds() {
     for (const h of this.hands) {
-      if (h.heldObject && this.getObjectOwner(h.heldObject) !== this.makeOwnerToken("hand", h.index)) {
+      // Red de seguridad: si el mesh sostenido fue destruido/removido de la escena por
+      // cualquier otro sistema mientras seguía "en la mano", esto libera la mano en vez
+      // de dejarla atorada para siempre sujetando una referencia fantasma.
+      if (h.heldObject && (!h.heldObject.parent || this.getObjectOwner(h.heldObject) !== this.makeOwnerToken("hand", h.index))) {
         h.heldObject = null
         h.isPinching = false
         h.openPinchMs = 0
         h.lostTrackingMs = 0
+        h.partialTrackMs = 0
         this.stopHoldTracking(h.hold)
       }
     }
 
     for (const c of this.controllers) {
-      if (c.userData?.heldObject && this.getObjectOwner(c.userData.heldObject) !== this.makeOwnerToken("controller", c.userData.sourceIndex ?? 0)) {
+      if (c.userData?.heldObject && (!c.userData.heldObject.parent || this.getObjectOwner(c.userData.heldObject) !== this.makeOwnerToken("controller", c.userData.sourceIndex ?? 0))) {
         c.userData.heldObject = null
         this.stopHoldTracking(c.userData.hold)
       }
@@ -2543,6 +2570,7 @@ export class InteractionSystem {
       if (h.heldObject) {
         if (tracked && dist != null) {
           h.lostTrackingMs = 0
+          h.partialTrackMs = 0
 
           if (dist >= this.pinchEndDist) {
             h.openPinchMs += dtMs
@@ -2557,7 +2585,13 @@ export class InteractionSystem {
         if (holdTracked) {
           h.lostTrackingMs = 0
           h.openPinchMs = 0
-          h.isPinching = true
+          h.partialTrackMs += dtMs
+          if (h.partialTrackMs >= this.partialTrackReleaseGraceMs) {
+            this.forceReleaseHand(h, true)
+            h.pinchArmed = true
+          } else {
+            h.isPinching = true
+          }
           continue
         }
 
@@ -2716,4 +2750,6 @@ export class InteractionSystem {
 
     this.setHover(handsActive ? this.computeHandHover() : this.computeControllerHover())
   }
+
+
 }

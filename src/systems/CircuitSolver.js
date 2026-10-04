@@ -235,3 +235,4 @@ export function solveCircuit(netlist) {
   return { branches, readings, faults, sources: branches.filter(b => b.source), revision: 0 }
 }
 
+

@@ -1,3 +1,4 @@
+//ElectricalSystem
 // Hecho e implementado por LFTS
 import { buildCircuit, solveCircuit } from "./CircuitSolver.js"
 

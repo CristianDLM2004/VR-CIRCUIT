@@ -1,3 +1,4 @@
+//StateSyncSystem
 // Hecho e implementado por LFTS
 import { ComponentFactory } from "../components/ComponentFactory.js"
 
