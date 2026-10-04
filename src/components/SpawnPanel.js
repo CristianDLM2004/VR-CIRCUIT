@@ -31,6 +31,7 @@ export function createSpawnPanel({
   onSwitch = () => {},
   onPowerSupply = () => {},
   onMultimeter = () => {},
+  onArduino = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "SpawnPanel"
@@ -164,6 +165,8 @@ export function createSpawnPanel({
   makeButton({ name: "SpawnPowerSupply", x: colX[1], y: -0.04, color: 0x2471a3, label: "Fuente", iconType: "powerSupply", onPress: onPowerSupply })
 
   makeButton({ name: "SpawnMultimeter", x: colX[2], y: -0.04, color: 0xb78416, label: "Tester", iconType: "powerSupply", onPress: onMultimeter })
+
+  makeButton({ name: "SpawnArduino", x: colX[3], y: -0.04, color: 0x087b82, label: "Arduino", iconType: "powerSupply", onPress: onArduino })
 
   return { group, buttons }
 }

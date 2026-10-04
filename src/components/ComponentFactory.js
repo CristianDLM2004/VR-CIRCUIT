@@ -1,3 +1,4 @@
+import { createArduinoUno } from "./ArduinoUno.js"
 import { createMultimeterPart } from "./Multimeter.js"
 // Hecho e implementado por LFTS
 import * as THREE from "three"
@@ -179,6 +180,7 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "arduinoUno": { mesh = createArduinoUno(); break }
       case "multimeter":
       case "meterProbe": { mesh = createMultimeterPart(data); break }
       case "powerSupply": {

@@ -1,3 +1,4 @@
+import { ArduinoSystem } from "./systems/ArduinoSystem.js"
 import { MultimeterSystem } from "./systems/MultimeterSystem.js"
 // Hecho e implementado por LFTS
 /**
@@ -59,6 +60,8 @@ const powerSupplyControls = new PowerSupplyInteractionSystem(interactionSystem, 
 interactionSystem.powerSupplyControls = powerSupplyControls
 const multimeterSystem = new MultimeterSystem(scene, appState, stateSyncSystem, interactionSystem)
 interactionSystem.multimeterSystem = multimeterSystem
+const arduinoSystem = new ArduinoSystem(scene, appState, stateSyncSystem, interactionSystem)
+interactionSystem.arduinoSystem = arduinoSystem
 
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 // Iluminación + entorno salón Mrs. Puff — Hecho e implementado por LFTS
@@ -556,6 +559,11 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+function addArduino() {
+  const p = getSpawnBasePosition(); p.x -= 0.25; p.y += 0.08; p.z += 0.25
+  selectComponent(arduinoSystem.spawn(p))
+}
+
 function addMultimeter() {
   const p = getSpawnBasePosition(); p.x += 0.26; p.y += 0.08; p.z += 0.15
   selectComponent(multimeterSystem.spawn(p))
@@ -707,7 +715,7 @@ const panelRotY     = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -884,7 +892,7 @@ const clock = new THREE.Clock()
 document.getElementById("btn-add-cube")?.addEventListener("click", addBattery5V)
 
 window.addEventListener("keydown", (e) => {
-  if (e.defaultPrevented || powerSupplyControls.keyboard) return
+  if (e.defaultPrevented || powerSupplyControls.keyboard || e.target?.closest?.("input, textarea, [contenteditable]")) return
   const k = e.key.toLowerCase()
   if (k === "p") addPowerSupply()
   if (k === "c") addBattery5V()
@@ -947,7 +955,9 @@ renderer.setAnimationLoop(() => {
   trashSystem.update(stateSyncSystem.meshById.values())
 
   // Sistema eléctrico — siempre activo — Hecho e implementado por LFTS
+  arduinoSystem.tick(dt)
   electricalSystem.update(dt)
+  arduinoSystem.observe(electricalSystem.lastGraph)
   multimeterSystem.update(electricalSystem.lastGraph)
   powerSupplyControls.update(electricalSystem.lastGraph)
 
@@ -959,7 +969,7 @@ renderer.setAnimationLoop(() => {
       electricalSystem.lastGraph,
       isSimMode ? "sim" : "edit"
     )
-    const meterAlerts = multimeterSystem.alerts
+    const meterAlerts = [...multimeterSystem.alerts, ...arduinoSystem.alerts]
     updateAlertPanel([...alerts, ...meterAlerts], hasErrors || meterAlerts.length > 0, isSimMode ? "sim" : "edit")
   } else {
     // Antes de que cargue el grafo, mostrar solo el modo — Hecho e implementado por LFTS

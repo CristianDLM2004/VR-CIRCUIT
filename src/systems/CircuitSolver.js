@@ -1,3 +1,4 @@
+import { arduinoBranches, UNO_PINS, unoNode } from "../core/ArduinoPins.js"
 // Hecho e implementado por LFTS
 import { supplySettings } from "../core/PowerSupplySettings.js"
 
@@ -31,6 +32,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
     if (a?.kind === "hole" && a.holeId && groups.has(a.holeId)) return holeNode(a.holeId)
     const c = byId.get(a?.componentId)
     if (!c) return null
+    if (c.type === "arduinoUno" && a.kind === "pin" && UNO_PINS.includes(a.id)) return unoNode(c.id, a.id)
     if (a.kind === "terminal" && ["battery5v", "powerSupply"].includes(c.type)
       && ["positive", "negative"].includes(a.id)) return `terminal:${c.id}:${a.id}`
     const pins = { led: ["anode", "cathode"], resistor: ["left", "right"], button: ["pin_a", "pin_b"], switch: ["pin_a", "pin_b"] }
@@ -41,6 +43,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
   const invalidWires = []
   for (const c of components) {
     const mesh = stateSyncSystem?.getMeshById(c.id)
+    if (c.type === "arduinoUno") { branches.push(...arduinoBranches(c, mesh)); continue }
     const b = { id: c.id, type: c.type, component: c, closed: true }
     if (c.type === "battery5v" || c.type === "powerSupply") {
       b.a = `terminal:${c.id}:positive`
@@ -208,7 +211,7 @@ export function solveCircuit(netlist) {
     if (shorted.length) result = { error: "Cortocircuito: (+) conectado a (-) sin carga; corriente no calculable" }
     else result = solveIsland(island, nodes)
     if (result.error) {
-      faults.push({ ids: island.map(b => b.id), message: result.error })
+      faults.push({ ids: [...new Set(island.map(b => b.ownerId || b.id))], message: result.error })
       for (const b of island) readings.set(b.id, { voltage: null, currentA: null, powerW: null, invalid: true })
       continue
     }
