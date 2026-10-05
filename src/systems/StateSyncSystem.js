@@ -19,6 +19,7 @@ export class StateSyncSystem {
 
     this.interactionSystem?.arduinoSystem?.unregister(mesh)
     for(const button of mesh.userData?.logicButtons||[])this.interactionSystem?.unregister(button)
+    mesh.userData?.disposeAnalog?.()
     mesh.userData?.disposeLogic?.()
     mesh.userData?.disposeArduino?.()
     this.interactionSystem?.multimeterSystem?.unregister(mesh)
@@ -61,6 +62,7 @@ export class StateSyncSystem {
 
       // Recolocar componentes insertados de 2 pines usando holes guardados — Hecho e implementado por LFTS
       if (
+        !mesh.userData.analogComponent &&
         data.inserted &&
         data.pinConnections &&
         this.interactionSystem?.holeSystem &&

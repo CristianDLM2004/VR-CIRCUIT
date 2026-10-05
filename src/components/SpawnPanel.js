@@ -35,6 +35,7 @@ export function createSpawnPanel({
   onArduino = () => {},
   onESP32 = () => {},
   onLogicGate = () => {},
+  onAnalog = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "SpawnPanel"
@@ -175,5 +176,12 @@ export function createSpawnPanel({
   makeButton({ name: "SpawnESP32", x: colX[0], y: -0.16, color: 0x333c48, label: "ESP32", iconType: "powerSupply", onPress: onESP32 })
 
   ;["NAND","AND","OR","NOR","NOT","XOR","XNOR"].forEach((kind,i)=>{const index=i+9;makeButton({name:"Spawn"+kind,x:colX[index%4],y:0.08-Math.floor(index/4)*0.12,color:0x344b67,label:kind,iconType:"powerSupply",onPress:()=>onLogicGate(kind)})})
+  // Dos páginas conservan el tamaño del panel y los botones originales. Hecho e implementado por LFTS
+  const firstPage=[...buttons],secondPage=[]
+  ;[['capacitor','Condens.'],['diode','Diodo'],['npn','NPN'],['pnp','PNP'],['nmos','MOS N'],['pmos','MOS P']].forEach(([type,label],i)=>{
+    const b=makeButton({name:'Spawn_'+type,x:colX[i%4],y:.08-Math.floor(i/4)*.12,color:0x265875,label,iconType:'',onPress:()=>onAnalog(type)});b.visible=false;secondPage.push(b)
+  })
+  let analogPage=false
+  const page=makeButton({name:'CambiarPagina',x:0,y:.17,color:0x236c68,label:'Más / Volver',iconType:'',onPress:()=>{analogPage=!analogPage;firstPage.forEach(b=>b.visible=!analogPage);secondPage.forEach(b=>b.visible=analogPage)}})
   return { group, buttons }
 }

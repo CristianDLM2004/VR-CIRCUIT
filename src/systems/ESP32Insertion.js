@@ -15,7 +15,7 @@ export function snapESP32(object,holeSystem,components,maxDist=.05){
   const currentQ=object.getWorldQuaternion(new THREE.Quaternion()),scale=object.getWorldScale(new THREE.Vector3())
   const worldPins=pins.map(p=>object.localToWorld(p.localPos.clone()))
   let best=null,bestScore=Infinity
-  for(const yaw of [-Math.PI/2,Math.PI/2]){
+  for(const yaw of object.userData.insertionYaws||[-Math.PI/2,Math.PI/2]){
     const q=board.getWorldQuaternion(new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),yaw))
     if(currentQ.angleTo(q)>Math.PI/4)continue
     const offsets=pins.map(p=>p.localPos.clone().multiply(scale).applyQuaternion(q))

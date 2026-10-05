@@ -1,3 +1,4 @@
+import { ANALOG, isAnalog, analogSettings, adjustAnalog } from "./core/AnalogComponents.js"
 import { ArduinoSystem } from "./systems/ArduinoSystem.js"
 import { MultimeterSystem } from "./systems/MultimeterSystem.js"
 // Hecho e implementado por LFTS
@@ -410,13 +411,13 @@ function getHeldMesh() { const id = getHeldComponentId(); return id ? stateSyncS
 
 function getEditingTargetComponent() {
   const held = getHeldComponent()
-  if (held && (held.type === "led" || held.type === "wire" || held.type === "resistor")) return held
+  if (held && (held.type === "led" || held.type === "wire" || held.type === "resistor" || isAnalog(held.type))) return held
   return getSelectedComponent()
 }
 
 function getEditingTargetMesh() {
   const heldComp = getHeldComponent()
-  if (heldComp && (heldComp.type === "led" || heldComp.type === "wire" || heldComp.type === "resistor")) return getHeldMesh()
+  if (heldComp && (heldComp.type === "led" || heldComp.type === "wire" || heldComp.type === "resistor" || isAnalog(heldComp.type))) return getHeldMesh()
   const selected = getSelectedComponent()
   if (!selected) return null
   return stateSyncSystem.getMeshById(selected.id)
@@ -465,9 +466,12 @@ function applyResistorBandsToMesh(mesh, resistance) {
 let selectedComponentId = null
 let pendingColorHex = null
 let pendingResistanceValue = null
+let pendingAnalog = null
+let analogFieldIndex = 0
+let analogTargetId = null
 
 function getSelectedComponent() { return selectedComponentId ? getComponentById(selectedComponentId) : null }
-function clearPendingChanges() { pendingColorHex = null; pendingResistanceValue = null }
+function clearPendingChanges() { pendingColorHex = null; pendingResistanceValue = null; pendingAnalog = null; analogFieldIndex = 0; analogTargetId = null }
 
 function selectComponent(id) { selectedComponentId = id || null; clearPendingChanges(); refreshEditPanel() }
 function clearSelection() { selectedComponentId = null; clearPendingChanges(); refreshEditPanel() }
@@ -492,6 +496,11 @@ function refreshEditPanel() {
   const comp = getEditingTargetComponent()
   if (!comp) { editPanelApi.updateForSelection(null); return }
 
+  if(isAnalog(comp.type)){
+    if(analogTargetId!==comp.id){analogTargetId=comp.id;pendingAnalog=null;analogFieldIndex=0}
+    editPanelApi.updateForSelection({id:comp.id,type:comp.type,meta:comp.meta,pendingMeta:pendingAnalog,fieldIndex:analogFieldIndex})
+    return
+  }
   if (comp.type === "resistor") {
     const currentResistance = Math.max(10, Math.round(Number(comp.meta?.resistance) || 220))
     editPanelApi.updateForSelection({
@@ -516,6 +525,9 @@ function refreshEditPanel() {
   editPanelApi.updateForSelection({ id: comp.id, type: comp.type, hasPendingChanges: false })
 }
 
+// Cambios pendientes ligados al componente para no transferir valores entre piezas. Hecho e implementado por LFTS
+function queueAnalogField(delta){const c=getEditingTargetComponent();if(!isAnalog(c?.type))return;refreshEditPanel();const count=ANALOG[c.type].fields.length;analogFieldIndex=(analogFieldIndex+delta+count)%count;refreshEditPanel()}
+function queueAnalogDelta(delta){const c=getEditingTargetComponent();if(!isAnalog(c?.type))return;refreshEditPanel();pendingAnalog=adjustAnalog(c.type,pendingAnalog||c.meta,ANALOG[c.type].fields[analogFieldIndex].key,delta);refreshEditPanel()}
 function queueResistanceDelta(delta) {
   let comp = getEditingTargetComponent()
   if (!comp) { const held = getHeldComponent(); if (held?.type === "resistor") { selectedComponentId = held.id; comp = held } }
@@ -538,6 +550,9 @@ function applyPendingChanges() {
   const mesh = getEditingTargetMesh()
   if (!comp || !mesh) return
 
+  if(isAnalog(comp.type)&&pendingAnalog&&analogTargetId===comp.id){
+    const meta={...comp.meta,...pendingAnalog};appState.updateComponent(comp.id,{meta});mesh.userData.meta=meta;mesh.userData.updateAnalogLabel?.(meta);pendingAnalog=null;refreshEditPanel();return
+  }
   if (comp.type === "led" && pendingColorHex !== null) {
     appState.updateComponent(comp.id, { meta: { ...comp.meta, color: pendingColorHex } })
     applyLedColorToMesh(mesh, pendingColorHex)
@@ -563,6 +578,11 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+function addAnalog(type){
+  const p=getSpawnBasePosition();p.y+=.10;p.z+=.12
+  const data={id:genId(type),type,meta:analogSettings(type),transform:{x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1}}
+  appState.addComponent(data);stateSyncSystem.addMeshFromComponent(data);selectComponent(data.id)
+}
 function addLogicGate(kind) {
   const p=getSpawnBasePosition();p.y+=0.08;p.z+=0.20
   const data={id:genId("logic"),type:"logicGate",meta:{gate:kind},transform:{x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1}}
@@ -730,7 +750,7 @@ const panelRotY = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32, onLogicGate: addLogicGate,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32, onLogicGate: addLogicGate, onAnalog: addAnalog,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
@@ -750,6 +770,8 @@ const editPanelApi = createEditPanel({
   onSelectLastWire: selectLastWire,
   onClearSelection: clearSelection,
   onResistanceDelta: queueResistanceDelta,
+  onAnalogField: queueAnalogField,
+  onAnalogDelta: queueAnalogDelta,
   onColorPicked: queueColorPicked,
   onAcceptChanges: applyPendingChanges,
 })

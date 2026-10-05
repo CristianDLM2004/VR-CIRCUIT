@@ -439,7 +439,11 @@ export class InteractionSystem {
     }
   }
 
+  // Los controles de páginas ocultas no deben interceptar manos ni rayos. Hecho e implementado por LFTS
+  isUIVisible(obj) { for(let node=obj;node;node=node.parent)if(!node.visible)return false;return true }
+
   distanceToObjectSurface(obj, pt) {
+    if(obj?.userData?.isUI && !this.isUIVisible(obj))return Infinity
     this._box.setFromObject(obj)
     return this._box.distanceToPoint(pt)
   }
@@ -767,7 +771,7 @@ export class InteractionSystem {
       if (h.distance > this.controllerRayMaxLength) continue
       const picked = this.pickInteractableFromHitObject(h.object)
       if (!picked || !this.interactables.includes(picked) || picked.userData?.isSurface) continue
-      if (picked.userData?.isUI) return picked
+      if (picked.userData?.isUI) { if(this.isUIVisible(picked))return picked;continue }
       if (this.isSimMode() && this.isComponentWithOnPress(picked)) return picked
       if ((this.isEditMode() || this.isMeterPart(picked)) && picked.userData?.componentId && this.isObjectFreeForGrab(picked)) return picked
     }
@@ -2125,7 +2129,7 @@ export class InteractionSystem {
   }
 
   trySnapComponentPinsToHoles(object, maxDist = 0.05) {
-    if(["esp32","logicGate"].includes(object?.userData?.componentType)) {
+    if(object?.userData?.analogComponent || ["esp32","logicGate"].includes(object?.userData?.componentType)) {
       const snap=snapESP32(object,this.holeSystem,this.appState.components,maxDist)
       if(!snap)return false
       const parentQ=object.parent?.getWorldQuaternion(new THREE.Quaternion())||new THREE.Quaternion()
@@ -2692,7 +2696,8 @@ export class InteractionSystem {
 
     if (!object || !this.holeSystem || !object.userData?.getPinWorldPositions) return
 
-    const matches = this.getPinSnapMatches(object, 0.05)
+    const analogSnap=object.userData.analogComponent?snapESP32(object,this.holeSystem,this.appState.components,.05):null
+    const matches = object.userData.analogComponent ? Object.values(analogSnap?.pinConnections||{}).map(id=>({hole:this.holeSystem.holes.find(h=>h.id===id)})) : this.getPinSnapMatches(object, 0.05)
     let visibleCount = 0
 
     for (const match of matches) {

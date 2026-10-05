@@ -1,3 +1,4 @@
+import { ANALOG, analogSettings } from "../core/AnalogComponents.js"
 import * as THREE from "three"
 
 function clamp01(v) {
@@ -81,6 +82,8 @@ export function createEditPanel({
   onSelectLastWire = () => {},
   onClearSelection = () => {},
   onResistanceDelta = () => {},
+  onAnalogField = () => {},
+  onAnalogDelta = () => {},
   onColorPicked = () => {},
   onAcceptChanges = () => {},
 } = {}) {
@@ -263,6 +266,12 @@ export function createEditPanel({
     }),
   }
 
+  // Elegir magnitud y ajustar por pasos antes de aceptar. Hecho e implementado por LFTS
+  const analogButtons=[
+    makeButton({name:'CampoAnterior',x:-.14,y:.015,w:.22,label:'< Magnitud',onPress:()=>onAnalogField(-1)}),
+    makeButton({name:'CampoSiguiente',x:.14,y:.015,w:.22,label:'Magnitud >',onPress:()=>onAnalogField(1)}),
+    ...[-100,-1,1,100].map((step,i)=>makeButton({name:'ValorAnalogico'+i,x:-.18+i*.12,y:-.09,label:(step>0?'+':'')+step,onPress:()=>onAnalogDelta(step)})),
+  ]
   const acceptButton = makeButton({
     name: "BtnEditAccept",
     x: -0.18,
@@ -356,7 +365,9 @@ export function createEditPanel({
     const type = selection?.type ?? null
     const canEditResistance = type === "resistor"
     const canEditColor = type === "led" || type === "wire"
-    const canAccept = !!selection && (canEditResistance || canEditColor)
+    const analog=ANALOG[type]
+    const canAccept = !!selection && (canEditResistance || canEditColor || !!analog)
+    analogButtons.forEach(b=>b.visible=!!analog)
 
     setResistorControlsVisible(canEditResistance)
     setColorControlsVisible(canEditColor)
@@ -389,6 +400,11 @@ export function createEditPanel({
       return
     }
 
+    if(analog){
+      const f=analog.fields[(selection.fieldIndex||0)%analog.fields.length],values=analogSettings(type,selection.meta),pending=analogSettings(type,selection.pendingMeta||selection.meta)
+      drawStatus([analog.label+' · '+f.label,values[f.key]+' → '+pending[f.key]+' '+f.unit,'Paso: '+f.step+' '+f.unit+' · Aceptar para guardar'])
+      return
+    }
     if (type === "resistor") {
       const shownResistance = selection.pendingResistance ?? selection.resistance ?? 220
       drawStatus([

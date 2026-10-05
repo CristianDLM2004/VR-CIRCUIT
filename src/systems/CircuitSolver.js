@@ -1,3 +1,5 @@
+import { ANALOG, isAnalog } from "../core/AnalogComponents.js"
+import { analogBranches, solveAnalogIsland, analogFaults } from "./AnalogCircuit.js"
 import { logicBranches, logicNode } from "../core/LogicGates.js"
 import { ESP_PINS, espNode, espBranches } from "../core/BoardProfiles.js"
 import { arduinoBranches, UNO_PINS, unoNode } from "../core/ArduinoPins.js"
@@ -39,6 +41,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
     if (c.type === "arduinoUno" && a.kind === "pin" && UNO_PINS.includes(a.id)) return unoNode(c.id, a.id)
     if (a.kind === "terminal" && ["battery5v", "powerSupply"].includes(c.type)
       && ["positive", "negative"].includes(a.id)) return `terminal:${c.id}:${a.id}`
+    if (a.kind === "pin" && ANALOG[c.type]?.pins.includes(a.id)) return pinNode(c,a.id)
     const pins = { led: ["anode", "cathode"], resistor: ["left", "right"], button: ["pin_a", "pin_b"], switch: ["pin_a", "pin_b"] }
     if (a.kind === "pin" && pins[c.type]?.includes(a.id)) return pinNode(c, a.id)
     return null
@@ -61,6 +64,7 @@ export function buildCircuit(components, holeSystem, stateSyncSystem) {
       }
       continue }
     if (c.type === "arduinoUno") { branches.push(...arduinoBranches(c, mesh)); continue }
+    if (isAnalog(c.type)) { branches.push(...analogBranches(c,pinNode,mesh)); continue }
     const b = { id: c.id, type: c.type, component: c, closed: true }
     if (c.type === "battery5v" || c.type === "powerSupply") {
       b.a = `terminal:${c.id}:positive`
@@ -152,6 +156,7 @@ function linearSolve(matrix, rhs) {
 }
 
 function solveIsland(branches, nodes) {
+  if(branches.some(b=>isAnalog(b.type))) return solveAnalogIsland(branches,nodes,linearSolve)
   const sources = branches.filter(b => b.source)
   if (!sources.length) return { voltages: new Map([...nodes].map(n => [n, 0])), currents: new Map() }
   const ground = sources[0].b
@@ -249,7 +254,9 @@ export function solveCircuit(netlist) {
       })
     }
   }
-  return { branches, readings, faults, sources: branches.filter(b => b.source), revision: 0 }
+  const graph = { branches, readings, faults, sources: branches.filter(b => b.source), revision: 0 }
+  graph.faults.push(...analogFaults(graph))
+  return graph
 }
 
 
