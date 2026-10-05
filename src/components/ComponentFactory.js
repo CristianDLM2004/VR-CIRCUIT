@@ -1,3 +1,4 @@
+import { createTimer555 } from "./Timer555.js"
 import { createAnalogComponent } from "./AnalogComponent.js"
 import { createLogicGate } from "./LogicGate.js"
 import { createESP32 } from "./ESP32.js"
@@ -183,6 +184,7 @@ export class ComponentFactory {
     let mesh
 
     switch (data.type) {
+      case "timer555": { mesh = createTimer555(); break }
       case "capacitor": case "diode": case "npn": case "pnp": case "nmos": case "pmos": { mesh = createAnalogComponent(data); break }
       case "logicGate": { mesh = createLogicGate(data); break }
       case "esp32": { mesh = createESP32(); break }

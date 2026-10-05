@@ -1,3 +1,4 @@
+import { simulateTimers } from "./Timer555Simulation.js"
 import { settleLogic } from "./LogicGateSimulation.js"
 //ElectricalSystem
 // Hecho e implementado por LFTS
@@ -102,6 +103,11 @@ export class ElectricalSystem {
       this._blinkAccumMs %= 400
       this._blinkOn = !this._blinkOn
     }
+    if(this.appState.components.some(c=>c.type==='timer555')){
+      this.lastGraph=simulateTimers(this.appState.components,this.holeSystem,this.stateSyncSystem,dt)
+      this.lastGraph.revision=++this._revision
+      this._signature=''
+    }else{
     // La carga avanza una vez por fotograma, tras resolver también la lógica. Hecho e implementado por LFTS
     for(const c of this.appState.components)if(c.type==="capacitor"){const m=this.stateSyncSystem.getMeshById(c.id);if(m)m.userData.analogStep=Math.max(.0001,Math.min(.033,Number(dt)||1/90))}
     const netlist = buildCircuit(this.appState.components, this.holeSystem, this.stateSyncSystem)
@@ -114,6 +120,7 @@ export class ElectricalSystem {
       this._signature = signature
     }
     for(const c of this.appState.components)if(c.type==="capacitor"){const m=this.stateSyncSystem.getMeshById(c.id),r=this.lastGraph?.readings.get(c.id);if(m&&r&&!r.invalid&&Number.isFinite(r.voltage))m.userData.capacitorVoltage=r.voltage}
+    }
     for (const comp of this.appState.components) {
       if (comp.type !== "led") continue
       const r = this.lastGraph?.readings.get(comp.id)

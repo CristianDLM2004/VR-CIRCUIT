@@ -34,7 +34,7 @@ export function measureMultimeter(meter, components, holes, sync, graph) {
   }
   const connected = net.branches.filter(x => seen.has(x.a) || seen.has(x.b))
   if (connected.some(x => x.source)) return { value: "ERROR", message: "Desconecta la alimentación" }
-  if (connected.some(x => isAnalog(x.type))) return { value: "—", message: "Aísla resistencias: red con C o semiconductor" }
+  if (connected.some(x => isAnalog(x.type) || x.type === "timer555")) return { value: "—", message: "Aísla resistencias: red con C o semiconductor" }
   if (connected.some(x => x.type === "led")) return { value: "—", message: "Red con LED: usa voltaje" }
   if (a === b) return { value: mode === "CONT" ? "SÍ" : "0.00 Ω", message: "Mismo nodo eléctrico", beep: mode === "CONT" }
   const source = { id: "__ohmmeter__", a, b, source: true, closed: true, voltage: 1, type: "test", component: {} }

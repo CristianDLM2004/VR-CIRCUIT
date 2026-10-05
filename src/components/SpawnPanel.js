@@ -36,6 +36,7 @@ export function createSpawnPanel({
   onESP32 = () => {},
   onLogicGate = () => {},
   onAnalog = () => {},
+  onTimer555 = () => {},
 } = {}) {
   const group = new THREE.Group()
   group.name = "SpawnPanel"
@@ -181,6 +182,8 @@ export function createSpawnPanel({
   ;[['capacitor','Condens.'],['diode','Diodo'],['npn','NPN'],['pnp','PNP'],['nmos','MOS N'],['pmos','MOS P']].forEach(([type,label],i)=>{
     const b=makeButton({name:'Spawn_'+type,x:colX[i%4],y:.08-Math.floor(i/4)*.12,color:0x265875,label,iconType:'',onPress:()=>onAnalog(type)});b.visible=false;secondPage.push(b)
   })
+  const timerButton=makeButton({name:'SpawnTimer555',x:colX[2],y:-.04,color:0x357083,label:'NE555N',iconType:'',onPress:onTimer555})
+  timerButton.visible=false;secondPage.push(timerButton)
   let analogPage=false
   const page=makeButton({name:'CambiarPagina',x:0,y:.17,color:0x236c68,label:'Más / Volver',iconType:'',onPress:()=>{analogPage=!analogPage;firstPage.forEach(b=>b.visible=!analogPage);secondPage.forEach(b=>b.visible=analogPage)}})
   return { group, buttons }

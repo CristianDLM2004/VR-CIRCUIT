@@ -578,6 +578,12 @@ function applyPendingChanges() {
 // Crear componentes — Hecho e implementado por LFTS
 // ───────────────────────────────────────────── — Hecho e implementado por LFTS
 
+// El intervalo del temporizador depende de los componentes externos. Hecho e implementado por LFTS
+function addTimer555(){
+  const p=getSpawnBasePosition();p.y+=.10;p.z+=.15
+  const data={id:genId('timer555'),type:'timer555',meta:{},transform:{x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1}}
+  appState.addComponent(data);stateSyncSystem.addMeshFromComponent(data);selectComponent(data.id)
+}
 function addAnalog(type){
   const p=getSpawnBasePosition();p.y+=.10;p.z+=.12
   const data={id:genId(type),type,meta:analogSettings(type),transform:{x:p.x,y:p.y,z:p.z,qx:0,qy:0,qz:0,qw:1}}
@@ -750,7 +756,7 @@ const panelRotY = -Math.PI / 6
 const { group: spawnPanel, buttons: spawnButtons } = createSpawnPanel({
   position: panelWorldPos, rotationY: panelRotY,
   onAdd: addBattery5V, onLed: addLed, onResistor: addResistor,
-  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32, onLogicGate: addLogicGate, onAnalog: addAnalog,
+  onButton: addButton, onSwitch: addSwitch, onPowerSupply: addPowerSupply, onMultimeter: addMultimeter, onArduino: addArduino, onESP32: addESP32, onLogicGate: addLogicGate, onAnalog: addAnalog, onTimer555: addTimer555,
 })
 
 const { group: modePanel, buttons: modeButtons, setWireModeVisual, setSimModeVisual } = createModePanel({
